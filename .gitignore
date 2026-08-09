@@ -7,4 +7,6 @@ coverage/
 .env.*.local
 !.env.example
 supabase/.temp/
+IMPLEMENTATION_LOG.md
+PHASE_0_GITHUB_BASELINE.md
 
