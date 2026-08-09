@@ -8,7 +8,12 @@ export const acknowledgementSchema = z.object({
 
 export type Acknowledgement<T = unknown> =
   | { ok: true; data: T }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      code?: RoomErrorCode;
+      currentRoomId?: string;
+    };
 
 export const pointSchema = z.object({
   x: z.number().finite(),
@@ -29,12 +34,29 @@ export const problemSchema = z.object({
 
 export type Problem = z.infer<typeof problemSchema>;
 
+export const roomPermissionsSchema = z.object({
+  canEditCode: z.boolean(),
+  canDrawWhiteboard: z.boolean(),
+  canChangeProblem: z.boolean(),
+  canChat: z.boolean(),
+})
+
+export type RoomPermissions = z.infer<typeof roomPermissionsSchema>;
+
+export const roomMemberSchema = z.object({
+  userId: z.string().uuid(),
+  username: z.string(),
+  permissions: roomPermissionsSchema,
+});
+
+export type RoomMember = z.infer<typeof roomMemberSchema>;
+
 export const roomStateSchema = z.object({
   roomId: z.string().uuid(),
   hostUserId: z.string().uuid(),
   problem: problemSchema.nullable(),
   code: z.string(),
-  members: z.array(z.object({ userId: z.string().uuid(), username: z.string() })),
+  members: z.array(roomMemberSchema),
   messages: z.array(z.object({ id: z.string().uuid(), username: z.string(), body: z.string(), sentAt: z.string() })),
   whiteboard: z.array(pointSchema),
 });
@@ -51,6 +73,16 @@ export const codeUpdateSchema = roomIdSchema.extend({ code: z.string().max(100_0
 export const chatSendSchema = roomIdSchema.extend({ body: z.string().trim().min(1).max(2_000) });
 export const whiteboardDrawSchema = roomIdSchema.extend({ point: pointSchema });
 
+export const setMemberPermissionsSchema = roomIdSchema.extend({
+  memberUserId: z.string().uuid(),
+  permissions: roomPermissionsSchema,
+});
+
+export type RoomErrorCode =
+  | "ALREADY_IN_ROOM"
+  | "ROOM_NOT_FOUND"
+  | "FORBIDDEN";
+
 export interface ClientToServerEvents {
   "room:create": (payload: z.infer<typeof createRoomSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "room:join": (payload: z.infer<typeof roomIdSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
@@ -60,6 +92,14 @@ export interface ClientToServerEvents {
   "chat:send": (payload: z.infer<typeof chatSendSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "whiteboard:draw": (payload: z.infer<typeof whiteboardDrawSchema>) => void;
   "whiteboard:clear": (payload: z.infer<typeof roomIdSchema>, callback: (response: Acknowledgement<null>) => void) => void;
+  "room:current": (
+  callback: (response: Acknowledgement<{ roomId: string } | null>) => void,
+  ) => void;
+
+  "room:member:permissions:set": (
+    payload: z.infer<typeof setMemberPermissionsSchema>,
+    callback: (response: Acknowledgement<RoomState>) => void,
+  ) => void;
 }
 
 export interface ServerToClientEvents {
@@ -69,5 +109,10 @@ export interface ServerToClientEvents {
   "chat:message": (message: RoomState["messages"][number]) => void;
   "whiteboard:drew": (point: WhiteboardPoint) => void;
   "whiteboard:cleared": () => void;
+  "room:left": (payload: {
+    roomId: string;
+    reason: "left" | "room-ended";
+  }) => void;
+
 }
 
