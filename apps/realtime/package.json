@@ -1,0 +1,30 @@
+{
+  "name": "@leetcollab/realtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@leetcollab/contracts": "workspace:*",
+    "@supabase/supabase-js": "2.112.2",
+    "cors": "2.8.6",
+    "dotenv": "16.6.1",
+    "express": "4.22.2",
+    "helmet": "8.3.0",
+    "socket.io": "4.8.3",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.1",
+    "tsup": "8.5.1",
+    "tsx": "4.23.11",
+    "typescript": "5.9.3"
+  }
+}

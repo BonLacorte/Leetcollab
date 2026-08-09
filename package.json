@@ -1,0 +1,17 @@
+{
+  "name": "leetcollab",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.16.0",
+  "scripts": {
+    "dev": "pnpm --filter @leetcollab/contracts build && concurrently -n realtime,web -c magenta,cyan \"pnpm --filter @leetcollab/realtime dev\" \"pnpm --filter @leetcollab/web dev\"",
+    "build": "pnpm --filter @leetcollab/contracts build && pnpm --filter @leetcollab/realtime build && pnpm --filter @leetcollab/web build",
+    "typecheck": "pnpm --filter @leetcollab/contracts build && pnpm --filter @leetcollab/realtime typecheck && pnpm --filter @leetcollab/web typecheck",
+    "supabase:start": "pnpm dlx supabase start",
+    "supabase:stop": "pnpm dlx supabase stop",
+    "supabase:reset": "pnpm dlx supabase db reset"
+  },
+  "devDependencies": {
+    "concurrently": "9.2.4"
+  }
+}

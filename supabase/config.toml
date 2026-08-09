@@ -1,0 +1,50 @@
+project_id = "leetcollab"
+
+[api]
+enabled = true
+# The default 54321 is in the Windows-reserved TCP range on this machine.
+port = 55421
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+# Windows reserves TCP ports 54231-54330 on this development machine.
+# Keep Supabase's local Postgres outside that range.
+port = 55432
+major_version = 15
+
+[studio]
+enabled = true
+# The default 54323 is in the Windows-reserved TCP range on this machine.
+port = 55423
+
+[local_smtp]
+# Local auth confirms accounts immediately, so its test mail server is unused.
+enabled = false
+
+[db.pooler]
+# The local application uses the Supabase API, not a direct pooled connection.
+# Disable the unused pooler whose default port 54329 is Windows-reserved.
+enabled = false
+
+[analytics]
+# The local MVP does not use Supabase Analytics. Disabling it avoids the
+# Windows Docker TCP warning and removes an unnecessary local container.
+enabled = false
+
+[edge_runtime]
+# The local MVP has no Supabase Edge Functions. Disable the Deno runtime,
+# whose Windows container boot can fail when no function entrypoint exists.
+enabled = false
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
