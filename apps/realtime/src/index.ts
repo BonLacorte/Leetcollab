@@ -13,6 +13,7 @@ import {
   roomIdSchema,
   setProblemSchema,
   whiteboardDrawSchema,
+  type RoomPermissions,
   type Acknowledgement,
   type ClientToServerEvents,
   type Problem,
@@ -40,6 +41,8 @@ app.get("/health", (_request, response) => response.json({ ok: true }));
 type SocketData = { userId: string; username: string };
 type Room = RoomState;
 const rooms = new Map<string, Room>();
+const activeRoomByUser = new Map<string, string>();
+const socketIdsByUser = new Map<string, Set<string>>();
 const server = http.createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(server, {
   cors: { origin, methods: ["GET", "POST"], credentials: true },
@@ -47,6 +50,63 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string,
 
 const success = <T>(data: T): Acknowledgement<T> => ({ ok: true, data });
 const failure = <T = never>(error: string): Acknowledgement<T> => ({ ok: false, error });
+
+function activeRoomForUser(userId: string): Room | null {
+  const roomId = activeRoomByUser.get(userId);
+  if (!roomId) return null;
+
+  const room = rooms.get(roomId);
+  if (!room) {
+    activeRoomByUser.delete(userId);
+    return null;
+  }
+
+  return room;
+}
+
+function memberCan(
+  room: Room,
+  userId: string,
+  capability: keyof RoomPermissions,
+): boolean {
+  if (room.hostUserId === userId) return true;
+
+  return room.members.find((member) => member.userId === userId)
+    ?.permissions[capability] === true;
+}
+
+function registerSocket(userId: string, socketId: string): void {
+  const socketIds = socketIdsByUser.get(userId) ?? new Set<string>();
+  socketIds.add(socketId);
+  socketIdsByUser.set(userId, socketIds);
+}
+
+function unregisterSocket(userId: string, socketId: string): void {
+  const socketIds = socketIdsByUser.get(userId);
+  if (!socketIds) return;
+
+  socketIds.delete(socketId);
+  if (socketIds.size === 0) socketIdsByUser.delete(userId);
+}
+
+
+function hostPermissions(): RoomPermissions {
+  return {
+    canEditCode: true,
+    canDrawWhiteboard: true,
+    canChangeProblem: true,
+    canChat: true,
+  };
+}
+
+function participantPermissions(): RoomPermissions {
+  return {
+    canEditCode: true,
+    canDrawWhiteboard: true,
+    canChangeProblem: false,
+    canChat: true,
+  };
+}
 
 function roomForMember(roomId: string, userId: string): Room | undefined {
   const room = rooms.get(roomId);
@@ -83,7 +143,25 @@ io.use(async (socket, next) => {
 });
 
 io.on("connection", (socket) => {
+  registerSocket(socket.data.userId, socket.id);
+
+  socket.on("disconnect", () => {
+    unregisterSocket(socket.data.userId, socket.id);
+  });
+
   socket.on("room:create", async (payload, callback) => {
+    
+    const currentRoom = activeRoomForUser(socket.data.userId);
+    if (currentRoom) {
+      return callback({
+        ok: false,
+        error: "Leave your current room before creating another one.",
+        code: "ALREADY_IN_ROOM",
+        currentRoomId: currentRoom.roomId,
+      });
+    }
+
+    
     const parsed = createRoomSchema.safeParse(payload);
     if (!parsed.success) return callback(failure("Invalid room creation request."));
     const problem = await getProblem(parsed.data.problemId);
@@ -97,11 +175,17 @@ io.on("connection", (socket) => {
       hostUserId: socket.data.userId,
       problem,
       code: "",
-      members: [{ userId: socket.data.userId, username: socket.data.username }],
+      members: [{
+        userId: socket.data.userId,
+        username: socket.data.username,
+        permissions: hostPermissions(),
+      }],
       messages: [],
       whiteboard: [],
     };
     rooms.set(roomId, room);
+    activeRoomByUser.set(socket.data.userId, roomId);
+
     socket.join(roomId);
     callback(success(room));
   });
@@ -109,15 +193,43 @@ io.on("connection", (socket) => {
   socket.on("room:join", (payload, callback) => {
     const parsed = roomIdSchema.safeParse(payload);
     if (!parsed.success) return callback(failure("Invalid room ID."));
+
+    const currentRoom = activeRoomForUser(socket.data.userId);
+    if (currentRoom && currentRoom.roomId !== parsed.data.roomId) {
+      return callback({
+        ok: false,
+        error: "Leave your current room before joining another one.",
+        code: "ALREADY_IN_ROOM",
+        currentRoomId: currentRoom.roomId,
+      });
+    }
+
     const room = rooms.get(parsed.data.roomId);
-    if (!room) return callback(failure("Room not found or has ended."));
+    if (!room) {
+      return callback({
+        ok: false,
+        error: "Room not found or has ended.",
+        code: "ROOM_NOT_FOUND",
+      });
+    }
 
     if (!room.members.some((member) => member.userId === socket.data.userId)) {
-      room.members.push({ userId: socket.data.userId, username: socket.data.username });
+      room.members.push({
+        userId: socket.data.userId,
+        username: socket.data.username,
+        permissions: participantPermissions(),
+      });
     }
+
+    activeRoomByUser.set(socket.data.userId, room.roomId);
     socket.join(room.roomId);
     broadcastState(room);
     callback(success(room));
+  });
+
+  socket.on("room:current", (callback) => {
+    const room = activeRoomForUser(socket.data.userId);
+    callback(success(room ? { roomId: room.roomId } : null));
   });
 
   socket.on("room:leave", (payload, callback) => {
@@ -127,7 +239,19 @@ io.on("connection", (socket) => {
     if (!room) return callback(failure("You are not in this room."));
 
     room.members = room.members.filter((member) => member.userId !== socket.data.userId);
-    socket.leave(room.roomId);
+    
+
+    activeRoomByUser.delete(socket.data.userId);
+
+    for (const socketId of socketIdsByUser.get(socket.data.userId) ?? []) {
+      const userSocket = io.sockets.sockets.get(socketId);
+      userSocket?.leave(room.roomId);
+      userSocket?.emit("room:left", {
+        roomId: room.roomId,
+        reason: "left",
+      });
+    }
+
     if (room.members.length === 0) rooms.delete(room.roomId);
     else {
       if (room.hostUserId === socket.data.userId) room.hostUserId = room.members[0].userId;
@@ -187,6 +311,10 @@ io.on("connection", (socket) => {
     room.whiteboard = [];
     io.to(room.roomId).emit("whiteboard:cleared");
     callback(success(null));
+  });
+
+  socket.on("disconnect", () => {
+    unregisterSocket(socket.data.userId, socket.id);
   });
 });
 
