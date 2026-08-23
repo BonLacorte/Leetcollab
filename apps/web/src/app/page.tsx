@@ -20,6 +20,7 @@ export default function HomePage() {
   const [status, setStatus] = useState<string>("");
   const [problems, setProblems] = useState<Problem[]>([]);
   const [roomId, setRoomId] = useState("");
+  const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) return;
@@ -29,6 +30,26 @@ export default function HomePage() {
         else setProblems((data ?? []) as Problem[]);
       });
   }, [session]);
+
+  useEffect(() => {
+    if (!session || !socket) {
+      setCurrentRoomId(null);
+      return;
+    }
+
+    const loadCurrentRoom = () => {
+      socket.emit("room:current", (response) => {
+        if (response.ok) setCurrentRoomId(response.data?.roomId ?? null);
+      });
+    };
+
+    socket.on("connect", loadCurrentRoom);
+    if (socket.connected) loadCurrentRoom();
+
+    return () => {
+      socket.off("connect", loadCurrentRoom);
+    };
+  }, [session, socket]);
 
   async function authenticate(event: FormEvent) {
     event.preventDefault();
@@ -45,7 +66,12 @@ export default function HomePage() {
   function createRoom(problemId: string) {
     if (!socket) return setStatus("Connecting to the collaboration server… please try again.");
     socket.emit("room:create", { problemId }, (response) => {
-      if (!response.ok) return setStatus(response.error);
+      if (!response.ok) {
+        if (response.code === "ALREADY_IN_ROOM" && response.currentRoomId) {
+          setCurrentRoomId(response.currentRoomId);
+        }
+        return setStatus(response.error);
+      }
       router.push(`/room/${response.data.roomId}`);
     });
   }
@@ -54,7 +80,12 @@ export default function HomePage() {
     event.preventDefault();
     if (!socket) return setStatus("Connecting to the collaboration server… please try again.");
     socket.emit("room:join", { roomId }, (response) => {
-      if (!response.ok) return setStatus(response.error);
+      if (!response.ok) {
+        if (response.code === "ALREADY_IN_ROOM" && response.currentRoomId) {
+          setCurrentRoomId(response.currentRoomId);
+        }
+        return setStatus(response.error);
+      }
       router.push(`/room/${response.data.roomId}`);
     });
   }
@@ -76,9 +107,14 @@ export default function HomePage() {
 
   return <main>
     <header className="topbar"><div><h1>LeetCollab</h1><p className="muted">Signed in as {session.user.user_metadata.username ?? session.user.email}</p></div><button className="secondary" onClick={() => supabase.auth.signOut()}>Sign out</button></header>
-    <section className="card stack" style={{ marginBottom: "1rem" }}><h2>Join an existing room</h2><form className="row" onSubmit={joinRoom}><input value={roomId} onChange={(event) => setRoomId(event.target.value)} placeholder="Room UUID" required /><button>Join room</button></form></section>
-    <section><h2>Start a new room</h2><div className="grid">{problems.map((problem) => <button className="card problem" key={problem.id} onClick={() => createRoom(problem.id)}><strong>{problem.title}</strong><span className="muted">{problem.difficulty} · {problem.slug}</span><span>Start collaboration room</span></button>)}</div></section>
+    {currentRoomId ? <section className="card stack" style={{ marginBottom: "1rem" }}>
+      <h2>You have an active room</h2>
+      <p className="muted">Leave your current room before creating or joining another one.</p>
+      <button onClick={() => router.push(`/room/${currentRoomId}`)}>Return to current room</button>
+    </section> : <>
+      <section className="card stack" style={{ marginBottom: "1rem" }}><h2>Join an existing room</h2><form className="row" onSubmit={joinRoom}><input value={roomId} onChange={(event) => setRoomId(event.target.value)} placeholder="Room UUID" required /><button>Join room</button></form></section>
+      <section><h2>Start a new room</h2><div className="grid">{problems.map((problem) => <button className="card problem" key={problem.id} onClick={() => createRoom(problem.id)}><strong>{problem.title}</strong><span className="muted">{problem.difficulty} · {problem.slug}</span><span>Start collaboration room</span></button>)}</div></section>
+    </>}
     {status && <p className="error">{status}</p>}
   </main>;
 }
-
