@@ -5,13 +5,11 @@ import { useRouter } from "next/navigation";
 import type { RoomPermissions, RoomState, WhiteboardPoint } from "@leetcollab/contracts";
 import { useAuth } from "./auth-provider";
 import { useSocket } from "./socket-provider";
-
-const permissionOptions: Array<[keyof RoomPermissions, string]> = [
-  ["canEditCode", "Edit code"],
-  ["canDrawWhiteboard", "Use whiteboard"],
-  ["canChangeProblem", "Change problem"],
-  ["canChat", "Send chat"],
-];
+import { ChatPanel } from "./room/chat-panel";
+import { EditorPanel } from "./room/editor-panel";
+import { ProblemPanel } from "./room/problem-panel";
+import { RoomHeader } from "./room/room-header";
+import { WorkspacePanel } from "./room/workspace-panel";
 
 function paint(context: CanvasRenderingContext2D, point: WhiteboardPoint, previous: WhiteboardPoint | null) {
   context.strokeStyle = point.color;
@@ -28,7 +26,7 @@ function paint(context: CanvasRenderingContext2D, point: WhiteboardPoint, previo
 
 export function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
-  const { session } = useAuth();
+  const { session, loading } = useAuth();
   const socket = useSocket();
   const [room, setRoom] = useState<RoomState | null>(null);
   const [code, setCode] = useState("");
@@ -49,8 +47,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
   }
 
   useEffect(() => {
-    if (!session) router.replace("/");
-  }, [router, session]);
+    if (!loading && !session) router.replace("/");
+  }, [loading, router, session]);
 
   useEffect(() => {
     if (!socket) return;
@@ -130,6 +128,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const canEditCode = isHost || currentMember?.permissions.canEditCode === true;
   const canDrawWhiteboard = isHost || currentMember?.permissions.canDrawWhiteboard === true;
   const canChat = isHost || currentMember?.permissions.canChat === true;
+  const hostName = room?.members.find((member) => member.userId === room.hostUserId)?.username ?? "host";
 
   function leaveRoom() {
     if (!socket) return router.push("/");
@@ -205,19 +204,41 @@ export function RoomClient({ roomId }: { roomId: string }) {
     });
   }
 
-  return <main>
-    <header className="topbar"><div><h1>{room?.problem?.title ?? "Collaboration room"}</h1><p className="muted">Room: {roomId}</p></div><button className="secondary" onClick={leaveRoom}>Leave room</button></header>
+  return <main className="room-page">
+    <RoomHeader roomId={roomId} hostName={hostName} onLeave={leaveRoom} />
     {status && <p className="error">{status}</p>}
-    {!room ? <div className="card">Waiting for room state…</div> : <div className="room">
-      <section className="stack">
-        <article className="card"><h2>{room.problem?.title}</h2><p className="muted">{room.problem?.difficulty} · Live-only room · {isHost ? "You are the host" : "Participant"}</p><p>Code execution is intentionally unavailable during the local MVP.</p></article>
-        <section className="card stack"><h2>Shared editor</h2><textarea value={code} disabled={!canEditCode} onChange={(event) => updateCode(event.target.value)} placeholder={canEditCode ? "Start solving together..." : "You do not have editor permission."} /></section>
-        <section className="card stack"><div className="row"><h2 style={{ flex: 1 }}>Whiteboard</h2><button className="secondary" disabled={!canDrawWhiteboard} onClick={clearWhiteboard}>Clear</button></div><canvas ref={canvasRef} width={800} height={360} style={{ cursor: canDrawWhiteboard ? "crosshair" : "not-allowed" }} onPointerDown={(event) => { if (!canDrawWhiteboard) return; setDrawing(true); event.currentTarget.setPointerCapture(event.pointerId); draw(event, true); }} onPointerMove={(event) => { if (drawing) draw(event, false); }} onPointerUp={() => { setDrawing(false); lastPoint.current = null; }} /></section>
+    {!room ? <div className="workspace-card loading-card">Waiting for room state...</div> : <div className="room-workspace">
+      <section className="problem-region">
+        <ProblemPanel problem={room.problem} isHost={isHost} />
       </section>
-      <aside className="stack">
-        <section className="card"><h2>Members ({room.members.length})</h2>{room.members.map((member) => <div key={member.userId} style={{ marginBottom: "0.75rem" }}><p>{member.username}{member.userId === room.hostUserId ? " · host" : ""}</p>{isHost && member.userId !== room.hostUserId && <div className="stack" style={{ gap: "0.25rem" }}>{permissionOptions.map(([capability, label]) => <label key={capability} className="row" style={{ justifyContent: "space-between" }}><span>{label}</span><input type="checkbox" checked={member.permissions[capability]} onChange={(event) => updateMemberPermission(member.userId, capability, event.target.checked)} /></label>)}</div>}</div>)}</section>
-        <section className="card stack"><h2>Chat</h2><div className="messages">{room.messages.length === 0 ? <p className="muted">No messages yet.</p> : room.messages.map((item) => <div className="message" key={item.id}><strong>{item.username}</strong><br />{item.body}</div>)}</div><form className="row" onSubmit={sendMessage}><input value={message} disabled={!canChat} onChange={(event) => setMessage(event.target.value)} placeholder={canChat ? "Message the room" : "Chat permission disabled"} maxLength={2000} /><button disabled={!canChat}>Send</button></form></section>
-      </aside>
+      <section className="editor-region">
+        <EditorPanel code={code} canEditCode={canEditCode} onCodeChange={updateCode} />
+      </section>
+      <section className="workspace-region">
+        <WorkspacePanel
+          canvasRef={canvasRef}
+          canDrawWhiteboard={canDrawWhiteboard}
+          drawing={drawing}
+          onClearWhiteboard={clearWhiteboard}
+          onDrawingChange={setDrawing}
+          onDraw={draw}
+          onStrokeEnd={() => {
+            setDrawing(false);
+            lastPoint.current = null;
+          }}
+        />
+      </section>
+      <section className="conversation-region">
+        <ChatPanel
+          room={room}
+          message={message}
+          canChat={canChat}
+          isHost={isHost}
+          onMessageChange={setMessage}
+          onSendMessage={sendMessage}
+          onMemberPermissionChange={updateMemberPermission}
+        />
+      </section>
     </div>}
   </main>;
 }

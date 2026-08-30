@@ -1,6 +1,7 @@
 import "./globals.css";
 import { AuthProvider } from "../components/auth-provider";
 import { SocketProvider } from "../components/socket-provider";
+import { ThemeProvider } from "../components/theme-provider";
 
 export const metadata = {
   title: "LeetCollab",
@@ -11,9 +12,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <AuthProvider><SocketProvider>{children}</SocketProvider></AuthProvider>
+        <ThemeProvider>
+          <AuthProvider><SocketProvider>{children}</SocketProvider></AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
 }
-
