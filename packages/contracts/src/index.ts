@@ -29,10 +29,29 @@ export const problemSchema = z.object({
   id: z.string().uuid(),
   slug: z.string(),
   title: z.string(),
+  category: z.string(),
   difficulty: z.enum(["Easy", "Medium", "Hard"]),
+  sortOrder: z.number().int(),
+  statement: z.string(),
+  starterCode: z.string(),
+  examples: z.array(z.object({
+    title: z.string(),
+    input: z.string(),
+    output: z.string(),
+    explanation: z.string().optional(),
+  })),
+  constraints: z.array(z.string()),
 });
 
 export type Problem = z.infer<typeof problemSchema>;
+
+export const timerSchema = z.object({
+  status: z.enum(["idle", "running", "paused"]),
+  elapsedMs: z.number().int().min(0),
+  startedAt: z.string().datetime().nullable(),
+});
+
+export type RoomTimer = z.infer<typeof timerSchema>;
 
 export const roomPermissionsSchema = z.object({
   canEditCode: z.boolean(),
@@ -56,6 +75,7 @@ export const roomStateSchema = z.object({
   hostUserId: z.string().uuid(),
   problem: problemSchema.nullable(),
   code: z.string(),
+  timer: timerSchema,
   members: z.array(roomMemberSchema),
   messages: z.array(z.object({ id: z.string().uuid(), username: z.string(), body: z.string(), sentAt: z.string() })),
   whiteboard: z.array(pointSchema),
@@ -72,6 +92,7 @@ export const setProblemSchema = roomIdSchema.extend({ problemId: z.string().uuid
 export const codeUpdateSchema = roomIdSchema.extend({ code: z.string().max(100_000) });
 export const chatSendSchema = roomIdSchema.extend({ body: z.string().trim().min(1).max(2_000) });
 export const whiteboardDrawSchema = roomIdSchema.extend({ point: pointSchema });
+export const timerActionSchema = roomIdSchema;
 
 export const setMemberPermissionsSchema = roomIdSchema.extend({
   memberUserId: z.string().uuid(),
@@ -88,6 +109,9 @@ export interface ClientToServerEvents {
   "room:join": (payload: z.infer<typeof roomIdSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "room:leave": (payload: z.infer<typeof roomIdSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "room:problem:set": (payload: z.infer<typeof setProblemSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
+  "room:timer:start": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
+  "room:timer:pause": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
+  "room:timer:reset": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "code:update": (payload: z.infer<typeof codeUpdateSchema>) => void;
   "chat:send": (payload: z.infer<typeof chatSendSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "whiteboard:draw": (payload: z.infer<typeof whiteboardDrawSchema>) => void;
@@ -115,4 +139,3 @@ export interface ServerToClientEvents {
   }) => void;
 
 }
-

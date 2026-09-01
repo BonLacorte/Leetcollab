@@ -1,8 +1,10 @@
 import { useState, type PointerEvent, type RefObject } from "react";
+import type { Problem } from "@leetcollab/contracts";
 
 type WorkspaceTab = "testcases" | "result" | "whiteboard";
 
 type WorkspacePanelProps = {
+  problem: Problem | null;
   canvasRef: RefObject<HTMLCanvasElement | null>;
   canDrawWhiteboard: boolean;
   drawing: boolean;
@@ -13,6 +15,7 @@ type WorkspacePanelProps = {
 };
 
 export function WorkspacePanel({
+  problem,
   canvasRef,
   canDrawWhiteboard,
   drawing,
@@ -32,9 +35,19 @@ export function WorkspacePanel({
       </div>
 
       {tab === "testcases" && (
-        <div className="empty-panel">
-          <strong>Case 1</strong>
-          <p className="muted">Testcase details will appear with the problem workflow.</p>
+        <div className="testcase-panel">
+          {problem?.examples.length ? problem.examples.map((example, index) => (
+            <div className="testcase-card" key={example.title}>
+              <strong>Case {index + 1}: {example.title}</strong>
+              <pre>Input: {example.input}{'\n'}Output: {example.output}</pre>
+              {example.explanation && <p className="muted">{example.explanation}</p>}
+            </div>
+          )) : (
+            <div className="empty-panel">
+              <strong>No testcases yet</strong>
+              <p className="muted">This problem does not have display examples.</p>
+            </div>
+          )}
         </div>
       )}
 

@@ -8,6 +8,35 @@ import { useAuth } from "../components/auth-provider";
 import { useSocket } from "../components/socket-provider";
 
 type Mode = "sign-in" | "sign-up";
+type ProblemRow = {
+  id: string;
+  slug: string;
+  title: string;
+  category: string;
+  difficulty: Problem["difficulty"];
+  sort_order: number;
+  statement: string;
+  starter_code: string;
+  examples: Problem["examples"];
+  constraints: string[];
+};
+
+const problemSelect = "id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints";
+
+function normalizeProblem(row: ProblemRow): Problem {
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    category: row.category,
+    difficulty: row.difficulty,
+    sortOrder: row.sort_order,
+    statement: row.statement,
+    starterCode: row.starter_code,
+    examples: Array.isArray(row.examples) ? row.examples : [],
+    constraints: Array.isArray(row.constraints) ? row.constraints : [],
+  };
+}
 
 export default function HomePage() {
   const router = useRouter();
@@ -24,10 +53,10 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!session) return;
-    supabase.from("problems").select("id, slug, title, difficulty").order("sort_order")
+    supabase.from("problems").select(problemSelect).order("sort_order")
       .then(({ data, error }) => {
         if (error) setStatus(error.message);
-        else setProblems((data ?? []) as Problem[]);
+        else setProblems(((data ?? []) as ProblemRow[]).map(normalizeProblem));
       });
   }, [session]);
 

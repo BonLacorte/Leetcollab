@@ -61,7 +61,9 @@ button {
 
 button.secondary,
 .pill-button,
-.icon-button {
+.icon-button,
+.mini-button,
+.filter-chip {
   background: var(--surface-raised);
   color: var(--text);
 }
@@ -219,6 +221,28 @@ p {
   color: var(--muted);
 }
 
+.timer-cluster {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.timer-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.mini-button,
+.filter-chip {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.filter-chip.active {
+  background: var(--button);
+  color: white;
+}
+
 .room-header-meta {
   display: flex;
   justify-content: center;
@@ -300,9 +324,42 @@ p {
 
 .problem-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   color: var(--muted);
+  margin-bottom: 1rem;
+}
+
+.problem-controls {
+  display: grid;
+  gap: 0.75rem;
   margin-bottom: 1.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.filter-row,
+.problem-picker-grid {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.filter-row {
+  flex-wrap: wrap;
+}
+
+.problem-picker-grid {
+  align-items: center;
+}
+
+.problem-picker-grid input {
+  min-width: 150px;
+}
+
+.problem-picker-grid select {
+  min-width: 180px;
 }
 
 .problem-copy {
@@ -317,6 +374,36 @@ p {
 .problem-copy h2 {
   font-size: 1rem;
   margin-top: 2rem;
+}
+
+.example-list,
+.testcase-panel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.example-card,
+.testcase-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.5;
+}
+
+.constraint-list {
+  display: grid;
+  gap: 0.5rem;
+  padding-left: 1.2rem;
 }
 
 .editor-actions {
@@ -364,6 +451,11 @@ html[data-theme="light"] .code-editor {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-soft);
+}
+
+.testcase-panel {
+  flex: 1;
+  overflow-y: auto;
 }
 
 .whiteboard-shell {
@@ -510,9 +602,16 @@ canvas {
 
   .room-header-meta,
   .room-header-actions,
-  .problem-nav {
+  .problem-nav,
+  .timer-cluster,
+  .problem-picker-grid {
     flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  .problem-picker-grid {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .hide-small {

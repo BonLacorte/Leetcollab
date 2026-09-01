@@ -2,12 +2,13 @@
 
 import { FormEvent, PointerEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { RoomPermissions, RoomState, WhiteboardPoint } from "@leetcollab/contracts";
+import type { Problem, RoomPermissions, RoomState, RoomTimer, WhiteboardPoint } from "@leetcollab/contracts";
+import { supabase } from "../lib/supabase";
 import { useAuth } from "./auth-provider";
 import { useSocket } from "./socket-provider";
 import { ChatPanel } from "./room/chat-panel";
 import { EditorPanel } from "./room/editor-panel";
-import { ProblemPanel } from "./room/problem-panel";
+import { type DifficultyFilter, ProblemPanel } from "./room/problem-panel";
 import { RoomHeader } from "./room/room-header";
 import { WorkspacePanel } from "./room/workspace-panel";
 
@@ -24,6 +25,49 @@ function paint(context: CanvasRenderingContext2D, point: WhiteboardPoint, previo
   }
 }
 
+type ProblemRow = {
+  id: string;
+  slug: string;
+  title: string;
+  category: string;
+  difficulty: Problem["difficulty"];
+  sort_order: number;
+  statement: string;
+  starter_code: string;
+  examples: Problem["examples"];
+  constraints: string[];
+};
+
+const problemSelect = "id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints";
+
+function normalizeProblem(row: ProblemRow): Problem {
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    category: row.category,
+    difficulty: row.difficulty,
+    sortOrder: row.sort_order,
+    statement: row.statement,
+    starterCode: row.starter_code,
+    examples: Array.isArray(row.examples) ? row.examples : [],
+    constraints: Array.isArray(row.constraints) ? row.constraints : [],
+  };
+}
+
+function timerElapsedMs(timer: RoomTimer, now: number): number {
+  if (timer.status !== "running" || !timer.startedAt) return timer.elapsedMs;
+  return timer.elapsedMs + Math.max(0, now - Date.parse(timer.startedAt));
+}
+
+function formatTimer(timer: RoomTimer, now: number): string {
+  const totalSeconds = Math.floor(timerElapsedMs(timer, now) / 1000);
+  const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, "0");
+  const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, "0");
+  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}
+
 export function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
   const { session, loading } = useAuth();
@@ -33,6 +77,10 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("Connecting to room…");
   const [drawing, setDrawing] = useState(false);
+  const [problemCatalog, setProblemCatalog] = useState<Problem[]>([]);
+  const [problemSearch, setProblemSearch] = useState("");
+  const [difficultyFilter, setDifficultyFilter] = useState<DifficultyFilter>("All");
+  const [timerNow, setTimerNow] = useState(Date.now());
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastPoint = useRef<WhiteboardPoint | null>(null);
 
@@ -49,6 +97,33 @@ export function RoomClient({ roomId }: { roomId: string }) {
   useEffect(() => {
     if (!loading && !session) router.replace("/");
   }, [loading, router, session]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    supabase
+      .from("problems")
+      .select(problemSelect)
+      .order("sort_order")
+      .then(({ data, error }) => {
+        if (error) {
+          setStatus(error.message);
+          return;
+        }
+
+        setProblemCatalog(((data ?? []) as ProblemRow[]).map(normalizeProblem));
+      });
+  }, [session]);
+
+  useEffect(() => {
+    if (room?.timer.status !== "running") {
+      setTimerNow(Date.now());
+      return;
+    }
+
+    const intervalId = window.setInterval(() => setTimerNow(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [room?.timer.status, room?.timer.startedAt]);
 
   useEffect(() => {
     if (!socket) return;
@@ -128,6 +203,18 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const canEditCode = isHost || currentMember?.permissions.canEditCode === true;
   const canDrawWhiteboard = isHost || currentMember?.permissions.canDrawWhiteboard === true;
   const canChat = isHost || currentMember?.permissions.canChat === true;
+  const canChangeProblem = isHost || currentMember?.permissions.canChangeProblem === true;
+  const filteredProblems = problemCatalog.filter((problem) => {
+    const matchesDifficulty = difficultyFilter === "All" || problem.difficulty === difficultyFilter;
+    const search = problemSearch.trim().toLowerCase();
+    const matchesSearch = !search
+      || problem.title.toLowerCase().includes(search)
+      || problem.slug.toLowerCase().includes(search)
+      || problem.category.toLowerCase().includes(search);
+
+    return matchesDifficulty && matchesSearch;
+  });
+  const timerDisplay = room ? formatTimer(room.timer, timerNow) : "00:00:00";
   const hostName = room?.members.find((member) => member.userId === room.hostUserId)?.username ?? "host";
 
   function leaveRoom() {
@@ -182,6 +269,70 @@ export function RoomClient({ roomId }: { roomId: string }) {
     });
   }
 
+  function selectProblem(problemId: string) {
+    if (!socket || !canChangeProblem) {
+      setStatus("You do not have permission to change the problem.");
+      return;
+    }
+    if (problemId === room?.problem?.id) return;
+
+    socket.emit("room:problem:set", { roomId, problemId }, (response) => {
+      if (response.ok) setRoom(response.data);
+      else setStatus(response.error);
+    });
+  }
+
+  function selectPreviousProblem() {
+    const candidates = filteredProblems.length > 0 ? filteredProblems : problemCatalog;
+    if (candidates.length === 0) return;
+    const currentIndex = candidates.findIndex((problem) => problem.id === room?.problem?.id);
+    const nextIndex = currentIndex >= 0
+      ? (currentIndex - 1 + candidates.length) % candidates.length
+      : candidates.length - 1;
+    selectProblem(candidates[nextIndex].id);
+  }
+
+  function selectNextProblem() {
+    const candidates = filteredProblems.length > 0 ? filteredProblems : problemCatalog;
+    if (candidates.length === 0) return;
+    const currentIndex = candidates.findIndex((problem) => problem.id === room?.problem?.id);
+    const nextIndex = (currentIndex + 1) % candidates.length;
+    selectProblem(candidates[nextIndex].id);
+  }
+
+  function selectRandomProblem() {
+    const candidates = filteredProblems.length > 0 ? filteredProblems : problemCatalog;
+    if (candidates.length === 0) return;
+    const currentProblemId = room?.problem?.id;
+    const selectable = candidates.length > 1
+      ? candidates.filter((problem) => problem.id !== currentProblemId)
+      : candidates;
+    const nextProblem = selectable[Math.floor(Math.random() * selectable.length)];
+    selectProblem(nextProblem.id);
+  }
+
+  function updateTimer(action: "start" | "pause" | "reset") {
+    if (!socket || !isHost) {
+      setStatus("Only the room host can control the timer.");
+      return;
+    }
+
+    const eventName = action === "start"
+      ? "room:timer:start"
+      : action === "pause"
+        ? "room:timer:pause"
+        : "room:timer:reset";
+
+    socket.emit(eventName, { roomId }, (response) => {
+      if (response.ok) {
+        setRoom(response.data);
+        setTimerNow(Date.now());
+      } else {
+        setStatus(response.error);
+      }
+    });
+  }
+
   function updateMemberPermission(
     memberUserId: string,
     capability: keyof RoomPermissions,
@@ -205,17 +356,43 @@ export function RoomClient({ roomId }: { roomId: string }) {
   }
 
   return <main className="room-page">
-    <RoomHeader roomId={roomId} hostName={hostName} onLeave={leaveRoom} />
+    <RoomHeader
+      roomId={roomId}
+      hostName={hostName}
+      timerDisplay={timerDisplay}
+      timerStatus={room?.timer.status ?? "idle"}
+      canChangeProblem={canChangeProblem}
+      canControlTimer={isHost === true}
+      onPreviousProblem={selectPreviousProblem}
+      onNextProblem={selectNextProblem}
+      onStartTimer={() => updateTimer("start")}
+      onPauseTimer={() => updateTimer("pause")}
+      onResetTimer={() => updateTimer("reset")}
+      onLeave={leaveRoom}
+    />
     {status && <p className="error">{status}</p>}
     {!room ? <div className="workspace-card loading-card">Waiting for room state...</div> : <div className="room-workspace">
       <section className="problem-region">
-        <ProblemPanel problem={room.problem} isHost={isHost} />
+        <ProblemPanel
+          problem={room.problem}
+          isHost={isHost}
+          problems={problemCatalog}
+          filteredProblems={filteredProblems}
+          canChangeProblem={canChangeProblem}
+          difficultyFilter={difficultyFilter}
+          searchTerm={problemSearch}
+          onDifficultyFilterChange={setDifficultyFilter}
+          onSearchTermChange={setProblemSearch}
+          onSelectProblem={selectProblem}
+          onRandomProblem={selectRandomProblem}
+        />
       </section>
       <section className="editor-region">
         <EditorPanel code={code} canEditCode={canEditCode} onCodeChange={updateCode} />
       </section>
       <section className="workspace-region">
         <WorkspacePanel
+          problem={room.problem}
           canvasRef={canvasRef}
           canDrawWhiteboard={canDrawWhiteboard}
           drawing={drawing}

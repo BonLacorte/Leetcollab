@@ -13,12 +13,14 @@ import {
   roomIdSchema,
   setMemberPermissionsSchema,
   setProblemSchema,
+  timerActionSchema,
   whiteboardDrawSchema,
   type RoomErrorCode,
   type RoomPermissions,
   type Acknowledgement,
   type ClientToServerEvents,
   type Problem,
+  type RoomTimer,
   type RoomState,
   type ServerToClientEvents,
 } from "@leetcollab/contracts";
@@ -42,6 +44,7 @@ app.get("/health", (_request, response) => response.json({ ok: true }));
 
 type SocketData = { userId: string; username: string };
 type Room = RoomState;
+type ProblemExample = Problem["examples"][number];
 const rooms = new Map<string, Room>();
 const activeRoomByUser = new Map<string, string>();
 const socketIdsByUser = new Map<string, Set<string>>();
@@ -119,6 +122,28 @@ function participantPermissions(): RoomPermissions {
   };
 }
 
+function initialTimer(): RoomTimer {
+  return {
+    status: "idle",
+    elapsedMs: 0,
+    startedAt: null,
+  };
+}
+
+function elapsedTimerMs(timer: RoomTimer, now = Date.now()): number {
+  if (timer.status !== "running" || !timer.startedAt) return timer.elapsedMs;
+  return timer.elapsedMs + Math.max(0, now - Date.parse(timer.startedAt));
+}
+
+function hostOnlyTimerAction(
+  room: Room,
+  userId: string,
+): Acknowledgement<never> | null {
+  return room.hostUserId === userId
+    ? null
+    : failure("Only the room host can control the timer.", "FORBIDDEN");
+}
+
 function roomForMember(roomId: string, userId: string): Room | undefined {
   const room = rooms.get(roomId);
   return room?.members.some((member) => member.userId === userId) ? room : undefined;
@@ -141,11 +166,22 @@ function requirePermission(
 async function getProblem(problemId: string): Promise<Problem | null> {
   const { data, error } = await supabase
     .from("problems")
-    .select("id, slug, title, difficulty")
+    .select("id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints")
     .eq("id", problemId)
     .maybeSingle();
   if (error || !data) return null;
-  return { id: data.id, slug: data.slug, title: data.title, difficulty: data.difficulty } as Problem;
+  return {
+    id: data.id,
+    slug: data.slug,
+    title: data.title,
+    category: data.category,
+    difficulty: data.difficulty,
+    sortOrder: data.sort_order,
+    statement: data.statement,
+    starterCode: data.starter_code,
+    examples: Array.isArray(data.examples) ? data.examples as ProblemExample[] : [],
+    constraints: Array.isArray(data.constraints) ? data.constraints as string[] : [],
+  } as Problem;
 }
 
 io.use(async (socket, next) => {
@@ -191,7 +227,8 @@ io.on("connection", (socket) => {
       roomId,
       hostUserId: socket.data.userId,
       problem,
-      code: "",
+      code: problem.starterCode,
+      timer: initialTimer(),
       members: [{
         userId: socket.data.userId,
         username: socket.data.username,
@@ -286,7 +323,58 @@ io.on("connection", (socket) => {
     const problem = await getProblem(parsed.data.problemId);
     if (!problem) return callback(failure("Problem not found."));
     room.problem = problem;
-    room.code = "";
+    room.code = problem.starterCode;
+    broadcastState(room);
+    callback(success(room));
+  });
+
+  socket.on("room:timer:start", (payload, callback) => {
+    const parsed = timerActionSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid timer request."));
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = hostOnlyTimerAction(room, socket.data.userId);
+    if (denied) return callback(denied);
+
+    if (room.timer.status !== "running") {
+      room.timer = {
+        status: "running",
+        elapsedMs: elapsedTimerMs(room.timer),
+        startedAt: new Date().toISOString(),
+      };
+    }
+
+    broadcastState(room);
+    callback(success(room));
+  });
+
+  socket.on("room:timer:pause", (payload, callback) => {
+    const parsed = timerActionSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid timer request."));
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = hostOnlyTimerAction(room, socket.data.userId);
+    if (denied) return callback(denied);
+
+    room.timer = {
+      status: "paused",
+      elapsedMs: elapsedTimerMs(room.timer),
+      startedAt: null,
+    };
+
+    broadcastState(room);
+    callback(success(room));
+  });
+
+  socket.on("room:timer:reset", (payload, callback) => {
+    const parsed = timerActionSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid timer request."));
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = hostOnlyTimerAction(room, socket.data.userId);
+    if (denied) return callback(denied);
+
+    room.timer = initialTimer();
     broadcastState(room);
     callback(success(room));
   });
