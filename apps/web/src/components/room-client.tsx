@@ -2,7 +2,15 @@
 
 import { FormEvent, PointerEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Problem, RoomPermissions, RoomState, RoomTimer, WhiteboardPoint } from "@leetcollab/contracts";
+import type {
+  Problem,
+  ProblemProgress,
+  RoomPermissions,
+  RoomState,
+  RoomTimer,
+  SolvedWithMember,
+  WhiteboardPoint,
+} from "@leetcollab/contracts";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./auth-provider";
 import { useSocket } from "./socket-provider";
@@ -38,7 +46,19 @@ type ProblemRow = {
   constraints: string[];
 };
 
+type ProgressRow = {
+  user_id: string;
+  problem_id: string;
+  draft_code: string | null;
+  draft_language: string | null;
+  last_saved_at: string | null;
+  solved_at: string | null;
+  solved_with: SolvedWithMember[] | null;
+  solved_code: string | null;
+};
+
 const problemSelect = "id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints";
+const progressSelect = "user_id, problem_id, draft_code, draft_language, last_saved_at, solved_at, solved_with, solved_code";
 
 function normalizeProblem(row: ProblemRow): Problem {
   return {
@@ -68,6 +88,19 @@ function formatTimer(timer: RoomTimer, now: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+function normalizeProgress(row: ProgressRow): ProblemProgress {
+  return {
+    userId: row.user_id,
+    problemId: row.problem_id,
+    draftCode: row.draft_code ?? "",
+    draftLanguage: row.draft_language ?? "javascript",
+    lastSavedAt: row.last_saved_at,
+    solvedAt: row.solved_at,
+    solvedWith: Array.isArray(row.solved_with) ? row.solved_with : [],
+    solvedCode: row.solved_code,
+  };
+}
+
 export function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
   const { session, loading } = useAuth();
@@ -81,6 +114,9 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [problemSearch, setProblemSearch] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState<DifficultyFilter>("All");
   const [timerNow, setTimerNow] = useState(Date.now());
+  const [progress, setProgress] = useState<ProblemProgress | null>(null);
+  const [progressStatus, setProgressStatus] = useState("");
+  const [isProgressLoading, setIsProgressLoading] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastPoint = useRef<WhiteboardPoint | null>(null);
 
@@ -124,6 +160,53 @@ export function RoomClient({ roomId }: { roomId: string }) {
     const intervalId = window.setInterval(() => setTimerNow(Date.now()), 1000);
     return () => window.clearInterval(intervalId);
   }, [room?.timer.status, room?.timer.startedAt]);
+
+  useEffect(() => {
+    const userId = session?.user.id;
+    const problemId = room?.problem?.id;
+    if (!userId || !problemId) {
+      setProgress(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsProgressLoading(true);
+    setProgressStatus("");
+
+    async function loadProgress() {
+      try {
+        const { data, error } = await supabase
+          .from("user_problem_progress")
+          .select(progressSelect)
+          .eq("user_id", userId)
+          .eq("problem_id", problemId)
+          .maybeSingle();
+
+        if (cancelled) return;
+        if (error) {
+          setStatus(error.message);
+          setProgress(null);
+          return;
+        }
+
+        setProgress(data ? normalizeProgress(data as ProgressRow) : null);
+      } catch (error) {
+        if (cancelled) return;
+        setStatus(error instanceof Error ? error.message : "Could not load problem progress.");
+        setProgress(null);
+      } finally {
+        if (!cancelled) {
+          setIsProgressLoading(false);
+        }
+      }
+    }
+
+    loadProgress();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [room?.problem?.id, session?.user.id]);
 
   useEffect(() => {
     if (!socket) return;
@@ -269,6 +352,88 @@ export function RoomClient({ roomId }: { roomId: string }) {
     });
   }
 
+  async function saveDraft() {
+    const userId = session?.user.id;
+    const problemId = room?.problem?.id;
+    if (!userId || !problemId) return;
+
+    setIsProgressLoading(true);
+    setProgressStatus("");
+
+    const { data, error } = await supabase
+      .from("user_problem_progress")
+      .upsert({
+        user_id: userId,
+        problem_id: problemId,
+        draft_code: code,
+        draft_language: "javascript",
+        last_saved_at: new Date().toISOString(),
+      }, { onConflict: "user_id,problem_id" })
+      .select(progressSelect)
+      .single();
+
+    setIsProgressLoading(false);
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setProgress(normalizeProgress(data as ProgressRow));
+    setProgressStatus("Draft saved.");
+  }
+
+  function loadDraft() {
+    if (!canEditCode) {
+      setStatus("You need editor permission to load your draft into the shared editor.");
+      return;
+    }
+
+    if (!progress?.draftCode) {
+      setStatus("No saved draft found for this problem.");
+      return;
+    }
+
+    updateCode(progress.draftCode);
+    setProgressStatus("Draft loaded into the shared editor.");
+  }
+
+  async function markSolved() {
+    const userId = session?.user.id;
+    const problemId = room?.problem?.id;
+    if (!userId || !problemId || !room) return;
+
+    setIsProgressLoading(true);
+    setProgressStatus("");
+
+    const solvedWith = room.members.map((member) => ({
+      userId: member.userId,
+      username: member.username,
+    }));
+
+    const { data, error } = await supabase
+      .from("user_problem_progress")
+      .upsert({
+        user_id: userId,
+        problem_id: problemId,
+        solved_at: new Date().toISOString(),
+        solved_code: code,
+        solved_with: solvedWith,
+      }, { onConflict: "user_id,problem_id" })
+      .select(progressSelect)
+      .single();
+
+    setIsProgressLoading(false);
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setProgress(normalizeProgress(data as ProgressRow));
+    setProgressStatus("Marked solved.");
+  }
+
   function selectProblem(problemId: string) {
     if (!socket || !canChangeProblem) {
       setStatus("You do not have permission to change the problem.");
@@ -388,7 +553,17 @@ export function RoomClient({ roomId }: { roomId: string }) {
         />
       </section>
       <section className="editor-region">
-        <EditorPanel code={code} canEditCode={canEditCode} onCodeChange={updateCode} />
+        <EditorPanel
+          code={code}
+          canEditCode={canEditCode}
+          progress={progress}
+          progressStatus={progressStatus}
+          isProgressLoading={isProgressLoading}
+          onCodeChange={updateCode}
+          onSaveDraft={saveDraft}
+          onLoadDraft={loadDraft}
+          onMarkSolved={markSolved}
+        />
       </section>
       <section className="workspace-region">
         <WorkspacePanel

@@ -45,6 +45,26 @@ export const problemSchema = z.object({
 
 export type Problem = z.infer<typeof problemSchema>;
 
+export const solvedWithMemberSchema = z.object({
+  userId: z.string().uuid(),
+  username: z.string(),
+});
+
+export type SolvedWithMember = z.infer<typeof solvedWithMemberSchema>;
+
+export const problemProgressSchema = z.object({
+  userId: z.string().uuid(),
+  problemId: z.string().uuid(),
+  draftCode: z.string(),
+  draftLanguage: z.string(),
+  lastSavedAt: z.string().datetime().nullable(),
+  solvedAt: z.string().datetime().nullable(),
+  solvedWith: z.array(solvedWithMemberSchema),
+  solvedCode: z.string().nullable(),
+});
+
+export type ProblemProgress = z.infer<typeof problemProgressSchema>;
+
 export const timerSchema = z.object({
   status: z.enum(["idle", "running", "paused"]),
   elapsedMs: z.number().int().min(0),
