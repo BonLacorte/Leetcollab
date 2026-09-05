@@ -14,7 +14,8 @@ import {
   setMemberPermissionsSchema,
   setProblemSchema,
   timerActionSchema,
-  whiteboardDrawSchema,
+  whiteboardStrokeAddSchema,
+  whiteboardUndoSchema,
   type RoomErrorCode,
   type RoomPermissions,
   type Acknowledgement,
@@ -23,6 +24,7 @@ import {
   type RoomTimer,
   type RoomState,
   type ServerToClientEvents,
+  type WhiteboardStroke,
 } from "@leetcollab/contracts";
 
 const port = Number(process.env.PORT ?? 3001);
@@ -48,6 +50,7 @@ type ProblemExample = Problem["examples"][number];
 const rooms = new Map<string, Room>();
 const activeRoomByUser = new Map<string, string>();
 const socketIdsByUser = new Map<string, Set<string>>();
+const maxWhiteboardStrokes = 2_000;
 const server = http.createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(server, {
   cors: { origin, methods: ["GET", "POST"], credentials: true },
@@ -401,20 +404,67 @@ io.on("connection", (socket) => {
       "You do not have permission to send chat messages.",
     );
     if (denied) return callback(denied);
-    const message = { id: randomUUID(), username: socket.data.username, body: parsed.data.body, sentAt: new Date().toISOString() };
+    const message = {
+      id: randomUUID(),
+      userId: socket.data.userId,
+      username: socket.data.username,
+      body: parsed.data.body,
+      sentAt: new Date().toISOString(),
+    };
     room.messages.push(message);
     io.to(room.roomId).emit("chat:message", message);
     callback(success(null));
   });
 
-  socket.on("whiteboard:draw", (payload) => {
-    const parsed = whiteboardDrawSchema.safeParse(payload);
-    if (!parsed.success) return;
+  socket.on("whiteboard:stroke:add", (payload, callback) => {
+    const parsed = whiteboardStrokeAddSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid whiteboard stroke."));
     const room = roomForMember(parsed.data.roomId, socket.data.userId);
-    if (!room) return;
-    if (!memberCan(room, socket.data.userId, "canDrawWhiteboard")) return;
-    room.whiteboard.push(parsed.data.point);
-    socket.to(room.roomId).emit("whiteboard:drew", parsed.data.point);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = requirePermission(
+      room,
+      socket.data.userId,
+      "canDrawWhiteboard",
+      "You do not have permission to draw on the whiteboard.",
+    );
+    if (denied) return callback(denied);
+    if (room.whiteboard.length >= maxWhiteboardStrokes) {
+      return callback(failure("Whiteboard stroke limit reached."));
+    }
+
+    const stroke: WhiteboardStroke = {
+      ...parsed.data.stroke,
+      id: randomUUID(),
+      authorUserId: socket.data.userId,
+    };
+
+    room.whiteboard.push(stroke);
+    io.to(room.roomId).emit("whiteboard:stroke:added", stroke);
+    callback(success(stroke));
+  });
+
+  socket.on("whiteboard:undo", (payload, callback) => {
+    const parsed = whiteboardUndoSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid room ID."));
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = requirePermission(
+      room,
+      socket.data.userId,
+      "canDrawWhiteboard",
+      "You do not have permission to undo whiteboard strokes.",
+    );
+    if (denied) return callback(denied);
+
+    const strokeIndex = room.hostUserId === socket.data.userId
+      ? room.whiteboard.length - 1
+      : room.whiteboard.map((stroke) => stroke.authorUserId).lastIndexOf(socket.data.userId);
+
+    if (strokeIndex < 0) return callback(failure("No whiteboard stroke to undo."));
+
+    const [removedStroke] = room.whiteboard.splice(strokeIndex, 1);
+    io.to(room.roomId).emit("whiteboard:undone", { strokeId: removedStroke.id });
+    callback(success({ strokeId: removedStroke.id }));
   });
 
   socket.on("whiteboard:clear", (payload, callback) => {

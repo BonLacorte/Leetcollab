@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { RoomPermissions, RoomState } from "@leetcollab/contracts";
 
 const permissionOptions: Array<[keyof RoomPermissions, string]> = [
@@ -11,6 +11,7 @@ const permissionOptions: Array<[keyof RoomPermissions, string]> = [
 type ChatPanelProps = {
   room: RoomState;
   message: string;
+  currentUserId: string;
   canChat: boolean;
   isHost: boolean;
   onMessageChange: (value: string) => void;
@@ -25,6 +26,7 @@ type ChatPanelProps = {
 export function ChatPanel({
   room,
   message,
+  currentUserId,
   canChat,
   isHost,
   onMessageChange,
@@ -32,6 +34,42 @@ export function ChatPanel({
   onMemberPermissionChange,
 }: ChatPanelProps) {
   const [activeTab, setActiveTab] = useState<"chat" | "members">("chat");
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
+
+  useEffect(() => {
+    const messagesElement = messagesRef.current;
+    if (!messagesElement || !shouldStickToBottomRef.current) return;
+
+    messagesElement.scrollTop = messagesElement.scrollHeight;
+  }, [room.messages.length]);
+
+  function formatTime(value: string): string {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(value));
+  }
+
+  function dateKey(value: string): string {
+    return new Date(value).toDateString();
+  }
+
+  function formatDate(value: string): string {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+    }).format(new Date(value));
+  }
+
+  function handleMessagesScroll() {
+    const messagesElement = messagesRef.current;
+    if (!messagesElement) return;
+
+    const distanceFromBottom = messagesElement.scrollHeight
+      - messagesElement.scrollTop
+      - messagesElement.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 80;
+  }
 
   return (
     <aside className="workspace-card conversation-panel">
@@ -42,15 +80,32 @@ export function ChatPanel({
 
       {activeTab === "chat" ? (
         <div className="chat-layout">
-          <div className="messages">
+          <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
             {room.messages.length === 0 ? (
               <p className="muted">No messages yet.</p>
-            ) : room.messages.map((item) => (
-              <div className="message" key={item.id}>
-                <strong>{item.username}</strong>
-                <span>{item.body}</span>
-              </div>
-            ))}
+            ) : room.messages.map((item, index) => {
+              const previousMessage = room.messages[index - 1];
+              const showDateSeparator = !previousMessage
+                || dateKey(previousMessage.sentAt) !== dateKey(item.sentAt);
+              const isMine = item.userId === currentUserId;
+
+              return (
+                <div className="message-block" key={item.id}>
+                  {showDateSeparator && (
+                    <div className="message-date-separator">
+                      <span>{formatDate(item.sentAt)}</span>
+                    </div>
+                  )}
+                  <div className={isMine ? "message mine" : "message"}>
+                    <div className="message-meta">
+                      <strong>{isMine ? "You" : item.username}</strong>
+                      <time dateTime={item.sentAt}>{formatTime(item.sentAt)}</time>
+                    </div>
+                    <span>{item.body}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
           <form className="chat-form" onSubmit={onSendMessage}>
             <input

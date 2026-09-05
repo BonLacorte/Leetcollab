@@ -15,15 +15,32 @@ export type Acknowledgement<T = unknown> =
       currentRoomId?: string;
     };
 
-export const pointSchema = z.object({
+export const whiteboardPointSchema = z.object({
   x: z.number().finite(),
   y: z.number().finite(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  size: z.number().int().min(1).max(32),
-  isNewStroke: z.boolean(),
 });
 
-export type WhiteboardPoint = z.infer<typeof pointSchema>;
+export type WhiteboardPoint = z.infer<typeof whiteboardPointSchema>;
+
+export const whiteboardToolSchema = z.enum(["pen", "eraser"]);
+
+export type WhiteboardTool = z.infer<typeof whiteboardToolSchema>;
+
+export const whiteboardStrokeInputSchema = z.object({
+  tool: whiteboardToolSchema,
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable(),
+  size: z.number().int().min(1).max(48),
+  points: z.array(whiteboardPointSchema).min(1).max(2_000),
+});
+
+export type WhiteboardStrokeInput = z.infer<typeof whiteboardStrokeInputSchema>;
+
+export const whiteboardStrokeSchema = whiteboardStrokeInputSchema.extend({
+  id: z.string().uuid(),
+  authorUserId: z.string().uuid(),
+});
+
+export type WhiteboardStroke = z.infer<typeof whiteboardStrokeSchema>;
 
 export const problemSchema = z.object({
   id: z.string().uuid(),
@@ -97,8 +114,14 @@ export const roomStateSchema = z.object({
   code: z.string(),
   timer: timerSchema,
   members: z.array(roomMemberSchema),
-  messages: z.array(z.object({ id: z.string().uuid(), username: z.string(), body: z.string(), sentAt: z.string() })),
-  whiteboard: z.array(pointSchema),
+  messages: z.array(z.object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    username: z.string(),
+    body: z.string(),
+    sentAt: z.string(),
+  })),
+  whiteboard: z.array(whiteboardStrokeSchema),
 });
 
 export type RoomState = z.infer<typeof roomStateSchema>;
@@ -111,7 +134,8 @@ export const roomIdSchema = z.object({ roomId: z.string().uuid() });
 export const setProblemSchema = roomIdSchema.extend({ problemId: z.string().uuid() });
 export const codeUpdateSchema = roomIdSchema.extend({ code: z.string().max(100_000) });
 export const chatSendSchema = roomIdSchema.extend({ body: z.string().trim().min(1).max(2_000) });
-export const whiteboardDrawSchema = roomIdSchema.extend({ point: pointSchema });
+export const whiteboardStrokeAddSchema = roomIdSchema.extend({ stroke: whiteboardStrokeInputSchema });
+export const whiteboardUndoSchema = roomIdSchema;
 export const timerActionSchema = roomIdSchema;
 
 export const setMemberPermissionsSchema = roomIdSchema.extend({
@@ -134,7 +158,14 @@ export interface ClientToServerEvents {
   "room:timer:reset": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "code:update": (payload: z.infer<typeof codeUpdateSchema>) => void;
   "chat:send": (payload: z.infer<typeof chatSendSchema>, callback: (response: Acknowledgement<null>) => void) => void;
-  "whiteboard:draw": (payload: z.infer<typeof whiteboardDrawSchema>) => void;
+  "whiteboard:stroke:add": (
+    payload: z.infer<typeof whiteboardStrokeAddSchema>,
+    callback: (response: Acknowledgement<WhiteboardStroke>) => void,
+  ) => void;
+  "whiteboard:undo": (
+    payload: z.infer<typeof whiteboardUndoSchema>,
+    callback: (response: Acknowledgement<{ strokeId: string }>) => void,
+  ) => void;
   "whiteboard:clear": (payload: z.infer<typeof roomIdSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "room:current": (
   callback: (response: Acknowledgement<{ roomId: string } | null>) => void,
@@ -151,7 +182,8 @@ export interface ServerToClientEvents {
   "room:presence": (members: RoomState["members"]) => void;
   "code:updated": (code: string) => void;
   "chat:message": (message: RoomState["messages"][number]) => void;
-  "whiteboard:drew": (point: WhiteboardPoint) => void;
+  "whiteboard:stroke:added": (stroke: WhiteboardStroke) => void;
+  "whiteboard:undone": (payload: { strokeId: string }) => void;
   "whiteboard:cleared": () => void;
   "room:left": (payload: {
     roomId: string;

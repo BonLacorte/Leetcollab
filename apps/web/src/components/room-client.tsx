@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, PointerEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, PointerEvent, WheelEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
   Problem,
@@ -10,6 +10,9 @@ import type {
   RoomTimer,
   SolvedWithMember,
   WhiteboardPoint,
+  WhiteboardStroke,
+  WhiteboardStrokeInput,
+  WhiteboardTool,
 } from "@leetcollab/contracts";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./auth-provider";
@@ -20,17 +23,42 @@ import { type DifficultyFilter, ProblemPanel } from "./room/problem-panel";
 import { RoomHeader } from "./room/room-header";
 import { WorkspacePanel } from "./room/workspace-panel";
 
-function paint(context: CanvasRenderingContext2D, point: WhiteboardPoint, previous: WhiteboardPoint | null) {
-  context.strokeStyle = point.color;
-  context.lineWidth = point.size;
+type WhiteboardMode = WhiteboardTool | "pan";
+type WhiteboardViewport = { scale: number; offsetX: number; offsetY: number };
+type CanvasPositionEvent = {
+  currentTarget: HTMLCanvasElement;
+  clientX: number;
+  clientY: number;
+};
+
+const initialWhiteboardViewport: WhiteboardViewport = { scale: 1, offsetX: 0, offsetY: 0 };
+
+function paintStroke(
+  context: CanvasRenderingContext2D,
+  stroke: WhiteboardStroke | WhiteboardStrokeInput,
+) {
+  if (stroke.points.length === 0) return;
+
+  context.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
+  context.strokeStyle = stroke.color ?? "#000000";
+  context.fillStyle = stroke.color ?? "#000000";
+  context.lineWidth = stroke.size;
   context.lineCap = "round";
-  if (point.isNewStroke || !previous) {
-    context.beginPath();
-    context.moveTo(point.x, point.y);
-  } else {
-    context.lineTo(point.x, point.y);
-    context.stroke();
+  context.lineJoin = "round";
+
+  const [firstPoint, ...remainingPoints] = stroke.points;
+  context.beginPath();
+
+  if (remainingPoints.length === 0) {
+    context.arc(firstPoint.x, firstPoint.y, stroke.size / 2, 0, Math.PI * 2);
+    if (stroke.tool === "eraser") context.fill();
+    else context.fill();
+    return;
   }
+
+  context.moveTo(firstPoint.x, firstPoint.y);
+  remainingPoints.forEach((point) => context.lineTo(point.x, point.y));
+  context.stroke();
 }
 
 type ProblemRow = {
@@ -117,17 +145,37 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [progress, setProgress] = useState<ProblemProgress | null>(null);
   const [progressStatus, setProgressStatus] = useState("");
   const [isProgressLoading, setIsProgressLoading] = useState(false);
+  const [whiteboardMode, setWhiteboardMode] = useState<WhiteboardMode>("pen");
+  const [whiteboardColor, setWhiteboardColor] = useState("#4f46e5");
+  const [whiteboardSize, setWhiteboardSize] = useState(3);
+  const [whiteboardViewport, setWhiteboardViewport] = useState<WhiteboardViewport>(initialWhiteboardViewport);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const lastPoint = useRef<WhiteboardPoint | null>(null);
+  const activeStrokeRef = useRef<WhiteboardStrokeInput | null>(null);
+  const panPointRef = useRef<WhiteboardPoint | null>(null);
 
-  function redraw(points: WhiteboardPoint[]) {
+  function redrawWhiteboard(
+    strokes = room?.whiteboard ?? [],
+    previewStroke = activeStrokeRef.current,
+  ) {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
+
+    context.save();
+    context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
-    let previous: WhiteboardPoint | null = null;
-    points.forEach((point) => { paint(context, point, previous); previous = point; });
-    lastPoint.current = previous;
+    context.setTransform(
+      whiteboardViewport.scale,
+      0,
+      0,
+      whiteboardViewport.scale,
+      whiteboardViewport.offsetX,
+      whiteboardViewport.offsetY,
+    );
+    strokes.forEach((stroke) => paintStroke(context, stroke));
+    if (previewStroke) paintStroke(context, previewStroke);
+    context.globalCompositeOperation = "source-over";
+    context.restore();
   }
 
   useEffect(() => {
@@ -160,6 +208,12 @@ export function RoomClient({ roomId }: { roomId: string }) {
     const intervalId = window.setInterval(() => setTimerNow(Date.now()), 1000);
     return () => window.clearInterval(intervalId);
   }, [room?.timer.status, room?.timer.startedAt]);
+
+  useEffect(() => {
+    redrawWhiteboard();
+  // `redrawWhiteboard` intentionally reads the current canvas and active preview stroke.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room?.whiteboard, whiteboardViewport]);
 
   useEffect(() => {
     const userId = session?.user.id;
@@ -214,19 +268,23 @@ export function RoomClient({ roomId }: { roomId: string }) {
       setRoom(state);
       setCode(state.code);
       setStatus("");
-      redraw(state.whiteboard);
     };
     const handleCode = (nextCode: string) => setCode(nextCode);
     const handleMessage = (nextMessage: RoomState["messages"][number]) => setRoom((current) => current ? { ...current, messages: [...current.messages, nextMessage] } : current);
-    const handleDraw = (point: WhiteboardPoint) => {
-      const context = canvasRef.current?.getContext("2d");
-      if (context) paint(context, point, lastPoint.current);
-      lastPoint.current = point;
+    const handleStrokeAdded = (stroke: WhiteboardStroke) => {
+      setRoom((current) => {
+        if (!current || current.whiteboard.some((item) => item.id === stroke.id)) return current;
+        return { ...current, whiteboard: [...current.whiteboard, stroke] };
+      });
+    };
+    const handleUndo = (payload: { strokeId: string }) => {
+      setRoom((current) => current
+        ? { ...current, whiteboard: current.whiteboard.filter((stroke) => stroke.id !== payload.strokeId) }
+        : current);
     };
     const handleClear = () => {
-      const canvas = canvasRef.current;
-      canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-      lastPoint.current = null;
+      activeStrokeRef.current = null;
+      setRoom((current) => current ? { ...current, whiteboard: [] } : current);
     };
     const handleRoomLeft = (payload: { roomId: string }) => {
       if (payload.roomId === roomId) router.replace("/");
@@ -260,7 +318,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
     socket.on("room:state", handleState);
     socket.on("code:updated", handleCode);
     socket.on("chat:message", handleMessage);
-    socket.on("whiteboard:drew", handleDraw);
+    socket.on("whiteboard:stroke:added", handleStrokeAdded);
+    socket.on("whiteboard:undone", handleUndo);
     socket.on("whiteboard:cleared", handleClear);
     socket.on("room:left", handleRoomLeft);
     socket.on("connect", joinRoom);
@@ -271,14 +330,13 @@ export function RoomClient({ roomId }: { roomId: string }) {
       socket.off("room:state", handleState);
       socket.off("code:updated", handleCode);
       socket.off("chat:message", handleMessage);
-      socket.off("whiteboard:drew", handleDraw);
+      socket.off("whiteboard:stroke:added", handleStrokeAdded);
+      socket.off("whiteboard:undone", handleUndo);
       socket.off("whiteboard:cleared", handleClear);
       socket.off("room:left", handleRoomLeft);
       socket.off("connect", joinRoom);
       socket.off("disconnect", handleDisconnect);
     };
-  // `redraw` intentionally reads the current canvas and does not need to resubscribe.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, router, socket]);
 
   const isHost = room?.hostUserId === session?.user.id;
@@ -324,25 +382,125 @@ export function RoomClient({ roomId }: { roomId: string }) {
     });
   }
 
-  function pointFromEvent(event: PointerEvent<HTMLCanvasElement>, isNewStroke: boolean): WhiteboardPoint {
+  function screenPointFromEvent(event: CanvasPositionEvent): WhiteboardPoint {
     const canvas = event.currentTarget;
     const rect = canvas.getBoundingClientRect();
     return {
       x: Math.round((event.clientX - rect.left) * (canvas.width / rect.width)),
       y: Math.round((event.clientY - rect.top) * (canvas.height / rect.height)),
-      color: "#4f46e5",
-      size: 3,
-      isNewStroke,
     };
   }
 
-  function draw(event: PointerEvent<HTMLCanvasElement>, isNewStroke: boolean) {
+  function worldPointFromEvent(event: CanvasPositionEvent): WhiteboardPoint {
+    const point = screenPointFromEvent(event);
+    return {
+      x: (point.x - whiteboardViewport.offsetX) / whiteboardViewport.scale,
+      y: (point.y - whiteboardViewport.offsetY) / whiteboardViewport.scale,
+    };
+  }
+
+  function updateWhiteboardZoom(factor: number, centerPoint?: WhiteboardPoint) {
+    const canvas = canvasRef.current;
+    const center = centerPoint ?? (canvas
+      ? { x: canvas.width / 2, y: canvas.height / 2 }
+      : { x: 400, y: 180 });
+
+    setWhiteboardViewport((current) => {
+      const nextScale = Math.min(4, Math.max(0.35, current.scale * factor));
+      const worldX = (center.x - current.offsetX) / current.scale;
+      const worldY = (center.y - current.offsetY) / current.scale;
+
+      return {
+        scale: nextScale,
+        offsetX: center.x - worldX * nextScale,
+        offsetY: center.y - worldY * nextScale,
+      };
+    });
+  }
+
+  function beginWhiteboardInteraction(event: PointerEvent<HTMLCanvasElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    if (whiteboardMode === "pan") {
+      panPointRef.current = screenPointFromEvent(event);
+      setDrawing(true);
+      return;
+    }
+
+    if (!canDrawWhiteboard) return;
+    const point = worldPointFromEvent(event);
+    activeStrokeRef.current = {
+      tool: whiteboardMode,
+      color: whiteboardMode === "pen" ? whiteboardColor : null,
+      size: whiteboardSize,
+      points: [point],
+    };
+    setDrawing(true);
+    redrawWhiteboard(room?.whiteboard ?? [], activeStrokeRef.current);
+  }
+
+  function updateWhiteboardInteraction(event: PointerEvent<HTMLCanvasElement>) {
+    if (!drawing) return;
+
+    if (whiteboardMode === "pan") {
+      const previousPoint = panPointRef.current;
+      const nextPoint = screenPointFromEvent(event);
+      if (!previousPoint) return;
+
+      setWhiteboardViewport((current) => ({
+        ...current,
+        offsetX: current.offsetX + nextPoint.x - previousPoint.x,
+        offsetY: current.offsetY + nextPoint.y - previousPoint.y,
+      }));
+      panPointRef.current = nextPoint;
+      return;
+    }
+
+    const activeStroke = activeStrokeRef.current;
+    if (!activeStroke || !canDrawWhiteboard) return;
+    const point = worldPointFromEvent(event);
+    const previousPoint = activeStroke.points.at(-1);
+    if (
+      previousPoint
+      && Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y) < 1
+    ) {
+      return;
+    }
+
+    if (activeStroke.points.length < 2_000) {
+      activeStroke.points.push(point);
+      redrawWhiteboard(room?.whiteboard ?? [], activeStroke);
+    }
+  }
+
+  function endWhiteboardInteraction() {
+    if (!drawing) return;
+    setDrawing(false);
+    panPointRef.current = null;
+
+    const activeStroke = activeStrokeRef.current;
+    activeStrokeRef.current = null;
+
+    if (!activeStroke) return;
+    redrawWhiteboard(room?.whiteboard ?? [], null);
+
     if (!socket || !canDrawWhiteboard) return;
-    const point = pointFromEvent(event, isNewStroke);
-    const context = canvasRef.current?.getContext("2d");
-    if (context) paint(context, point, lastPoint.current);
-    lastPoint.current = point;
-    socket.emit("whiteboard:draw", { roomId, point });
+    socket.emit("whiteboard:stroke:add", { roomId, stroke: activeStroke }, (response) => {
+      if (!response.ok) setStatus(response.error);
+    });
+  }
+
+  function undoWhiteboard() {
+    if (!socket || !canDrawWhiteboard) return;
+    socket.emit("whiteboard:undo", { roomId }, (response) => {
+      if (!response.ok) setStatus(response.error);
+    });
+  }
+
+  function handleWhiteboardWheel(event: WheelEvent<HTMLCanvasElement>) {
+    event.preventDefault();
+    const center = screenPointFromEvent(event);
+    updateWhiteboardZoom(event.deltaY < 0 ? 1.12 : 0.88, center);
   }
 
   function clearWhiteboard() {
@@ -571,19 +729,29 @@ export function RoomClient({ roomId }: { roomId: string }) {
           canvasRef={canvasRef}
           canDrawWhiteboard={canDrawWhiteboard}
           drawing={drawing}
+          whiteboardMode={whiteboardMode}
+          whiteboardColor={whiteboardColor}
+          whiteboardSize={whiteboardSize}
+          whiteboardScale={whiteboardViewport.scale}
           onClearWhiteboard={clearWhiteboard}
-          onDrawingChange={setDrawing}
-          onDraw={draw}
-          onStrokeEnd={() => {
-            setDrawing(false);
-            lastPoint.current = null;
-          }}
+          onUndoWhiteboard={undoWhiteboard}
+          onModeChange={setWhiteboardMode}
+          onColorChange={setWhiteboardColor}
+          onSizeChange={setWhiteboardSize}
+          onPointerDown={beginWhiteboardInteraction}
+          onPointerMove={updateWhiteboardInteraction}
+          onPointerEnd={endWhiteboardInteraction}
+          onWheel={handleWhiteboardWheel}
+          onZoomIn={() => updateWhiteboardZoom(1.2)}
+          onZoomOut={() => updateWhiteboardZoom(0.8)}
+          onResetView={() => setWhiteboardViewport(initialWhiteboardViewport)}
         />
       </section>
       <section className="conversation-region">
         <ChatPanel
           room={room}
           message={message}
+          currentUserId={session?.user.id ?? ""}
           canChat={canChat}
           isHost={isHost}
           onMessageChange={setMessage}
