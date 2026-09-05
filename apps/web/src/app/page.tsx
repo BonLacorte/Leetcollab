@@ -141,7 +141,7 @@ export default function HomePage() {
       <p className="muted">Leave your current room before creating or joining another one.</p>
       <button onClick={() => router.push(`/room/${currentRoomId}`)}>Return to current room</button>
     </section> : <>
-      <section className="card stack" style={{ marginBottom: "1rem" }}><h2>Join an existing room</h2><form className="row" onSubmit={joinRoom}><input value={roomId} onChange={(event) => setRoomId(event.target.value)} placeholder="Room UUID" required /><button>Join room</button></form></section>
+      <section className="card stack" style={{ marginBottom: "1rem" }}><h2>Join an existing room</h2><form className="row" onSubmit={joinRoom}><input value={roomId} onChange={(event) => setRoomId(event.target.value.toLowerCase())} placeholder="8-character room ID" required /><button>Join room</button></form></section>
       <section><h2>Start a new room</h2><div className="grid">{problems.map((problem) => <button className="card problem" key={problem.id} onClick={() => createRoom(problem.id)}><strong>{problem.title}</strong><span className="muted">{problem.difficulty} · {problem.slug}</span><span>Start collaboration room</span></button>)}</div></section>
     </>}
     {status && <p className="error">{status}</p>}

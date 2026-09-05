@@ -39,6 +39,13 @@ export function RoomHeader({
       </div>
       <nav className="problem-nav" aria-label="Problem navigation">
         <button className="pill-button" disabled={!canChangeProblem} onClick={onPreviousProblem} type="button">Prev</button>
+        <button className="pill-button" disabled={!canChangeProblem} onClick={onNextProblem} type="button">Next</button>
+      </nav>
+      <div className="room-header-center">
+        <div className="room-header-meta">
+          <strong>Room ID: {roomId}</strong>
+          <span>Host: {hostName}</span>
+        </div>
         <div className="timer-cluster">
           <div className="timer-pill" aria-label="Timer">{timerDisplay}</div>
           <div className="timer-actions" aria-label="Timer controls">
@@ -48,11 +55,6 @@ export function RoomHeader({
             <button className="mini-button" disabled={!canControlTimer} onClick={onResetTimer} type="button">Reset</button>
           </div>
         </div>
-        <button className="pill-button" disabled={!canChangeProblem} onClick={onNextProblem} type="button">Next</button>
-      </nav>
-      <div className="room-header-meta">
-        <strong>Room ID: {roomId}</strong>
-        <span className="hide-small">Host: {hostName}</span>
       </div>
       <div className="room-header-actions">
         <button className="secondary" onClick={onLeave} type="button">Leave Room</button>

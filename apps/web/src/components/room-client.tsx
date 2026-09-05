@@ -25,6 +25,7 @@ import { WorkspacePanel } from "./room/workspace-panel";
 
 type WhiteboardMode = WhiteboardTool | "pan";
 type WhiteboardViewport = { scale: number; offsetX: number; offsetY: number };
+type WhiteboardCursor = { visible: boolean; x: number; y: number; diameter: number };
 type CanvasPositionEvent = {
   currentTarget: HTMLCanvasElement;
   clientX: number;
@@ -149,6 +150,12 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [whiteboardColor, setWhiteboardColor] = useState("#4f46e5");
   const [whiteboardSize, setWhiteboardSize] = useState(3);
   const [whiteboardViewport, setWhiteboardViewport] = useState<WhiteboardViewport>(initialWhiteboardViewport);
+  const [whiteboardCursor, setWhiteboardCursor] = useState<WhiteboardCursor>({
+    visible: false,
+    x: 0,
+    y: 0,
+    diameter: whiteboardSize,
+  });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const activeStrokeRef = useRef<WhiteboardStrokeInput | null>(null);
   const panPointRef = useRef<WhiteboardPoint | null>(null);
@@ -391,12 +398,38 @@ export function RoomClient({ roomId }: { roomId: string }) {
     };
   }
 
+  function cssPointFromEvent(event: CanvasPositionEvent): WhiteboardPoint {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  }
+
   function worldPointFromEvent(event: CanvasPositionEvent): WhiteboardPoint {
     const point = screenPointFromEvent(event);
     return {
       x: (point.x - whiteboardViewport.offsetX) / whiteboardViewport.scale,
       y: (point.y - whiteboardViewport.offsetY) / whiteboardViewport.scale,
     };
+  }
+
+  function updateWhiteboardCursor(event: CanvasPositionEvent) {
+    if (whiteboardMode === "pan" || !canDrawWhiteboard) {
+      setWhiteboardCursor((current) => current.visible ? { ...current, visible: false } : current);
+      return;
+    }
+
+    const point = cssPointFromEvent(event);
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const cssScale = rect.width / canvas.width;
+    setWhiteboardCursor({
+      visible: true,
+      x: point.x,
+      y: point.y,
+      diameter: Math.max(6, whiteboardSize * whiteboardViewport.scale * cssScale),
+    });
   }
 
   function updateWhiteboardZoom(factor: number, centerPoint?: WhiteboardPoint) {
@@ -420,6 +453,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
 
   function beginWhiteboardInteraction(event: PointerEvent<HTMLCanvasElement>) {
     event.currentTarget.setPointerCapture(event.pointerId);
+    updateWhiteboardCursor(event);
 
     if (whiteboardMode === "pan") {
       panPointRef.current = screenPointFromEvent(event);
@@ -440,6 +474,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   }
 
   function updateWhiteboardInteraction(event: PointerEvent<HTMLCanvasElement>) {
+    updateWhiteboardCursor(event);
     if (!drawing) return;
 
     if (whiteboardMode === "pan") {
@@ -488,6 +523,11 @@ export function RoomClient({ roomId }: { roomId: string }) {
     socket.emit("whiteboard:stroke:add", { roomId, stroke: activeStroke }, (response) => {
       if (!response.ok) setStatus(response.error);
     });
+  }
+
+  function leaveWhiteboardCanvas() {
+    setWhiteboardCursor((current) => ({ ...current, visible: false }));
+    if (drawing) endWhiteboardInteraction();
   }
 
   function undoWhiteboard() {
@@ -665,16 +705,31 @@ export function RoomClient({ roomId }: { roomId: string }) {
     const member = room.members.find((item) => item.userId === memberUserId);
     if (!member) return;
 
+    const previousRoom = room;
+    const nextPermissions = {
+      ...member.permissions,
+      [capability]: enabled,
+    };
+
+    setRoom((current) => current
+      ? {
+        ...current,
+        members: current.members.map((item) => item.userId === memberUserId
+          ? { ...item, permissions: nextPermissions }
+          : item),
+      }
+      : current);
+
     socket.emit("room:member:permissions:set", {
       roomId,
       memberUserId,
-      permissions: {
-        ...member.permissions,
-        [capability]: enabled,
-      },
+      permissions: nextPermissions,
     }, (response) => {
       if (response.ok) setRoom(response.data);
-      else setStatus(response.error);
+      else {
+        setStatus(response.error);
+        setRoom(previousRoom);
+      }
     });
   }
 
@@ -733,6 +788,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
           whiteboardColor={whiteboardColor}
           whiteboardSize={whiteboardSize}
           whiteboardScale={whiteboardViewport.scale}
+          whiteboardCursor={whiteboardCursor}
           onClearWhiteboard={clearWhiteboard}
           onUndoWhiteboard={undoWhiteboard}
           onModeChange={setWhiteboardMode}
@@ -741,6 +797,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
           onPointerDown={beginWhiteboardInteraction}
           onPointerMove={updateWhiteboardInteraction}
           onPointerEnd={endWhiteboardInteraction}
+          onPointerLeave={leaveWhiteboardCanvas}
           onWheel={handleWhiteboardWheel}
           onZoomIn={() => updateWhiteboardZoom(1.2)}
           onZoomOut={() => updateWhiteboardZoom(0.8)}

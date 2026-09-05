@@ -1,6 +1,6 @@
 import "dotenv/config";
 import http from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -51,6 +51,7 @@ const rooms = new Map<string, Room>();
 const activeRoomByUser = new Map<string, string>();
 const socketIdsByUser = new Map<string, Set<string>>();
 const maxWhiteboardStrokes = 2_000;
+const roomIdAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 const server = http.createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(server, {
   cors: { origin, methods: ["GET", "POST"], credentials: true },
@@ -157,6 +158,32 @@ function broadcastState(room: Room): void {
   io.to(room.roomId).emit("room:presence", room.members);
 }
 
+function generateRoomId(): string {
+  const bytes = randomBytes(8);
+  return Array.from(bytes, (byte) => roomIdAlphabet[byte % roomIdAlphabet.length]).join("");
+}
+
+function generateUniqueRoomId(): string {
+  for (let attempts = 0; attempts < 10; attempts += 1) {
+    const roomId = generateRoomId();
+    if (!rooms.has(roomId)) return roomId;
+  }
+
+  throw new Error("Could not generate a unique room ID.");
+}
+
+function appendSystemMessage(room: Room, body: string): void {
+  const message: RoomState["messages"][number] = {
+    type: "system",
+    id: randomUUID(),
+    body,
+    sentAt: new Date().toISOString(),
+  };
+
+  room.messages.push(message);
+  io.to(room.roomId).emit("chat:message", message);
+}
+
 function requirePermission(
   room: Room,
   userId: string,
@@ -223,7 +250,7 @@ io.on("connection", (socket) => {
     const problem = await getProblem(parsed.data.problemId);
     if (!problem) return callback(failure("Problem not found."));
 
-    const roomId = parsed.data.roomId ?? randomUUID();
+    const roomId = parsed.data.roomId ?? generateUniqueRoomId();
     if (rooms.has(roomId)) return callback(failure("Room already exists."));
 
     const room: Room = {
@@ -289,6 +316,9 @@ io.on("connection", (socket) => {
     if (!parsed.success) return callback(failure("Invalid room ID."));
     const room = roomForMember(parsed.data.roomId, socket.data.userId);
     if (!room) return callback(failure("You are not in this room."));
+    const leavingUsername = room.members.find((member) => member.userId === socket.data.userId)?.username
+      ?? socket.data.username;
+    const wasHost = room.hostUserId === socket.data.userId;
 
     room.members = room.members.filter((member) => member.userId !== socket.data.userId);
 
@@ -305,7 +335,11 @@ io.on("connection", (socket) => {
 
     if (room.members.length === 0) rooms.delete(room.roomId);
     else {
-      if (room.hostUserId === socket.data.userId) room.hostUserId = room.members[0].userId;
+      appendSystemMessage(room, `${leavingUsername} left the room.`);
+      if (wasHost) {
+        room.hostUserId = room.members[0].userId;
+        appendSystemMessage(room, `${room.members[0].username} is now the host.`);
+      }
       broadcastState(room);
     }
     callback(success(null));
@@ -405,6 +439,7 @@ io.on("connection", (socket) => {
     );
     if (denied) return callback(denied);
     const message = {
+      type: "user" as const,
       id: randomUUID(),
       userId: socket.data.userId,
       username: socket.data.username,

@@ -34,8 +34,10 @@ export function ChatPanel({
   onMemberPermissionChange,
 }: ChatPanelProps) {
   const [activeTab, setActiveTab] = useState<"chat" | "members">("chat");
+  const [settingsMemberId, setSettingsMemberId] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
+  const settingsMember = room.members.find((member) => member.userId === settingsMemberId);
 
   useEffect(() => {
     const messagesElement = messagesRef.current;
@@ -87,7 +89,8 @@ export function ChatPanel({
               const previousMessage = room.messages[index - 1];
               const showDateSeparator = !previousMessage
                 || dateKey(previousMessage.sentAt) !== dateKey(item.sentAt);
-              const isMine = item.userId === currentUserId;
+              const isSystem = item.type === "system";
+              const isMine = item.type === "user" && item.userId === currentUserId;
 
               return (
                 <div className="message-block" key={item.id}>
@@ -96,13 +99,20 @@ export function ChatPanel({
                       <span>{formatDate(item.sentAt)}</span>
                     </div>
                   )}
-                  <div className={isMine ? "message mine" : "message"}>
-                    <div className="message-meta">
-                      <strong>{isMine ? "You" : item.username}</strong>
+                  {isSystem ? (
+                    <div className="message system-message">
+                      <span>{item.body}</span>
                       <time dateTime={item.sentAt}>{formatTime(item.sentAt)}</time>
                     </div>
-                    <span>{item.body}</span>
-                  </div>
+                  ) : (
+                    <div className={isMine ? "message mine" : "message"}>
+                      <div className="message-meta">
+                        <strong>{isMine ? "You" : item.username}</strong>
+                        <time dateTime={item.sentAt}>{formatTime(item.sentAt)}</time>
+                      </div>
+                      <span>{item.body}</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -124,24 +134,62 @@ export function ChatPanel({
             <div className="member-card" key={member.userId}>
               <div className="member-row">
                 <strong>{member.username}</strong>
-                {member.userId === room.hostUserId && <span className="host-badge">Host</span>}
-              </div>
-              {isHost && member.userId !== room.hostUserId && (
-                <div className="permission-grid">
-                  {permissionOptions.map(([capability, label]) => (
-                    <label key={capability} className="permission-toggle">
-                      <span>{label}</span>
-                      <input
-                        type="checkbox"
-                        checked={member.permissions[capability]}
-                        onChange={(event) => onMemberPermissionChange(member.userId, capability, event.target.checked)}
-                      />
-                    </label>
-                  ))}
+                <div className="member-actions">
+                  {member.userId === room.hostUserId && <span className="host-badge">Host</span>}
+                  {isHost && member.userId !== room.hostUserId && (
+                    <button
+                      aria-label={`Manage ${member.username} permissions`}
+                      className="member-settings-button"
+                      onClick={() => setSettingsMemberId(member.userId)}
+                      title={`Manage ${member.username} permissions`}
+                      type="button"
+                    >
+                      ⋯
+                    </button>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           ))}
+        </div>
+      )}
+      {isHost && settingsMember && settingsMember.userId !== room.hostUserId && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSettingsMemberId(null)}>
+          <div
+            aria-labelledby="member-permissions-title"
+            aria-modal="true"
+            className="member-permissions-modal"
+            role="dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Member settings</p>
+                <h2 id="member-permissions-title">{settingsMember.username}</h2>
+              </div>
+              <button
+                aria-label="Close member settings"
+                className="member-settings-button"
+                onClick={() => setSettingsMemberId(null)}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <div className="permission-grid">
+              {permissionOptions.map(([capability, label]) => (
+                <label key={capability} className="permission-toggle">
+                  <span>{label}</span>
+                  <input
+                    type="checkbox"
+                    checked={settingsMember.permissions[capability]}
+                    onChange={(event) => onMemberPermissionChange(settingsMember.userId, capability, event.target.checked)}
+                  />
+                </label>
+              ))}
+            </div>
+            <button className="secondary" onClick={() => setSettingsMemberId(null)} type="button">Done</button>
+          </div>
         </div>
       )}
     </aside>

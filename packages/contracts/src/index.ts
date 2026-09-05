@@ -42,6 +42,8 @@ export const whiteboardStrokeSchema = whiteboardStrokeInputSchema.extend({
 
 export type WhiteboardStroke = z.infer<typeof whiteboardStrokeSchema>;
 
+export const roomCodeSchema = z.string().regex(/^[a-z0-9]{8}$/);
+
 export const problemSchema = z.object({
   id: z.string().uuid(),
   slug: z.string(),
@@ -107,30 +109,47 @@ export const roomMemberSchema = z.object({
 
 export type RoomMember = z.infer<typeof roomMemberSchema>;
 
+export const roomUserMessageSchema = z.object({
+  type: z.literal("user"),
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  username: z.string(),
+  body: z.string(),
+  sentAt: z.string(),
+});
+
+export const roomSystemMessageSchema = z.object({
+  type: z.literal("system"),
+  id: z.string().uuid(),
+  body: z.string(),
+  sentAt: z.string(),
+});
+
+export const roomMessageSchema = z.discriminatedUnion("type", [
+  roomUserMessageSchema,
+  roomSystemMessageSchema,
+]);
+
+export type RoomMessage = z.infer<typeof roomMessageSchema>;
+
 export const roomStateSchema = z.object({
-  roomId: z.string().uuid(),
+  roomId: roomCodeSchema,
   hostUserId: z.string().uuid(),
   problem: problemSchema.nullable(),
   code: z.string(),
   timer: timerSchema,
   members: z.array(roomMemberSchema),
-  messages: z.array(z.object({
-    id: z.string().uuid(),
-    userId: z.string().uuid(),
-    username: z.string(),
-    body: z.string(),
-    sentAt: z.string(),
-  })),
+  messages: z.array(roomMessageSchema),
   whiteboard: z.array(whiteboardStrokeSchema),
 });
 
 export type RoomState = z.infer<typeof roomStateSchema>;
 
 export const createRoomSchema = z.object({
-  roomId: z.string().uuid().optional(),
+  roomId: roomCodeSchema.optional(),
   problemId: z.string().uuid(),
 });
-export const roomIdSchema = z.object({ roomId: z.string().uuid() });
+export const roomIdSchema = z.object({ roomId: roomCodeSchema });
 export const setProblemSchema = roomIdSchema.extend({ problemId: z.string().uuid() });
 export const codeUpdateSchema = roomIdSchema.extend({ code: z.string().max(100_000) });
 export const chatSendSchema = roomIdSchema.extend({ body: z.string().trim().min(1).max(2_000) });

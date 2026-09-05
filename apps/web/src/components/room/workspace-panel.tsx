@@ -3,6 +3,7 @@ import type { Problem, WhiteboardTool } from "@leetcollab/contracts";
 
 type WorkspaceTab = "testcases" | "result" | "whiteboard";
 type WhiteboardMode = WhiteboardTool | "pan";
+type WhiteboardCursor = { visible: boolean; x: number; y: number; diameter: number };
 
 type WorkspacePanelProps = {
   problem: Problem | null;
@@ -13,6 +14,7 @@ type WorkspacePanelProps = {
   whiteboardColor: string;
   whiteboardSize: number;
   whiteboardScale: number;
+  whiteboardCursor: WhiteboardCursor;
   onClearWhiteboard: () => void;
   onUndoWhiteboard: () => void;
   onModeChange: (mode: WhiteboardMode) => void;
@@ -21,6 +23,7 @@ type WorkspacePanelProps = {
   onPointerDown: (event: PointerEvent<HTMLCanvasElement>) => void;
   onPointerMove: (event: PointerEvent<HTMLCanvasElement>) => void;
   onPointerEnd: () => void;
+  onPointerLeave: () => void;
   onWheel: (event: WheelEvent<HTMLCanvasElement>) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -36,6 +39,7 @@ export function WorkspacePanel({
   whiteboardColor,
   whiteboardSize,
   whiteboardScale,
+  whiteboardCursor,
   onClearWhiteboard,
   onUndoWhiteboard,
   onModeChange,
@@ -44,6 +48,7 @@ export function WorkspacePanel({
   onPointerDown,
   onPointerMove,
   onPointerEnd,
+  onPointerLeave,
   onWheel,
   onZoomIn,
   onZoomOut,
@@ -88,27 +93,33 @@ export function WorkspacePanel({
           <div className="whiteboard-toolbar">
             <div className="whiteboard-tool-group" aria-label="Whiteboard drawing tools">
               <button
+                aria-label="Pen"
+                title="Pen"
                 className={whiteboardMode === "pen" ? "secondary active-tool" : "secondary"}
                 disabled={!canDrawWhiteboard}
                 onClick={() => onModeChange("pen")}
                 type="button"
               >
-                Pen
+                <ToolIcon icon="pen" />
               </button>
               <button
+                aria-label="Eraser"
+                title="Eraser"
                 className={whiteboardMode === "eraser" ? "secondary active-tool" : "secondary"}
                 disabled={!canDrawWhiteboard}
                 onClick={() => onModeChange("eraser")}
                 type="button"
               >
-                Eraser
+                <ToolIcon icon="eraser" />
               </button>
               <button
+                aria-label="Pan"
+                title="Pan"
                 className={whiteboardMode === "pan" ? "secondary active-tool" : "secondary"}
                 onClick={() => onModeChange("pan")}
                 type="button"
               >
-                Pan
+                <ToolIcon icon="pan" />
               </button>
             </div>
             <label className="whiteboard-control">
@@ -134,8 +145,12 @@ export function WorkspacePanel({
               />
             </label>
             <div className="whiteboard-tool-group" aria-label="Whiteboard history controls">
-              <button className="secondary" disabled={!canDrawWhiteboard} onClick={onUndoWhiteboard} type="button">Undo</button>
-              <button className="secondary" disabled={!canDrawWhiteboard} onClick={onClearWhiteboard} type="button">Clear</button>
+              <button aria-label="Undo" title="Undo" className="secondary" disabled={!canDrawWhiteboard} onClick={onUndoWhiteboard} type="button">
+                <ToolIcon icon="undo" />
+              </button>
+              <button aria-label="Clear" title="Clear" className="secondary" disabled={!canDrawWhiteboard} onClick={onClearWhiteboard} type="button">
+                <ToolIcon icon="clear" />
+              </button>
             </div>
             <div className="whiteboard-tool-group" aria-label="Whiteboard viewport controls">
               <button className="secondary" onClick={onZoomOut} type="button">−</button>
@@ -144,24 +159,41 @@ export function WorkspacePanel({
               <button className="secondary" onClick={onResetView} type="button">Fit</button>
             </div>
           </div>
-          <canvas
-            ref={canvasRef}
-            width={800}
-            height={360}
-            style={{
-              cursor: whiteboardMode === "pan"
-                ? drawing ? "grabbing" : "grab"
-                : canDrawWhiteboard ? "crosshair" : "not-allowed",
-            }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerEnd}
-            onPointerCancel={onPointerEnd}
-            onPointerLeave={() => {
-              if (drawing) onPointerEnd();
-            }}
-            onWheel={onWheel}
-          />
+          <div className="whiteboard-canvas-wrap">
+            <canvas
+              ref={canvasRef}
+              width={800}
+              height={360}
+              className={whiteboardMode === "pan" ? "whiteboard-pan-cursor" : "whiteboard-draw-cursor"}
+              style={{
+                cursor: whiteboardMode === "pan"
+                  ? drawing ? "grabbing" : "grab"
+                  : canDrawWhiteboard ? "none" : "not-allowed",
+              }}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerEnd}
+              onPointerCancel={onPointerEnd}
+              onPointerLeave={onPointerLeave}
+              onWheel={onWheel}
+            />
+            {whiteboardCursor.visible && whiteboardMode !== "pan" && (
+              <div
+                aria-hidden="true"
+                className={whiteboardMode === "eraser"
+                  ? "whiteboard-cursor-preview eraser"
+                  : "whiteboard-cursor-preview pen"}
+                style={{
+                  left: whiteboardCursor.x,
+                  top: whiteboardCursor.y,
+                  width: whiteboardCursor.diameter,
+                  height: whiteboardCursor.diameter,
+                  borderColor: whiteboardMode === "pen" ? whiteboardColor : undefined,
+                  backgroundColor: whiteboardMode === "pen" ? `${whiteboardColor}22` : undefined,
+                }}
+              />
+            )}
+          </div>
           {!canDrawWhiteboard && (
             <p className="muted whiteboard-permission-note">
               You can view the whiteboard, but drawing controls are disabled by room permissions.
@@ -170,5 +202,58 @@ export function WorkspacePanel({
         </div>
       )}
     </section>
+  );
+}
+
+function ToolIcon({ icon }: { icon: "pen" | "eraser" | "pan" | "undo" | "clear" }) {
+  if (icon === "pen") {
+    return (
+      <svg aria-hidden="true" className="tool-icon" viewBox="0 0 24 24">
+        <path d="M4 20l4.5-1 10.8-10.8a2.1 2.1 0 0 0 0-3L18.8 4.7a2.1 2.1 0 0 0-3 0L5 15.5 4 20z" />
+        <path d="M14.5 6l3.5 3.5" />
+      </svg>
+    );
+  }
+
+  if (icon === "eraser") {
+    return (
+      <svg aria-hidden="true" className="tool-icon" viewBox="0 0 24 24">
+        <path d="M4 15.5 12.5 7a2.4 2.4 0 0 1 3.4 0l2.1 2.1a2.4 2.4 0 0 1 0 3.4L11.5 19H7.6L4 15.5z" />
+        <path d="M10 9.5 15.5 15" />
+        <path d="M12 19h8" />
+      </svg>
+    );
+  }
+
+  if (icon === "pan") {
+    return (
+      <svg aria-hidden="true" className="tool-icon" viewBox="0 0 24 24">
+        <path d="M12 3v18" />
+        <path d="M3 12h18" />
+        <path d="m8 7 4-4 4 4" />
+        <path d="m8 17 4 4 4-4" />
+        <path d="m7 8-4 4 4 4" />
+        <path d="m17 8 4 4-4 4" />
+      </svg>
+    );
+  }
+
+  if (icon === "undo") {
+    return (
+      <svg aria-hidden="true" className="tool-icon" viewBox="0 0 24 24">
+        <path d="M9 7H4v5" />
+        <path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" className="tool-icon" viewBox="0 0 24 24">
+      <path d="M5 7h14" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M8 7l1 13h6l1-13" />
+      <path d="M9 7l1-3h4l1 3" />
+    </svg>
   );
 }
