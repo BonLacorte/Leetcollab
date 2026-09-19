@@ -1,6 +1,6 @@
 import "dotenv/config";
 import http from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -11,13 +11,20 @@ import {
   codeUpdateSchema,
   createRoomSchema,
   roomIdSchema,
+  setMemberPermissionsSchema,
   setProblemSchema,
-  whiteboardDrawSchema,
+  timerActionSchema,
+  whiteboardStrokeAddSchema,
+  whiteboardUndoSchema,
+  type RoomErrorCode,
+  type RoomPermissions,
   type Acknowledgement,
   type ClientToServerEvents,
   type Problem,
+  type RoomTimer,
   type RoomState,
   type ServerToClientEvents,
+  type WhiteboardStroke,
 } from "@leetcollab/contracts";
 
 const port = Number(process.env.PORT ?? 3001);
@@ -39,14 +46,107 @@ app.get("/health", (_request, response) => response.json({ ok: true }));
 
 type SocketData = { userId: string; username: string };
 type Room = RoomState;
+type ProblemExample = Problem["examples"][number];
 const rooms = new Map<string, Room>();
+const activeRoomByUser = new Map<string, string>();
+const socketIdsByUser = new Map<string, Set<string>>();
+const maxWhiteboardStrokes = 2_000;
+const roomIdAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 const server = http.createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(server, {
   cors: { origin, methods: ["GET", "POST"], credentials: true },
 });
 
 const success = <T>(data: T): Acknowledgement<T> => ({ ok: true, data });
-const failure = <T = never>(error: string): Acknowledgement<T> => ({ ok: false, error });
+const failure = <T = never>(
+  error: string,
+  code?: RoomErrorCode,
+  currentRoomId?: string,
+): Acknowledgement<T> => ({
+  ok: false,
+  error,
+  ...(code ? { code } : {}),
+  ...(currentRoomId ? { currentRoomId } : {}),
+});
+
+function activeRoomForUser(userId: string): Room | null {
+  const roomId = activeRoomByUser.get(userId);
+  if (!roomId) return null;
+
+  const room = rooms.get(roomId);
+  if (!room) {
+    activeRoomByUser.delete(userId);
+    return null;
+  }
+
+  return room;
+}
+
+function memberCan(
+  room: Room,
+  userId: string,
+  capability: keyof RoomPermissions,
+): boolean {
+  if (room.hostUserId === userId) return true;
+
+  return room.members.find((member) => member.userId === userId)
+    ?.permissions[capability] === true;
+}
+
+function registerSocket(userId: string, socketId: string): void {
+  const socketIds = socketIdsByUser.get(userId) ?? new Set<string>();
+  socketIds.add(socketId);
+  socketIdsByUser.set(userId, socketIds);
+}
+
+function unregisterSocket(userId: string, socketId: string): void {
+  const socketIds = socketIdsByUser.get(userId);
+  if (!socketIds) return;
+
+  socketIds.delete(socketId);
+  if (socketIds.size === 0) socketIdsByUser.delete(userId);
+}
+
+
+function hostPermissions(): RoomPermissions {
+  return {
+    canEditCode: true,
+    canDrawWhiteboard: true,
+    canChangeProblem: true,
+    canChat: true,
+  };
+}
+
+function participantPermissions(): RoomPermissions {
+  return {
+    canEditCode: true,
+    canDrawWhiteboard: true,
+    canChangeProblem: false,
+    canChat: true,
+  };
+}
+
+function initialTimer(): RoomTimer {
+  return {
+    status: "idle",
+    elapsedMs: 0,
+    startedAt: null,
+  };
+}
+
+function elapsedTimerMs(timer: RoomTimer, now = Date.now()): number {
+  if (timer.status !== "running" || !timer.startedAt) return timer.elapsedMs;
+  return timer.elapsedMs + Math.max(0, now - Date.parse(timer.startedAt));
+}
+
+function hostOnlyTimerAction(
+  room: Room,
+  userId: string,
+): Acknowledgement<never> | null {
+  return room.hostUserId === userId
+    ? null
+    : failure("Only the room host can control the timer.", "FORBIDDEN");
+}
 
 function roomForMember(roomId: string, userId: string): Room | undefined {
   const room = rooms.get(roomId);
@@ -58,14 +158,60 @@ function broadcastState(room: Room): void {
   io.to(room.roomId).emit("room:presence", room.members);
 }
 
+function generateRoomId(): string {
+  const bytes = randomBytes(8);
+  return Array.from(bytes, (byte) => roomIdAlphabet[byte % roomIdAlphabet.length]).join("");
+}
+
+function generateUniqueRoomId(): string {
+  for (let attempts = 0; attempts < 10; attempts += 1) {
+    const roomId = generateRoomId();
+    if (!rooms.has(roomId)) return roomId;
+  }
+
+  throw new Error("Could not generate a unique room ID.");
+}
+
+function appendSystemMessage(room: Room, body: string): void {
+  const message: RoomState["messages"][number] = {
+    type: "system",
+    id: randomUUID(),
+    body,
+    sentAt: new Date().toISOString(),
+  };
+
+  room.messages.push(message);
+  io.to(room.roomId).emit("chat:message", message);
+}
+
+function requirePermission(
+  room: Room,
+  userId: string,
+  capability: keyof RoomPermissions,
+  message: string,
+): Acknowledgement<never> | null {
+  return memberCan(room, userId, capability) ? null : failure(message, "FORBIDDEN");
+}
+
 async function getProblem(problemId: string): Promise<Problem | null> {
   const { data, error } = await supabase
     .from("problems")
-    .select("id, slug, title, difficulty")
+    .select("id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints")
     .eq("id", problemId)
     .maybeSingle();
   if (error || !data) return null;
-  return { id: data.id, slug: data.slug, title: data.title, difficulty: data.difficulty } as Problem;
+  return {
+    id: data.id,
+    slug: data.slug,
+    title: data.title,
+    category: data.category,
+    difficulty: data.difficulty,
+    sortOrder: data.sort_order,
+    statement: data.statement,
+    starterCode: data.starter_code,
+    examples: Array.isArray(data.examples) ? data.examples as ProblemExample[] : [],
+    constraints: Array.isArray(data.constraints) ? data.constraints as string[] : [],
+  } as Problem;
 }
 
 io.use(async (socket, next) => {
@@ -83,25 +229,47 @@ io.use(async (socket, next) => {
 });
 
 io.on("connection", (socket) => {
+  registerSocket(socket.data.userId, socket.id);
+
+  socket.on("disconnect", () => {
+    unregisterSocket(socket.data.userId, socket.id);
+  });
+
   socket.on("room:create", async (payload, callback) => {
+    const currentRoom = activeRoomForUser(socket.data.userId);
+    if (currentRoom) {
+      return callback(failure(
+        "Leave your current room before creating another one.",
+        "ALREADY_IN_ROOM",
+        currentRoom.roomId,
+      ));
+    }
+
     const parsed = createRoomSchema.safeParse(payload);
     if (!parsed.success) return callback(failure("Invalid room creation request."));
     const problem = await getProblem(parsed.data.problemId);
     if (!problem) return callback(failure("Problem not found."));
 
-    const roomId = parsed.data.roomId ?? randomUUID();
+    const roomId = parsed.data.roomId ?? generateUniqueRoomId();
     if (rooms.has(roomId)) return callback(failure("Room already exists."));
 
     const room: Room = {
       roomId,
       hostUserId: socket.data.userId,
       problem,
-      code: "",
-      members: [{ userId: socket.data.userId, username: socket.data.username }],
+      code: problem.starterCode,
+      timer: initialTimer(),
+      members: [{
+        userId: socket.data.userId,
+        username: socket.data.username,
+        permissions: hostPermissions(),
+      }],
       messages: [],
       whiteboard: [],
     };
     rooms.set(roomId, room);
+    activeRoomByUser.set(socket.data.userId, roomId);
+
     socket.join(roomId);
     callback(success(room));
   });
@@ -109,15 +277,38 @@ io.on("connection", (socket) => {
   socket.on("room:join", (payload, callback) => {
     const parsed = roomIdSchema.safeParse(payload);
     if (!parsed.success) return callback(failure("Invalid room ID."));
+
+    const currentRoom = activeRoomForUser(socket.data.userId);
+    if (currentRoom && currentRoom.roomId !== parsed.data.roomId) {
+      return callback(failure(
+        "Leave your current room before joining another one.",
+        "ALREADY_IN_ROOM",
+        currentRoom.roomId,
+      ));
+    }
+
     const room = rooms.get(parsed.data.roomId);
-    if (!room) return callback(failure("Room not found or has ended."));
+    if (!room) {
+      return callback(failure("Room not found or has ended.", "ROOM_NOT_FOUND"));
+    }
 
     if (!room.members.some((member) => member.userId === socket.data.userId)) {
-      room.members.push({ userId: socket.data.userId, username: socket.data.username });
+      room.members.push({
+        userId: socket.data.userId,
+        username: socket.data.username,
+        permissions: participantPermissions(),
+      });
     }
+
+    activeRoomByUser.set(socket.data.userId, room.roomId);
     socket.join(room.roomId);
     broadcastState(room);
     callback(success(room));
+  });
+
+  socket.on("room:current", (callback) => {
+    const room = activeRoomForUser(socket.data.userId);
+    callback(success(room ? { roomId: room.roomId } : null));
   });
 
   socket.on("room:leave", (payload, callback) => {
@@ -125,12 +316,30 @@ io.on("connection", (socket) => {
     if (!parsed.success) return callback(failure("Invalid room ID."));
     const room = roomForMember(parsed.data.roomId, socket.data.userId);
     if (!room) return callback(failure("You are not in this room."));
+    const leavingUsername = room.members.find((member) => member.userId === socket.data.userId)?.username
+      ?? socket.data.username;
+    const wasHost = room.hostUserId === socket.data.userId;
 
     room.members = room.members.filter((member) => member.userId !== socket.data.userId);
-    socket.leave(room.roomId);
+
+    activeRoomByUser.delete(socket.data.userId);
+
+    for (const socketId of socketIdsByUser.get(socket.data.userId) ?? []) {
+      const userSocket = io.sockets.sockets.get(socketId);
+      userSocket?.leave(room.roomId);
+      userSocket?.emit("room:left", {
+        roomId: room.roomId,
+        reason: "left",
+      });
+    }
+
     if (room.members.length === 0) rooms.delete(room.roomId);
     else {
-      if (room.hostUserId === socket.data.userId) room.hostUserId = room.members[0].userId;
+      appendSystemMessage(room, `${leavingUsername} left the room.`);
+      if (wasHost) {
+        room.hostUserId = room.members[0].userId;
+        appendSystemMessage(room, `${room.members[0].username} is now the host.`);
+      }
       broadcastState(room);
     }
     callback(success(null));
@@ -141,11 +350,68 @@ io.on("connection", (socket) => {
     if (!parsed.success) return callback(failure("Invalid problem request."));
     const room = roomForMember(parsed.data.roomId, socket.data.userId);
     if (!room) return callback(failure("You are not in this room."));
-    if (room.hostUserId !== socket.data.userId) return callback(failure("Only the room host can change the problem."));
+    const denied = requirePermission(
+      room,
+      socket.data.userId,
+      "canChangeProblem",
+      "You do not have permission to change the problem.",
+    );
+    if (denied) return callback(denied);
     const problem = await getProblem(parsed.data.problemId);
     if (!problem) return callback(failure("Problem not found."));
     room.problem = problem;
-    room.code = "";
+    room.code = problem.starterCode;
+    broadcastState(room);
+    callback(success(room));
+  });
+
+  socket.on("room:timer:start", (payload, callback) => {
+    const parsed = timerActionSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid timer request."));
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = hostOnlyTimerAction(room, socket.data.userId);
+    if (denied) return callback(denied);
+
+    if (room.timer.status !== "running") {
+      room.timer = {
+        status: "running",
+        elapsedMs: elapsedTimerMs(room.timer),
+        startedAt: new Date().toISOString(),
+      };
+    }
+
+    broadcastState(room);
+    callback(success(room));
+  });
+
+  socket.on("room:timer:pause", (payload, callback) => {
+    const parsed = timerActionSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid timer request."));
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = hostOnlyTimerAction(room, socket.data.userId);
+    if (denied) return callback(denied);
+
+    room.timer = {
+      status: "paused",
+      elapsedMs: elapsedTimerMs(room.timer),
+      startedAt: null,
+    };
+
+    broadcastState(room);
+    callback(success(room));
+  });
+
+  socket.on("room:timer:reset", (payload, callback) => {
+    const parsed = timerActionSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid timer request."));
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = hostOnlyTimerAction(room, socket.data.userId);
+    if (denied) return callback(denied);
+
+    room.timer = initialTimer();
     broadcastState(room);
     callback(success(room));
   });
@@ -155,6 +421,7 @@ io.on("connection", (socket) => {
     if (!parsed.success) return;
     const room = roomForMember(parsed.data.roomId, socket.data.userId);
     if (!room) return;
+    if (!memberCan(room, socket.data.userId, "canEditCode")) return;
     room.code = parsed.data.code;
     socket.to(room.roomId).emit("code:updated", room.code);
   });
@@ -164,19 +431,75 @@ io.on("connection", (socket) => {
     if (!parsed.success) return callback(failure("Invalid message."));
     const room = roomForMember(parsed.data.roomId, socket.data.userId);
     if (!room) return callback(failure("You are not in this room."));
-    const message = { id: randomUUID(), username: socket.data.username, body: parsed.data.body, sentAt: new Date().toISOString() };
+    const denied = requirePermission(
+      room,
+      socket.data.userId,
+      "canChat",
+      "You do not have permission to send chat messages.",
+    );
+    if (denied) return callback(denied);
+    const message = {
+      type: "user" as const,
+      id: randomUUID(),
+      userId: socket.data.userId,
+      username: socket.data.username,
+      body: parsed.data.body,
+      sentAt: new Date().toISOString(),
+    };
     room.messages.push(message);
     io.to(room.roomId).emit("chat:message", message);
     callback(success(null));
   });
 
-  socket.on("whiteboard:draw", (payload) => {
-    const parsed = whiteboardDrawSchema.safeParse(payload);
-    if (!parsed.success) return;
+  socket.on("whiteboard:stroke:add", (payload, callback) => {
+    const parsed = whiteboardStrokeAddSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid whiteboard stroke."));
     const room = roomForMember(parsed.data.roomId, socket.data.userId);
-    if (!room) return;
-    room.whiteboard.push(parsed.data.point);
-    socket.to(room.roomId).emit("whiteboard:drew", parsed.data.point);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = requirePermission(
+      room,
+      socket.data.userId,
+      "canDrawWhiteboard",
+      "You do not have permission to draw on the whiteboard.",
+    );
+    if (denied) return callback(denied);
+    if (room.whiteboard.length >= maxWhiteboardStrokes) {
+      return callback(failure("Whiteboard stroke limit reached."));
+    }
+
+    const stroke: WhiteboardStroke = {
+      ...parsed.data.stroke,
+      id: randomUUID(),
+      authorUserId: socket.data.userId,
+    };
+
+    room.whiteboard.push(stroke);
+    io.to(room.roomId).emit("whiteboard:stroke:added", stroke);
+    callback(success(stroke));
+  });
+
+  socket.on("whiteboard:undo", (payload, callback) => {
+    const parsed = whiteboardUndoSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid room ID."));
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    const denied = requirePermission(
+      room,
+      socket.data.userId,
+      "canDrawWhiteboard",
+      "You do not have permission to undo whiteboard strokes.",
+    );
+    if (denied) return callback(denied);
+
+    const strokeIndex = room.hostUserId === socket.data.userId
+      ? room.whiteboard.length - 1
+      : room.whiteboard.map((stroke) => stroke.authorUserId).lastIndexOf(socket.data.userId);
+
+    if (strokeIndex < 0) return callback(failure("No whiteboard stroke to undo."));
+
+    const [removedStroke] = room.whiteboard.splice(strokeIndex, 1);
+    io.to(room.roomId).emit("whiteboard:undone", { strokeId: removedStroke.id });
+    callback(success({ strokeId: removedStroke.id }));
   });
 
   socket.on("whiteboard:clear", (payload, callback) => {
@@ -184,9 +507,37 @@ io.on("connection", (socket) => {
     if (!parsed.success) return callback(failure("Invalid room ID."));
     const room = roomForMember(parsed.data.roomId, socket.data.userId);
     if (!room) return callback(failure("You are not in this room."));
+    const denied = requirePermission(
+      room,
+      socket.data.userId,
+      "canDrawWhiteboard",
+      "You do not have permission to clear the whiteboard.",
+    );
+    if (denied) return callback(denied);
     room.whiteboard = [];
     io.to(room.roomId).emit("whiteboard:cleared");
     callback(success(null));
+  });
+
+  socket.on("room:member:permissions:set", (payload, callback) => {
+    const parsed = setMemberPermissionsSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid permissions request."));
+
+    const room = roomForMember(parsed.data.roomId, socket.data.userId);
+    if (!room) return callback(failure("You are not in this room."));
+    if (room.hostUserId !== socket.data.userId) {
+      return callback(failure("Only the room host can manage permissions.", "FORBIDDEN"));
+    }
+
+    const member = room.members.find((item) => item.userId === parsed.data.memberUserId);
+    if (!member) return callback(failure("Member not found."));
+    if (member.userId === room.hostUserId) {
+      return callback(failure("Host permissions cannot be changed.", "FORBIDDEN"));
+    }
+
+    member.permissions = parsed.data.permissions;
+    broadcastState(room);
+    callback(success(room));
   });
 });
 
