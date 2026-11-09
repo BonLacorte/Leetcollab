@@ -1,4 +1,10 @@
 import type { Problem } from "@leetcollab/contracts";
+import { Search, Shuffle } from "lucide-react";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card } from "../ui/card";
+import { Input } from "../ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
 export type DifficultyFilter = "All" | Problem["difficulty"];
 
@@ -34,15 +40,18 @@ export function ProblemPanel({
   const pickerProblems = problem && !filteredProblems.some((item) => item.id === problem.id)
     ? [problem, ...filteredProblems]
     : filteredProblems;
+  const difficultyVariant = problem?.difficulty === "Easy"
+    ? "success"
+    : problem?.difficulty === "Medium" ? "warning" : "destructive";
 
   return (
-    <article className="workspace-card problem-panel">
+    <Card className="workspace-card problem-panel">
       <div className="panel-heading">
         <div>
           <p className="eyebrow">Problem</p>
           <h1>{problem?.title ?? "Collaboration room"}</h1>
         </div>
-        {problem && <span className={`difficulty difficulty-${problem.difficulty.toLowerCase()}`}>{problem.difficulty}</span>}
+        {problem && <Badge variant={difficultyVariant}>{problem.difficulty}</Badge>}
       </div>
       <div className="problem-meta">
         <span>{problem?.slug ?? "room"}</span>
@@ -52,45 +61,53 @@ export function ProblemPanel({
       <div className="problem-controls" aria-label="Problem picker">
         <div className="filter-row" role="group" aria-label="Difficulty filter">
           {difficultyFilters.map((difficulty) => (
-            <button
-              className={difficultyFilter === difficulty ? "filter-chip active" : "filter-chip"}
+            <Button
               disabled={!canChangeProblem}
               key={difficulty}
               onClick={() => onDifficultyFilterChange(difficulty)}
-              type="button"
+              size="sm"
+              variant={difficultyFilter === difficulty ? "default" : "outline"}
             >
               {difficulty}
-            </button>
+            </Button>
           ))}
         </div>
         <div className="problem-picker-grid">
-          <input
-            disabled={!canChangeProblem}
-            onChange={(event) => onSearchTermChange(event.target.value)}
-            placeholder="Search problems..."
-            type="search"
-            value={searchTerm}
-          />
-          <select
+          <div className="search-field">
+            <Search aria-hidden="true" />
+            <Input
+              aria-label="Search problems"
+              disabled={!canChangeProblem}
+              onChange={(event) => onSearchTermChange(event.target.value)}
+              placeholder="Search problems..."
+              type="search"
+              value={searchTerm}
+            />
+          </div>
+          <Select
             disabled={!canChangeProblem || pickerProblems.length === 0}
-            onChange={(event) => onSelectProblem(event.target.value)}
+            onValueChange={onSelectProblem}
             value={problem?.id ?? ""}
           >
-            {pickerProblems.length === 0 && <option value="">No matching problems</option>}
-            {pickerProblems.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.sortOrder}. {item.title} ({item.difficulty})
-              </option>
-            ))}
-          </select>
-          <button
-            className="secondary"
+            <SelectTrigger aria-label="Selected problem">
+              <SelectValue placeholder="No matching problems" />
+            </SelectTrigger>
+            <SelectContent>
+              {pickerProblems.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.sortOrder}. {item.title} ({item.difficulty})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
             disabled={!canChangeProblem || problems.length === 0}
             onClick={onRandomProblem}
-            type="button"
+            variant="secondary"
           >
+            <Shuffle aria-hidden="true" />
             Random
-          </button>
+          </Button>
         </div>
         {!canChangeProblem && <p className="muted">You can view the selected problem, but changing it requires permission.</p>}
       </div>
@@ -101,11 +118,11 @@ export function ProblemPanel({
             <h2>Examples</h2>
             <div className="example-list">
               {problem.examples.map((example) => (
-                <div className="example-card" key={example.title}>
+                <Card className="example-card" key={example.title}>
                   <strong>{example.title}</strong>
                   <pre>Input: {example.input}{'\n'}Output: {example.output}</pre>
                   {example.explanation && <p>{example.explanation}</p>}
-                </div>
+                </Card>
               ))}
             </div>
           </>}
@@ -117,6 +134,6 @@ export function ProblemPanel({
           </>}
         </> : <p>Waiting for a problem to be selected.</p>}
       </div>
-    </article>
+    </Card>
   );
 }

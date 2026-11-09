@@ -1,4 +1,7 @@
+import { ChevronLeft, ChevronRight, Code2, LogOut, Moon, Pause, Play, RotateCcw, Sun } from "lucide-react";
 import { useTheme } from "../theme-provider";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 
 type RoomHeaderProps = {
   roomId: string;
@@ -34,12 +37,18 @@ export function RoomHeader({
   return (
     <header className="room-header">
       <div className="brand">
-        <span className="brand-mark" aria-hidden="true" />
+        <span className="brand-icon"><Code2 aria-hidden="true" /></span>
         <span>LeetCollab</span>
       </div>
       <nav className="problem-nav" aria-label="Problem navigation">
-        <button className="pill-button" disabled={!canChangeProblem} onClick={onPreviousProblem} type="button">Prev</button>
-        <button className="pill-button" disabled={!canChangeProblem} onClick={onNextProblem} type="button">Next</button>
+        <Button disabled={!canChangeProblem} onClick={onPreviousProblem} size="sm" variant="outline">
+          <ChevronLeft aria-hidden="true" />
+          Prev
+        </Button>
+        <Button disabled={!canChangeProblem} onClick={onNextProblem} size="sm" variant="outline">
+          Next
+          <ChevronRight aria-hidden="true" />
+        </Button>
       </nav>
       <div className="room-header-center">
         <div className="room-header-meta">
@@ -47,20 +56,36 @@ export function RoomHeader({
           <span>Host: {hostName}</span>
         </div>
         <div className="timer-cluster">
-          <div className="timer-pill" aria-label="Timer">{timerDisplay}</div>
+          <Badge aria-label="Timer" className="timer-pill" variant="secondary">{timerDisplay}</Badge>
           <div className="timer-actions" aria-label="Timer controls">
             {timerStatus === "running"
-              ? <button className="mini-button" disabled={!canControlTimer} onClick={onPauseTimer} type="button">Pause</button>
-              : <button className="mini-button" disabled={!canControlTimer} onClick={onStartTimer} type="button">Start</button>}
-            <button className="mini-button" disabled={!canControlTimer} onClick={onResetTimer} type="button">Reset</button>
+              ? (
+                <Button disabled={!canControlTimer} onClick={onPauseTimer} size="sm" variant="secondary">
+                  <Pause aria-hidden="true" />
+                  Pause
+                </Button>
+              ) : (
+                <Button disabled={!canControlTimer} onClick={onStartTimer} size="sm" variant="secondary">
+                  <Play aria-hidden="true" />
+                  Start
+                </Button>
+              )}
+            <Button disabled={!canControlTimer} onClick={onResetTimer} size="sm" variant="ghost">
+              <RotateCcw aria-hidden="true" />
+              Reset
+            </Button>
           </div>
         </div>
       </div>
       <div className="room-header-actions">
-        <button className="secondary" onClick={onLeave} type="button">Leave Room</button>
-        <button className="icon-button" onClick={toggleTheme} type="button" aria-label="Toggle theme">
+        <Button onClick={onLeave} size="sm" variant="outline">
+          <LogOut aria-hidden="true" />
+          Leave Room
+        </Button>
+        <Button aria-label="Toggle theme" onClick={toggleTheme} size="sm" variant="ghost">
+          {theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
           {theme === "dark" ? "Light" : "Dark"}
-        </button>
+        </Button>
       </div>
     </header>
   );

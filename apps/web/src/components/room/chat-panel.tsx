@@ -1,5 +1,21 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { RoomPermissions, RoomState } from "@leetcollab/contracts";
+import { Send, Settings2 } from "lucide-react";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card } from "../ui/card";
+import { Checkbox } from "../ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 
 const permissionOptions: Array<[keyof RoomPermissions, string]> = [
   ["canEditCode", "Edit code"],
@@ -74,14 +90,18 @@ export function ChatPanel({
   }
 
   return (
-    <aside className="workspace-card conversation-panel">
-      <div className="tabs" role="tablist" aria-label="Conversation">
-        <button className={activeTab === "chat" ? "active" : ""} onClick={() => setActiveTab("chat")} type="button">Chat</button>
-        <button className={activeTab === "members" ? "active" : ""} onClick={() => setActiveTab("members")} type="button">Members</button>
-      </div>
+    <Card className="workspace-card conversation-panel">
+      <Tabs
+        className="conversation-tabs"
+        onValueChange={(value) => setActiveTab(value as "chat" | "members")}
+        value={activeTab}
+      >
+        <TabsList aria-label="Conversation">
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="members">Members</TabsTrigger>
+        </TabsList>
 
-      {activeTab === "chat" ? (
-        <div className="chat-layout">
+        <TabsContent className="chat-layout" value="chat">
           <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
             {room.messages.length === 0 ? (
               <p className="muted">No messages yet.</p>
@@ -118,80 +138,78 @@ export function ChatPanel({
             })}
           </div>
           <form className="chat-form" onSubmit={onSendMessage}>
-            <input
+            <Input
+              aria-label="Chat message"
               value={message}
               disabled={!canChat}
               onChange={(event) => onMessageChange(event.target.value)}
               placeholder={canChat ? "Type a message..." : "Chat permission disabled"}
               maxLength={2000}
             />
-            <button disabled={!canChat} type="submit">Send</button>
+            <Button aria-label="Send message" disabled={!canChat} type="submit">
+              <Send aria-hidden="true" />
+              Send
+            </Button>
           </form>
-        </div>
-      ) : (
-        <div className="member-list">
+        </TabsContent>
+
+        <TabsContent className="member-list" value="members">
           {room.members.map((member) => (
-            <div className="member-card" key={member.userId}>
+            <Card className="member-card" key={member.userId}>
               <div className="member-row">
                 <strong>{member.username}</strong>
                 <div className="member-actions">
-                  {member.userId === room.hostUserId && <span className="host-badge">Host</span>}
+                  {member.userId === room.hostUserId && <Badge variant="secondary">Host</Badge>}
                   {isHost && member.userId !== room.hostUserId && (
-                    <button
+                    <Button
                       aria-label={`Manage ${member.username} permissions`}
-                      className="member-settings-button"
                       onClick={() => setSettingsMemberId(member.userId)}
+                      size="icon"
                       title={`Manage ${member.username} permissions`}
-                      type="button"
+                      variant="ghost"
                     >
-                      ⋯
-                    </button>
+                      <Settings2 aria-hidden="true" />
+                    </Button>
                   )}
                 </div>
               </div>
-            </div>
+            </Card>
           ))}
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
+
       {isHost && settingsMember && settingsMember.userId !== room.hostUserId && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSettingsMemberId(null)}>
-          <div
-            aria-labelledby="member-permissions-title"
-            aria-modal="true"
-            className="member-permissions-modal"
-            role="dialog"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-heading">
-              <div>
-                <p className="eyebrow">Member settings</p>
-                <h2 id="member-permissions-title">{settingsMember.username}</h2>
-              </div>
-              <button
-                aria-label="Close member settings"
-                className="member-settings-button"
-                onClick={() => setSettingsMemberId(null)}
-                type="button"
-              >
-                ×
-              </button>
-            </div>
+        <Dialog open onOpenChange={(open) => { if (!open) setSettingsMemberId(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <p className="eyebrow">Member settings</p>
+              <DialogTitle>{settingsMember.username}</DialogTitle>
+              <DialogDescription className="sr-only">
+                Member settings for {settingsMember.username}
+              </DialogDescription>
+            </DialogHeader>
             <div className="permission-grid">
               {permissionOptions.map(([capability, label]) => (
-                <label key={capability} className="permission-toggle">
-                  <span>{label}</span>
-                  <input
-                    type="checkbox"
+                <div key={capability} className="permission-toggle">
+                  <Label htmlFor={`permission-${settingsMember.userId}-${capability}`}>{label}</Label>
+                  <Checkbox
+                    id={`permission-${settingsMember.userId}-${capability}`}
                     checked={settingsMember.permissions[capability]}
-                    onChange={(event) => onMemberPermissionChange(settingsMember.userId, capability, event.target.checked)}
+                    onCheckedChange={(checked) => onMemberPermissionChange(
+                      settingsMember.userId,
+                      capability,
+                      checked === true,
+                    )}
                   />
-                </label>
+                </div>
               ))}
             </div>
-            <button className="secondary" onClick={() => setSettingsMemberId(null)} type="button">Done</button>
-          </div>
-        </div>
+            <DialogFooter>
+              <Button onClick={() => setSettingsMemberId(null)} variant="secondary">Done</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
-    </aside>
+    </Card>
   );
 }

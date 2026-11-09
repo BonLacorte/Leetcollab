@@ -3,8 +3,13 @@
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { CheckCircle2, Download, Play, Save } from "lucide-react";
 import type { ProblemProgress } from "@leetcollab/contracts";
 import { useTheme } from "../theme-provider";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card } from "../ui/card";
+import { Textarea } from "../ui/textarea";
 
 type EditorPanelProps = {
   code: string;
@@ -44,14 +49,26 @@ export function EditorPanel({
   const solvedWith = progress?.solvedWith.map((member) => member.username).join(", ");
 
   return (
-    <section className="workspace-card editor-panel">
+    <Card className="workspace-card editor-panel">
       <div className="panel-heading compact">
-        <span className="language-pill">JavaScript</span>
+        <Badge variant="secondary">JavaScript</Badge>
         <div className="editor-actions">
-          <button className="secondary" disabled={isProgressLoading} onClick={onSaveDraft} type="button">Save draft</button>
-          <button className="secondary" disabled={!canEditCode || !hasDraft || isProgressLoading} onClick={onLoadDraft} type="button">Load draft</button>
-          <button className="secondary" disabled={isProgressLoading} onClick={onMarkSolved} type="button">Mark solved</button>
-          <button className="secondary" disabled type="button">Run</button>
+          <Button disabled={isProgressLoading} onClick={onSaveDraft} size="sm" variant="secondary">
+            <Save aria-hidden="true" />
+            Save draft
+          </Button>
+          <Button disabled={!canEditCode || !hasDraft || isProgressLoading} onClick={onLoadDraft} size="sm" variant="secondary">
+            <Download aria-hidden="true" />
+            Load draft
+          </Button>
+          <Button disabled={isProgressLoading} onClick={onMarkSolved} size="sm" variant="secondary">
+            <CheckCircle2 aria-hidden="true" />
+            Mark solved
+          </Button>
+          <Button disabled size="sm">
+            <Play aria-hidden="true" />
+            Run
+          </Button>
         </div>
       </div>
       <div className="code-editor">
@@ -85,12 +102,12 @@ export function EditorPanel({
         {progressStatus && <p className="success">{progressStatus}</p>}
         {!canEditCode && <p className="muted">You can view this room's code, but loading a draft into the shared editor requires edit permission.</p>}
       </div>
-      <textarea
+      <Textarea
         aria-hidden="true"
         className="sr-only"
         readOnly
         value={code}
       />
-    </section>
+    </Card>
   );
 }

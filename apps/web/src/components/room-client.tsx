@@ -22,6 +22,9 @@ import { EditorPanel } from "./room/editor-panel";
 import { type DifficultyFilter, ProblemPanel } from "./room/problem-panel";
 import { RoomHeader } from "./room/room-header";
 import { WorkspacePanel } from "./room/workspace-panel";
+import { Alert, AlertDescription } from "./ui/alert";
+import { Card } from "./ui/card";
+import { Skeleton } from "./ui/skeleton";
 
 type WhiteboardMode = WhiteboardTool | "pan";
 type WhiteboardViewport = { scale: number; offsetX: number; offsetY: number };
@@ -748,8 +751,17 @@ export function RoomClient({ roomId }: { roomId: string }) {
       onResetTimer={() => updateTimer("reset")}
       onLeave={leaveRoom}
     />
-    {status && <p className="error">{status}</p>}
-    {!room ? <div className="workspace-card loading-card">Waiting for room state...</div> : <div className="room-workspace">
+    {status && (
+      <Alert className="room-alert" variant="destructive">
+        <AlertDescription>{status}</AlertDescription>
+      </Alert>
+    )}
+    {!room ? (
+      <Card className="workspace-card loading-card">
+        <Skeleton className="room-loading-line" />
+        <span>Waiting for room state...</span>
+      </Card>
+    ) : <div className="room-workspace">
       <section className="problem-region">
         <ProblemPanel
           problem={room.problem}
