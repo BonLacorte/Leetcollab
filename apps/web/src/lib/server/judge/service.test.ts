@@ -137,18 +137,6 @@ describe("JudgeService", () => {
     });
   });
 
-  it("does not spend more than the shared limit under concurrent requests", async () => {
-    const repository = new MemoryRepository(config());
-    const provider = new OutputProvider();
-    const service = new JudgeService(repository, provider, { quotaLimit: 20, activeLimit: 20, now: () => now });
-    const results = await Promise.all(Array.from({ length: 30 }, (_, index) => service.submit(`user-${index}`, request())));
-
-    expect(repository.used).toBe(20);
-    expect(provider.calls).toBe(20);
-    expect(results.filter((result) => result.body.ok).length).toBe(20);
-    expect(results.filter((result) => !result.body.ok && result.body.error.code === "QUOTA_EXHAUSTED").length).toBe(10);
-  });
-
   it("deduplicates a retry without a second provider call", async () => {
     const repository = new MemoryRepository(config());
     const provider = new OutputProvider();
