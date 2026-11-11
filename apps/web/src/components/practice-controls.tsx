@@ -13,6 +13,7 @@ export function PracticeControls({ problemId, code }: { problemId: string; code:
 
 function SessionPracticeControls({ problemId, code, token, userId }: { problemId: string; code: string; token: string; userId: string }) {
   const mounted = useRef(false);
+  const reviewGeneration = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -34,8 +35,9 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   useEffect(() => {
     let current = true;
     void refreshStatus();
+    const generation = reviewGeneration.current;
     supabase.from("user_problem_progress").select("suggested_review_at").eq("user_id", userId).eq("problem_id", problemId).maybeSingle()
-      .then(({ data }) => { if (current) setReviewAt(data?.suggested_review_at ?? null); });
+      .then(({ data }) => { if (current && generation === reviewGeneration.current) setReviewAt(data?.suggested_review_at ?? null); });
     return () => { current = false; };
   }, [problemId, userId, refreshStatus]);
 
@@ -65,6 +67,7 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   }
 
   async function grade(value: string) {
+    reviewGeneration.current += 1;
     setBusy(true);
     try {
       const { data, error } = await supabase.rpc("record_problem_grade", { p_problem_id: problemId, p_grade: value });

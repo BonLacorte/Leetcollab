@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Problem } from "@leetcollab/contracts";
+import { nextLocalDay } from "../lib/review-day";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../components/auth-provider";
 import { GoogleSignInButton } from "../components/google-sign-in-button";
@@ -40,6 +41,11 @@ function normalizeProblem(row: ProblemRow): Problem {
 }
 
 export default function HomePage() {
+  const { session } = useAuth();
+  return <SessionHomePage key={session?.access_token ?? "signed-out"} />;
+}
+
+function SessionHomePage() {
   const router = useRouter();
   const { session, loading } = useAuth();
   const socket = useSocket();
@@ -65,15 +71,19 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!session) return;
-    supabase.from("user_problem_progress").select("problem_id").eq("user_id", session.user.id).lte("suggested_review_at", new Date().toISOString()).then(({ data, error }) => {
+    let current = true;
+    supabase.from("user_problem_progress").select("problem_id").eq("user_id", session.user.id).lt("suggested_review_at", nextLocalDay(new Date()).toISOString()).then(({ data, error }) => {
+      if (!current) return;
       if (error) setReviewError(error.message);
       else setDueIds((data ?? []).map(row => row.problem_id));
     });
     supabase.from("problems").select(problemSelect).order("sort_order")
       .then(({ data, error }) => {
+        if (!current) return;
         if (error) setStatus(error.message);
         else setProblems(((data ?? []) as ProblemRow[]).map(normalizeProblem));
       });
+    return () => { current = false; };
   }, [session]);
 
   useEffect(() => {
