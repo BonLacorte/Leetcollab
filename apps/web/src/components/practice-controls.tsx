@@ -13,6 +13,7 @@ export function PracticeControls({ problemId, code }: { problemId: string; code:
 
 function SessionPracticeControls({ problemId, code, token, userId }: { problemId: string; code: string; token: string; userId: string }) {
   const mounted = useRef(false);
+  const statusGeneration = useRef(0);
   const reviewGeneration = useRef(0);
   useEffect(() => {
     mounted.current = true;
@@ -23,12 +24,13 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   const [busy, setBusy] = useState(false);
   const [reviewAt, setReviewAt] = useState<string | null>(null);
   const refreshStatus = useCallback(async () => {
+    const generation = ++statusGeneration.current;
     try {
       const response = await fetch(`/api/judge/status?problemId=${problemId}`, { headers: { Authorization: `Bearer ${token}` } });
       const value = judgeStatusResponseSchema.parse(await response.json());
-      if (mounted.current) setQuota(value);
+      if (mounted.current && generation === statusGeneration.current) setQuota(value);
     } catch {
-      if (mounted.current) { setQuota(null); setMessage("Judge status unavailable. Refresh status to try again."); }
+      if (mounted.current && generation === statusGeneration.current) { setQuota(null); setMessage("Judge status unavailable. Refresh status to try again."); }
     }
   }, [problemId, token]);
 
@@ -42,14 +44,16 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   }, [problemId, userId, refreshStatus]);
 
   useEffect(() => {
-    if (!quota) return;
+    if (!quota || busy) return;
     const delay = new Date(quota.resetAt).getTime() - Date.now();
     const timer = setTimeout(() => { setQuota(null); void refreshStatus(); }, Math.max(1000, delay));
     return () => clearTimeout(timer);
-  }, [quota, refreshStatus]);
+  }, [quota, busy, refreshStatus]);
 
   async function run() {
     if (busy || !quota?.available) return;
+    statusGeneration.current += 1;
+    setQuota(null);
     setBusy(true);
     try {
       const response = await fetch("/api/judge/submissions", {
