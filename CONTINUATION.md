@@ -88,5 +88,8 @@ do not treat its earlier step results as validation of the latest commit.
 
 This branch contains the existing email/password app. Separate backend work,
 including Google auth and proposed Java editor integration, is not integrated.
-No Java runtime is required by the startup commands above. Earlier UX scout
-application/schema experiments were excluded from this UI migration.
+No Java runtime is required by the startup commands above. The surviving
+standalone UX prototype and design summary are preserved in
+[docs/prototypes](docs/prototypes/README.md). Earlier uncommitted scout
+application/schema experiments could not be located and are **not backed up** by
+this transfer. They were not reconstructed or imported into this UI migration.
