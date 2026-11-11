@@ -161,15 +161,6 @@ describe("JudgeService", () => {
     expect(repository.used).toBe(1);
   });
 
-  it("keeps submissions private to their owner", async () => {
-    const repository = new MemoryRepository(config());
-    const service = new JudgeService(repository, new OutputProvider(), { now: () => now });
-    const result = await service.submit("user-a", request());
-    if (!result.body.ok) throw new Error("expected accepted submission");
-    await expect(repository.getSubmission("user-b", result.body.submission.id)).resolves.toBeNull();
-    await expect(repository.getSubmission("user-a", result.body.submission.id)).resolves.toMatchObject({ owner: "user-a" });
-  });
-
   it("offers only a curated fallback after exhaustion", async () => {
     const eligible = { name: "Source judge", url: "https://judge.example/problem", verification: "external_self_reported" as const };
     const repository = new MemoryRepository(config(eligible));

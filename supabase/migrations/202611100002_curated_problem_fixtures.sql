@@ -230,10 +230,16 @@ join (
   }
 }$java$, '["true","false","true","false"]'::jsonb),
     ('checkpoint-reversal', $java$class Main {
+  static void check(int[] input) {
+    int[] original = input.clone();
+    int[] result = Solution.reverse(input);
+    if (result == input || !java.util.Arrays.equals(input, original)) throw new IllegalStateException();
+    System.out.println(java.util.Arrays.toString(result));
+  }
   public static void main(String[] args) {
-    System.out.println(java.util.Arrays.toString(Solution.reverse(new int[]{8,3,5,1})));
-    System.out.println(java.util.Arrays.toString(Solution.reverse(new int[]{})));
-    System.out.println(java.util.Arrays.toString(Solution.reverse(new int[]{7})));
+    check(new int[]{8,3,5,1});
+    check(new int[]{});
+    check(new int[]{7});
   }
 }$java$, '["[1, 5, 3, 8]","[]","[7]"]'::jsonb),
     ('first-ready-slot', $java$class Main {
@@ -317,11 +323,17 @@ join (
   }
 }$java$, '["true","false","true","true"]'::jsonb),
     ('rotate-shift-queue', $java$class Main {
+  static void check(int[] input, int k) {
+    int[] original = input.clone();
+    int[] result = Solution.rotateRight(input, k);
+    if (result == input || !java.util.Arrays.equals(input, original)) throw new IllegalStateException();
+    System.out.println(java.util.Arrays.toString(result));
+  }
   public static void main(String[] args) {
-    System.out.println(java.util.Arrays.toString(Solution.rotateRight(new int[]{1,2,3,4,5}, 7)));
-    System.out.println(java.util.Arrays.toString(Solution.rotateRight(new int[]{}, 3)));
-    System.out.println(java.util.Arrays.toString(Solution.rotateRight(new int[]{8,9}, 0)));
-    System.out.println(java.util.Arrays.toString(Solution.rotateRight(new int[]{1,2,3}, 3)));
+    check(new int[]{1,2,3,4,5}, 7);
+    check(new int[]{}, 3);
+    check(new int[]{8,9}, 0);
+    check(new int[]{1,2,3}, 3);
   }
 }$java$, '["[4, 5, 1, 2, 3]","[]","[8, 9]","[1, 2, 3]"]'::jsonb),
     ('rolling-window-maximum', $java$class Main {

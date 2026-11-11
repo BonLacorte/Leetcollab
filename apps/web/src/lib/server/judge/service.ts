@@ -106,7 +106,7 @@ export class JudgeService {
   ) {
     this.quotaLimit = Math.min(20, Math.max(1, options.quotaLimit ?? 20));
     this.activeLimit = Math.max(1, options.activeLimit ?? 4);
-    this.reservationSeconds = Math.min(120, Math.max(5, options.reservationSeconds ?? 45));
+    this.reservationSeconds = Math.min(120, Math.max(35, options.reservationSeconds ?? 45));
     this.now = options.now ?? (() => new Date());
   }
 
