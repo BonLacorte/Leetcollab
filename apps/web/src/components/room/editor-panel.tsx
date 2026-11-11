@@ -1,12 +1,14 @@
 "use client";
 
 import CodeMirror from "@uiw/react-codemirror";
-import { javascript } from "@codemirror/lang-javascript";
+import { java } from "@codemirror/lang-java";
+import { PracticeControls } from "../practice-controls";
 import { oneDark } from "@codemirror/theme-one-dark";
 import type { ProblemProgress } from "@leetcollab/contracts";
 import { useTheme } from "../theme-provider";
 
 type EditorPanelProps = {
+  problemId: string;
   code: string;
   canEditCode: boolean;
   progress: ProblemProgress | null;
@@ -18,7 +20,7 @@ type EditorPanelProps = {
   onMarkSolved: () => void;
 };
 
-const extensions = [javascript({ jsx: true, typescript: true })];
+const extensions = [java()];
 
 function formatDateTime(value: string | null): string {
   if (!value) return "Never";
@@ -29,6 +31,7 @@ function formatDateTime(value: string | null): string {
 }
 
 export function EditorPanel({
+  problemId,
   code,
   canEditCode,
   progress,
@@ -46,14 +49,15 @@ export function EditorPanel({
   return (
     <section className="workspace-card editor-panel">
       <div className="panel-heading compact">
-        <span className="language-pill">JavaScript</span>
+        <span className="language-pill">Java</span>
         <div className="editor-actions">
           <button className="secondary" disabled={isProgressLoading} onClick={onSaveDraft} type="button">Save draft</button>
           <button className="secondary" disabled={!canEditCode || !hasDraft || isProgressLoading} onClick={onLoadDraft} type="button">Load draft</button>
           <button className="secondary" disabled={isProgressLoading} onClick={onMarkSolved} type="button">Mark solved</button>
-          <button className="secondary" disabled type="button">Run</button>
+
         </div>
       </div>
+      <PracticeControls problemId={problemId} code={code} />
       <div className="code-editor">
         <CodeMirror
           basicSetup={{ lineNumbers: true, foldGutter: true }}

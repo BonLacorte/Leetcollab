@@ -49,6 +49,8 @@ export default function HomePage() {
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string>("");
   const [problems, setProblems] = useState<Problem[]>([]);
+  const [dueIds, setDueIds] = useState<string[]>([]);
+  const [reviewError, setReviewError] = useState("");
   const [roomId, setRoomId] = useState("");
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
 
@@ -63,6 +65,10 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!session) return;
+    supabase.from("user_problem_progress").select("problem_id").eq("user_id", session.user.id).lte("suggested_review_at", new Date().toISOString()).then(({ data, error }) => {
+      if (error) setReviewError(error.message);
+      else setDueIds((data ?? []).map(row => row.problem_id));
+    });
     supabase.from("problems").select(problemSelect).order("sort_order")
       .then(({ data, error }) => {
         if (error) setStatus(error.message);
@@ -147,6 +153,7 @@ export default function HomePage() {
 
   return <main>
     <header className="topbar"><div><h1>LeetCollab</h1><p className="muted">Signed in as {session.user.user_metadata.username ?? session.user.email}</p></div><button className="secondary" onClick={() => supabase.auth.signOut()}>Sign out</button></header>
+    <section className="card stack"><h2>Due today</h2><p>Suggested reviews are voluntary.</p>{reviewError ? <p className="error">{reviewError}</p> : dueIds.length ? problems.filter(problem => dueIds.includes(problem.id)).map(problem => <button key={problem.id} onClick={() => createRoom(problem.id)}>{problem.title}</button>) : <p>No reviews due.</p>}<p className="muted">Demo history (example only, not your progress): Parcel Pair · Good · suggested review in 3 days.</p></section>
     {currentRoomId ? <section className="card stack" style={{ marginBottom: "1rem" }}>
       <h2>You have an active room</h2>
       <p className="muted">Leave your current room before creating or joining another one.</p>
