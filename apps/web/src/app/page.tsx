@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Problem } from "@leetcollab/contracts";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../components/auth-provider";
+import { GoogleSignInButton } from "../components/google-sign-in-button";
 import { useSocket } from "../components/socket-provider";
 
 type Mode = "sign-in" | "sign-up";
@@ -50,6 +51,15 @@ export default function HomePage() {
   const [problems, setProblems] = useState<Problem[]>([]);
   const [roomId, setRoomId] = useState("");
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const authError = new URL(window.location.href).searchParams.get("authError");
+    if (!authError) return;
+    setStatus(authError === "oauth_denied"
+      ? "Google sign-in was cancelled."
+      : "Google sign-in could not be completed. Please try again.");
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -129,6 +139,7 @@ export default function HomePage() {
         <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" minLength={6} placeholder="Password" required />
         <button type="submit">{mode === "sign-in" ? "Sign in" : "Create account"}</button>
       </form>
+      <GoogleSignInButton />
       <button className="secondary" onClick={() => setMode(mode === "sign-in" ? "sign-up" : "sign-in")}>Switch to {mode === "sign-in" ? "sign up" : "sign in"}</button>
       {status && <p className={status.includes("created") ? "success" : "error"}>{status}</p>}
     </div></main>;

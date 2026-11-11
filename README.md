@@ -16,7 +16,7 @@ The previous checkout has a broken npm installation. Repair/reinstall Node.js if
 2. From this directory, run `pnpm install`.
 3. Run `pnpm supabase:start`; copy the printed local API URL and anonymous key.
 4. Copy `apps/web/.env.example` to `apps/web/.env.local` and `apps/realtime/.env.example` to `apps/realtime/.env`, then fill the copied Supabase values.
-5. Run `pnpm supabase:reset` to apply migrations and seed the catalogue.
+5. Run `pnpm dlx supabase migration up --local` to apply pending migrations. Never reset an existing database.
 6. Run `pnpm dev`.
 7. Open `http://localhost:3000` in two browser sessions, create accounts, create a room, and join it from the second session.
 
@@ -36,7 +36,7 @@ Local Supabase uses API port `55421`, Postgres port `55432`, and Studio port `55
 
 - Supabase stores durable user/profile, problem, progress, and submission data.
 - Socket.IO owns live-only room presence, code, chat, and whiteboard state. This is intentional for the first MVP; state is lost after a server restart or after a room ends.
-- Code execution is deliberately disabled. A future runner must be isolated from the Socket.IO service.
+- Authenticated code execution uses an external sandbox and remains disabled until provider credentials and supported resource limits are confirmed. See [backend setup](docs/backend-setup.md) for Google OAuth, API contracts, migrations and operator requirements.
 - Production deployment is deferred until the local MVP is validated: Vercel hosts `apps/web`, Render hosts `apps/realtime`, and Supabase hosts data/auth.
 
 See [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md) for the step-by-step creation record and verification status.

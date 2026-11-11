@@ -84,6 +84,114 @@ export const problemProgressSchema = z.object({
 
 export type ProblemProgress = z.infer<typeof problemProgressSchema>;
 
+export const reviewGradeSchema = z.enum(["again", "hard", "good", "easy"]);
+
+export type ReviewGrade = z.infer<typeof reviewGradeSchema>;
+
+export const judgeLanguageSchema = z.literal("java");
+
+export const judgeSubmissionRequestSchema = z.object({
+  problemId: z.string().uuid(),
+  language: judgeLanguageSchema,
+  sourceCode: z.string().min(1).max(32_768),
+  idempotencyKey: z.string().uuid(),
+});
+
+export type JudgeSubmissionRequest = z.infer<typeof judgeSubmissionRequestSchema>;
+
+export const judgeVerdictSchema = z.enum([
+  "accepted",
+  "wrong_answer",
+  "compile_error",
+  "runtime_error",
+  "time_limit",
+  "memory_limit",
+  "output_limit",
+]);
+
+export type JudgeVerdict = z.infer<typeof judgeVerdictSchema>;
+
+export const judgeQuotaSchema = z.object({
+  used: z.number().int().min(0),
+  limit: z.number().int().positive(),
+  remaining: z.number().int().min(0),
+  active: z.number().int().min(0),
+  resetAt: z.string().datetime(),
+});
+
+export type JudgeQuota = z.infer<typeof judgeQuotaSchema>;
+
+export const judgeFallbackSchema = z.object({
+  name: z.string(),
+  url: z.string().url(),
+  verification: z.literal("external_self_reported"),
+}).nullable();
+
+export type JudgeFallback = z.infer<typeof judgeFallbackSchema>;
+
+export const judgeSubmissionSchema = z.object({
+  id: z.string().uuid(),
+  problemId: z.string().uuid(),
+  language: judgeLanguageSchema,
+  verdict: judgeVerdictSchema,
+  verification: z.literal("leetcollab"),
+  testsPassed: z.number().int().min(0),
+  testsTotal: z.number().int().min(0),
+  durationMs: z.number().nonnegative().nullable(),
+  diagnostics: z.string().nullable(),
+  createdAt: z.string().datetime(),
+});
+
+export type JudgeSubmission = z.infer<typeof judgeSubmissionSchema>;
+
+export const judgeErrorCodeSchema = z.enum([
+  "UNAUTHENTICATED",
+  "INVALID_REQUEST",
+  "PROBLEM_NOT_FOUND",
+  "UNSAFE_SOURCE",
+  "BUSY",
+  "QUOTA_EXHAUSTED",
+  "JUDGE_UNAVAILABLE",
+]);
+
+export type JudgeErrorCode = z.infer<typeof judgeErrorCodeSchema>;
+
+export const judgeSuccessResponseSchema = z.object({
+  ok: z.literal(true),
+  submission: judgeSubmissionSchema,
+  quota: judgeQuotaSchema,
+});
+
+export const judgeErrorResponseSchema = z.object({
+  ok: z.literal(false),
+  error: z.object({
+    code: judgeErrorCodeSchema,
+    message: z.string(),
+  }),
+  quota: judgeQuotaSchema.optional(),
+  fallback: judgeFallbackSchema.optional(),
+});
+
+export const judgeSubmissionResponseSchema = z.discriminatedUnion("ok", [
+  judgeSuccessResponseSchema,
+  judgeErrorResponseSchema,
+]);
+
+export type JudgeSubmissionResponse = z.infer<typeof judgeSubmissionResponseSchema>;
+
+export const judgeStatusResponseSchema = z.object({
+  available: z.boolean(),
+  used: z.number().int().min(0),
+  limit: z.number().int().positive(),
+  remaining: z.number().int().min(0),
+  active: z.number().int().min(0),
+  resetAt: z.string().datetime(),
+  fallback: judgeFallbackSchema,
+  unavailableReason: z.enum(["quota_exhausted", "provider_unconfigured"]).nullable(),
+});
+
+export type JudgeStatusResponse = z.infer<typeof judgeStatusResponseSchema>;
+
 export const timerSchema = z.object({
   status: z.enum(["idle", "running", "paused"]),
   elapsedMs: z.number().int().min(0),
