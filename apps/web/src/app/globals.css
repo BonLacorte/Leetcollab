@@ -784,7 +784,7 @@ h3 {
   width: 100%;
   min-height: 100svh;
   padding: 2rem 1rem;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .auth-glow {

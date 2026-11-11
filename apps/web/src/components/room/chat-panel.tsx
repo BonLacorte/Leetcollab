@@ -52,6 +52,7 @@ export function ChatPanel({
   const [activeTab, setActiveTab] = useState<"chat" | "members">("chat");
   const [settingsMemberId, setSettingsMemberId] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const settingsMember = room.members.find((member) => member.userId === settingsMemberId);
 
@@ -163,7 +164,10 @@ export function ChatPanel({
                   {isHost && member.userId !== room.hostUserId && (
                     <Button
                       aria-label={`Manage ${member.username} permissions`}
-                      onClick={() => setSettingsMemberId(member.userId)}
+                      onClick={(event) => {
+                        settingsTriggerRef.current = event.currentTarget;
+                        setSettingsMemberId(member.userId);
+                      }}
                       size="icon"
                       title={`Manage ${member.username} permissions`}
                       variant="ghost"
@@ -180,7 +184,10 @@ export function ChatPanel({
 
       {isHost && settingsMember && settingsMember.userId !== room.hostUserId && (
         <Dialog open onOpenChange={(open) => { if (!open) setSettingsMemberId(null); }}>
-          <DialogContent>
+          <DialogContent onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            settingsTriggerRef.current?.focus();
+          }}>
             <DialogHeader>
               <p className="eyebrow">Member settings</p>
               <DialogTitle>{settingsMember.username}</DialogTitle>
