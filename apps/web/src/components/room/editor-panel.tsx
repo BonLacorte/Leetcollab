@@ -4,7 +4,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { java } from "@codemirror/lang-java";
 import { PracticeControls } from "../practice-controls";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { CheckCircle2, Download, Save } from "lucide-react";
+import { Download, Save } from "lucide-react";
 import type { ProblemProgress } from "@leetcollab/contracts";
 import { useTheme } from "../theme-provider";
 import { Badge } from "../ui/badge";
@@ -22,7 +22,6 @@ type EditorPanelProps = {
   onCodeChange: (value: string) => void;
   onSaveDraft: () => void;
   onLoadDraft: () => void;
-  onMarkSolved: () => void;
 };
 
 const extensions = [java()];
@@ -45,11 +44,9 @@ export function EditorPanel({
   onCodeChange,
   onSaveDraft,
   onLoadDraft,
-  onMarkSolved,
 }: EditorPanelProps) {
   const { theme } = useTheme();
   const hasDraft = Boolean(progress?.draftCode);
-  const solvedWith = progress?.solvedWith.map((member) => member.username).join(", ");
 
   return (
     <Card className="workspace-card editor-panel">
@@ -63,10 +60,6 @@ export function EditorPanel({
           <Button disabled={!canEditCode || !hasDraft || isProgressLoading} onClick={onLoadDraft} size="sm" variant="secondary">
             <Download aria-hidden="true" />
             Load draft
-          </Button>
-          <Button disabled={isProgressLoading} onClick={onMarkSolved} size="sm" variant="secondary">
-            <CheckCircle2 aria-hidden="true" />
-            Mark solved
           </Button>
         </div>
       </div>
@@ -88,17 +81,15 @@ export function EditorPanel({
       </div>
       <div className="editor-progress">
         <div>
-          <strong>{progress?.solvedAt ? "Solved" : progress?.lastSavedAt ? "Draft saved" : "Not saved yet"}</strong>
+          <strong>{progress?.lastSavedAt ? "Draft saved" : "Not saved yet"}</strong>
           <p className="muted">
             Last saved: {formatDateTime(progress?.lastSavedAt ?? null)}
           </p>
         </div>
-        {progress?.solvedAt && (
-          <div>
-            <strong>Solved with</strong>
-            <p className="muted">{solvedWith || "Solo"}</p>
-          </div>
-        )}
+        {progress?.solvedAt && <div>
+          <strong>Prior manual completion (unverified)</strong>
+          <p className="muted">{formatDateTime(progress.solvedAt)}. With: {progress.solvedWith.map(member => member.username).join(", ") || "Solo"}.</p>
+        </div>}
         {progressStatus && <p className="success">{progressStatus}</p>}
         {!canEditCode && <p className="muted">You can view this room's code, but loading a draft into the shared editor requires edit permission.</p>}
       </div>

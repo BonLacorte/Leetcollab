@@ -1812,20 +1812,22 @@ html[data-theme="light"] .code-editor {
   }
 
   .room-header {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     padding: 0.65rem;
+    gap: 0.5rem;
   }
 
   .room-header-center {
     justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
   }
 
   .room-header-meta {
     justify-items: start;
   }
 
-  .timer-actions,
-  .room-header .brand {
+  .timer-actions {
     display: none;
   }
 

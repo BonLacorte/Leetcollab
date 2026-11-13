@@ -86,8 +86,8 @@ export function WorkspacePanel({
         </TabsContent>
 
         <TabsContent className="empty-panel" value="result">
-          <strong>No run result yet</strong>
-          <p className="muted">Execution output will appear after a safe runner is added.</p>
+          <strong>Run or submit your solution</strong>
+          <p className="muted">Verdicts appear above the editor after Run or Submit. Execution requires the external sandbox to be configured.</p>
         </TabsContent>
 
         <TabsContent className="whiteboard-shell" value="whiteboard">

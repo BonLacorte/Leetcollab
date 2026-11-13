@@ -599,42 +599,6 @@ export function RoomClient({ roomId }: { roomId: string }) {
     setProgressStatus("Draft loaded into the shared editor.");
   }
 
-  async function markSolved() {
-    const userId = session?.user.id;
-    const problemId = room?.problem?.id;
-    if (!userId || !problemId || !room) return;
-
-    setIsProgressLoading(true);
-    setProgressStatus("");
-
-    const solvedWith = room.members.map((member) => ({
-      userId: member.userId,
-      username: member.username,
-    }));
-
-    const { data, error } = await supabase
-      .from("user_problem_progress")
-      .upsert({
-        user_id: userId,
-        problem_id: problemId,
-        solved_at: new Date().toISOString(),
-        solved_code: code,
-        solved_with: solvedWith,
-      }, { onConflict: "user_id,problem_id" })
-      .select(progressSelect)
-      .single();
-
-    setIsProgressLoading(false);
-
-    if (error) {
-      setStatus(error.message);
-      return;
-    }
-
-    setProgress(normalizeProgress(data as ProgressRow));
-    setProgressStatus("Marked solved.");
-  }
-
   function selectProblem(problemId: string) {
     if (!socket || !canChangeProblem) {
       setStatus("You do not have permission to change the problem.");
@@ -788,7 +752,6 @@ export function RoomClient({ roomId }: { roomId: string }) {
           onCodeChange={updateCode}
           onSaveDraft={saveDraft}
           onLoadDraft={loadDraft}
-          onMarkSolved={markSolved}
         />
       </section>
       <section className="workspace-region">
