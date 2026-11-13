@@ -1,9 +1,10 @@
 "use client";
 
 import CodeMirror from "@uiw/react-codemirror";
-import { javascript } from "@codemirror/lang-javascript";
+import { java } from "@codemirror/lang-java";
+import { PracticeControls } from "../practice-controls";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { CheckCircle2, Download, Play, Save } from "lucide-react";
+import { CheckCircle2, Download, Save } from "lucide-react";
 import type { ProblemProgress } from "@leetcollab/contracts";
 import { useTheme } from "../theme-provider";
 import { Badge } from "../ui/badge";
@@ -12,6 +13,7 @@ import { Card } from "../ui/card";
 import { Textarea } from "../ui/textarea";
 
 type EditorPanelProps = {
+  problemId: string | null;
   code: string;
   canEditCode: boolean;
   progress: ProblemProgress | null;
@@ -23,7 +25,7 @@ type EditorPanelProps = {
   onMarkSolved: () => void;
 };
 
-const extensions = [javascript({ jsx: true, typescript: true })];
+const extensions = [java()];
 
 function formatDateTime(value: string | null): string {
   if (!value) return "Never";
@@ -34,6 +36,7 @@ function formatDateTime(value: string | null): string {
 }
 
 export function EditorPanel({
+  problemId,
   code,
   canEditCode,
   progress,
@@ -51,7 +54,7 @@ export function EditorPanel({
   return (
     <Card className="workspace-card editor-panel">
       <div className="panel-heading compact">
-        <Badge variant="secondary">JavaScript</Badge>
+        <Badge variant="secondary">Java</Badge>
         <div className="editor-actions">
           <Button disabled={isProgressLoading} onClick={onSaveDraft} size="sm" variant="secondary">
             <Save aria-hidden="true" />
@@ -65,12 +68,9 @@ export function EditorPanel({
             <CheckCircle2 aria-hidden="true" />
             Mark solved
           </Button>
-          <Button disabled size="sm">
-            <Play aria-hidden="true" />
-            Run
-          </Button>
         </div>
       </div>
+      {problemId && <PracticeControls problemId={problemId} code={code} />}
       <div className="code-editor">
         <CodeMirror
           basicSetup={{ lineNumbers: true, foldGutter: true }}
@@ -106,6 +106,7 @@ export function EditorPanel({
         aria-hidden="true"
         className="sr-only"
         readOnly
+        tabIndex={-1}
         value={code}
       />
     </Card>

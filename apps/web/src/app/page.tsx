@@ -4,8 +4,10 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Code2, DoorOpen, LogIn, LogOut, Users } from "lucide-react";
 import type { Problem } from "@leetcollab/contracts";
+import { nextLocalDay } from "../lib/review-day";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../components/auth-provider";
+import { GoogleSignInButton } from "../components/google-sign-in-button";
 import { useSocket } from "../components/socket-provider";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
@@ -54,6 +56,11 @@ function normalizeProblem(row: ProblemRow): Problem {
 }
 
 export default function HomePage() {
+  const { session } = useAuth();
+  return <SessionHomePage key={session?.access_token ?? "signed-out"} />;
+}
+
+function SessionHomePage() {
   const router = useRouter();
   const { session, loading } = useAuth();
   const socket = useSocket();
@@ -63,16 +70,35 @@ export default function HomePage() {
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string>("");
   const [problems, setProblems] = useState<Problem[]>([]);
+  const [dueIds, setDueIds] = useState<string[]>([]);
+  const [reviewError, setReviewError] = useState("");
   const [roomId, setRoomId] = useState("");
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
 
   useEffect(() => {
+    const authError = new URL(window.location.href).searchParams.get("authError");
+    if (!authError) return;
+    setStatus(authError === "oauth_denied"
+      ? "Google sign-in was cancelled."
+      : "Google sign-in could not be completed. Please try again.");
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
+
+  useEffect(() => {
     if (!session) return;
+    let current = true;
+    supabase.from("user_problem_progress").select("problem_id").eq("user_id", session.user.id).lt("suggested_review_at", nextLocalDay(new Date()).toISOString()).then(({ data, error }) => {
+      if (!current) return;
+      if (error) setReviewError(error.message);
+      else setDueIds((data ?? []).map(row => row.problem_id));
+    });
     supabase.from("problems").select(problemSelect).order("sort_order")
       .then(({ data, error }) => {
+        if (!current) return;
         if (error) setStatus(error.message);
         else setProblems(((data ?? []) as ProblemRow[]).map(normalizeProblem));
       });
+    return () => { current = false; };
   }, [session]);
 
   useEffect(() => {
@@ -217,6 +243,7 @@ export default function HomePage() {
                 {mode === "sign-in" ? "Sign in" : "Create account"}
               </Button>
             </form>
+            <GoogleSignInButton />
             {status && (
               <Alert className="auth-alert" variant={status.includes("created") ? "success" : "destructive"}>
                 <AlertDescription>{status}</AlertDescription>
@@ -248,6 +275,23 @@ export default function HomePage() {
           Sign out
         </Button>
       </header>
+
+      <Card className="due-reviews-card">
+        <CardHeader>
+          <CardTitle>Due today</CardTitle>
+          <CardDescription>Suggested reviews are voluntary.</CardDescription>
+        </CardHeader>
+        <CardContent className="due-reviews-content">
+          {reviewError ? (
+            <Alert variant="destructive"><AlertDescription>{reviewError}</AlertDescription></Alert>
+          ) : dueIds.length ? (
+            problems.filter(problem => dueIds.includes(problem.id)).map(problem => (
+              <Button key={problem.id} onClick={() => createRoom(problem.id)} variant="outline">{problem.title}</Button>
+            ))
+          ) : <p>No reviews due.</p>}
+          <p className="muted">Demo history (example only, not your progress): Parcel Pair · Good · suggested review in 3 days.</p>
+        </CardContent>
+      </Card>
 
       {currentRoomId ? (
         <Card className="active-room-card">

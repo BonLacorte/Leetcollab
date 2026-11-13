@@ -1,30 +1,18 @@
-# Continue on another device
+# Continue the combined application
 
-This branch preserves unfinished Shadcn/ui migration progress and all existing
-pipeline fixes, including the desktop room layout fix and minimal GitHub Actions
-workflow. Publication is a transfer checkpoint. Final validation and real browser
-authentication/collaboration testing are deferred, not passed. Nothing is merged
-or deployed.
+The `fm/leetcollab-shadcn-all-screens` branch combines the Shadcn/ui migration,
+prototype, CI workflow and backend head
+`640d2e06cc5e76abcfc51214bd7d8740a1048878`. Nothing is merged into main or deployed.
+The open review is https://github.com/BonLacorte/Leetcollab/pull/1.
 
-## Get this exact branch
+## Clone and start
 
 ```sh
 git clone --branch fm/leetcollab-shadcn-all-screens https://github.com/BonLacorte/Leetcollab.git
 ```
 
-Open a terminal in the cloned `Leetcollab` directory. Existing review:
-https://github.com/BonLacorte/Leetcollab/pull/1
-
-For an existing clean checkout already on this branch:
-
-```sh
-git pull --ff-only origin fm/leetcollab-shadcn-all-screens
-```
-
-## Start locally
-
-Install Node.js 22 (see `.nvmrc`), enable Corepack, and start Docker Desktop or
-Docker Engine. Commands below run from the repository root:
+Use Node.js 22 from `.nvmrc`, enable Corepack, and start Docker. Run these commands
+from the cloned repository root:
 
 ```sh
 corepack enable
@@ -34,62 +22,73 @@ cp apps/web/.env.example apps/web/.env.local
 cp apps/realtime/.env.example apps/realtime/.env
 ```
 
-Copy the local API URL and anonymous key printed by Supabase into both copied
-environment files. Existing custom API port: `55421`; Studio: `55423`; Postgres:
-`55432`. Use the local anonymous key, not a service-role key or production values.
-The templates use web port `3000` and realtime port `3001`.
+Copy the local Supabase API URL and anonymous key into both ignored environment
+files. The API uses port `55421`, Postgres `55432`, and Studio `55423`. Put the
+**local** service-role key only in `apps/web/.env.local` as
+`SUPABASE_SERVICE_ROLE_KEY`, for the server APIs. Never give it a `NEXT_PUBLIC_`
+prefix or put it in the realtime environment. Leave JDoodle credentials empty
+and `JDOODLE_LIMITS_CONFIRMED=false`; Java execution stays disabled.
 
-On a **brand-new disposable local database only**, initialize migrations and the
-problem catalogue with:
-
-```sh
-pnpm supabase:reset
-```
-
-That command deletes local database contents. Skip it for any existing database
-whose data must be preserved. Local users, database contents, ignored environment
-files, and Docker volumes are not transferred by Git; a clone does not restore
-the previous device's accounts or data.
+Apply pending additive migrations, preserving any existing local data:
 
 ```sh
+pnpm dlx supabase migration up --local
 pnpm dev
 ```
 
 Open http://localhost:3000. Realtime health is http://localhost:3001/health.
-The old device used ports `3200`/`3201` to avoid collisions; those ignored local
-overrides are not required on a fresh device. Git does not preserve running
-services. Only esbuild is approved to run dependency build scripts in
-`pnpm-workspace.yaml`; keep the other script restrictions intact.
+Use separate browser profiles or a normal and private window for two accounts.
+Local email confirmation is disabled. Create disposable accounts, select an
+exercise to create a room, and join its room ID from the other account. Edit code,
+exchange chat messages, save a draft, grade your practice and reload to check
+persistence. Only esbuild's dependency build script is approved in
+`pnpm-workspace.yaml`; keep the other restrictions intact.
 
-## Resume testing
+The current task preview uses http://localhost:3200 and realtime port `3201`.
+Its ignored realtime environment has `PORT=3201` and
+`CORS_ORIGIN=http://localhost:3200`; the ignored web environment has
+`NEXT_PUBLIC_SOCKET_URL=http://localhost:3201`. To reproduce that port choice,
+set those values before building and start in two terminals:
 
-- Create two disposable local email/password accounts in independent browser
-  sessions. Local email confirmation is disabled in `supabase/config.toml`.
-- Sign in, create a room, join it from the second account, inspect the workspace,
-  exchange chat messages, and exercise member controls.
-- Check light/dark themes, desktop layout and narrow/mobile sizing.
-- Run `pnpm typecheck` and `pnpm build` when ready to resume validation. There is
-  no workspace test script. `.github/workflows/ci.yml` runs frozen installation,
-  typecheck and build for pull requests; no green CI result is claimed here.
+```sh
+pnpm build
+pnpm --filter @leetcollab/web start --port 3200 --hostname 0.0.0.0
+```
 
-Earlier typecheck/build and HTTP health probes passed. Real Supabase auth health
-was restored on the old device without resetting data, but email/password signup,
-sign-in, room creation, workspace and chat still need real browser verification.
-Synthetic auth and health probes are insufficient evidence for those flows.
+```sh
+pnpm --filter @leetcollab/realtime start
+```
 
-The previous browser attachment returned `BRIDGE_NOT_READY`; local Chromium
-needed `libnspr4`, `libnss3` and `libasound2t64`, and package downloads failed with
-DNS resolution errors for `archive.ubuntu.com`. Resume with a reachable Chrome
-remote-debugging session and `chrome-devtools-axi`. These blockers are deferred.
+Git does not transfer local accounts, database volumes, ignored credentials,
+dependencies or running services. Do not reset an existing database. The
+standalone [prototype](docs/prototypes/README.md) remains available.
 
-The old no-mistakes run `01M75H8J74ZN8XEGF8166FRAHA` was cancelled before this
-transfer. Start a fresh validation of the final transferred head when ready;
-do not treat its earlier step results as validation of the latest commit.
+## Validation and limits
 
-This branch contains the existing email/password app. Separate backend work,
-including Google auth and proposed Java editor integration, is not integrated.
-No Java runtime is required by the startup commands above. The surviving
-standalone UX prototype and design summary are preserved in
-[docs/prototypes](docs/prototypes/README.md). Earlier uncommitted scout
-application/schema experiments could not be located and are **not backed up** by
-this transfer. They were not reconstructed or imported into this UI migration.
+The combined application has 48 automated tests. Run:
+
+```sh
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+The retained GitHub Actions workflow runs frozen installation and those three
+commands on pull requests. Final combined no-mistakes review and CI evidence
+must be read from the open review; earlier standalone validation does not prove
+the final combined head.
+
+Real local browser checks on 2026-11-13 passed two-account signup/login, room
+creation/join, code synchronization in both directions, bidirectional chat,
+permission changes, draft saving, independent grades and review dates, and room
+rejoin after browser reload. Room code/chat/presence/whiteboard are live-only:
+a realtime server restart or an ended room loses them. Personal progress is
+stored in Supabase. No database reset or production change was used.
+
+Live Google consent and automatic verified-email account linking remain deferred
+until an operator supplies provider configuration. Remote Java execution remains
+deferred until server-only credentials and supported provider execution limits
+are verified. Neither is an external end-to-end pass. See
+[backend setup](docs/backend-setup.md) for these requirements, API contracts and
+database tests. No live provider secrets, merge or deployment are authorized by
+this continuation guide.

@@ -125,7 +125,7 @@ function normalizeProgress(row: ProgressRow): ProblemProgress {
     userId: row.user_id,
     problemId: row.problem_id,
     draftCode: row.draft_code ?? "",
-    draftLanguage: row.draft_language ?? "javascript",
+    draftLanguage: row.draft_language ?? "java",
     lastSavedAt: row.last_saved_at,
     solvedAt: row.solved_at,
     solvedWith: Array.isArray(row.solved_with) ? row.solved_with : [],
@@ -567,7 +567,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
         user_id: userId,
         problem_id: problemId,
         draft_code: code,
-        draft_language: "javascript",
+        draft_language: "java",
         last_saved_at: new Date().toISOString(),
       }, { onConflict: "user_id,problem_id" })
       .select(progressSelect)
@@ -779,6 +779,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       </section>
       <section className="editor-region">
         <EditorPanel
+          problemId={room.problem?.id ?? null}
           code={code}
           canEditCode={canEditCode}
           progress={progress}

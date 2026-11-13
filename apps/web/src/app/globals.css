@@ -156,14 +156,63 @@ h3 {
   color: hsl(var(--destructive));
 }
 
+.practice-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--muted) / 0.3);
+  font-size: 0.75rem;
+}
+
+.practice-controls p,
+.practice-controls > div {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.practice-controls > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.due-reviews-card {
+  margin-bottom: 1.25rem;
+}
+
+.due-reviews-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.due-reviews-content > p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.auth-google {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
 .success {
   color: hsl(var(--success));
 }
 
-.sr-only {
+.sr-only,
+.ui-textarea.sr-only {
   position: absolute;
   width: 1px;
   height: 1px;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
   margin: -1px;
   overflow: hidden;
@@ -1304,6 +1353,11 @@ pre {
 
 .editor-panel {
   gap: 0.7rem;
+  overflow-y: auto;
+}
+
+.editor-panel > :not(.code-editor) {
+  flex-shrink: 0;
 }
 
 .editor-actions {
