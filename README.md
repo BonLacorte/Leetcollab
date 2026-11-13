@@ -32,6 +32,14 @@ The Supabase API gateway is also remapped to `http://127.0.0.1:55421` on this ma
 
 Local Supabase uses API port `55421`, Postgres port `55432`, and Studio port `55423` on this machine because Windows reserves ports 54231-54330. Analytics and Supabase Edge Functions are disabled locally because this MVP does not use them.
 
+## Practice
+
+Sign in with email/password or Google. Google sign-in requires the operator configuration in [backend setup](docs/backend-setup.md#google-sign-in).
+
+Choose an exercise to practice alone in a room, or share the room ID with collaborators. The catalogue contains 15 original exercises with Java starter code. Save drafts and solved status independently from other room members. Use **Run Java** for a LeetCollab verdict when the external sandbox is enabled; **Refresh status** retries an unavailable execution-status request. The editor shows the shared execution allowance and reset time. When exhausted, eligible exercises link to a source judge with results labelled unverified; original exercises wait for reset.
+
+Save a personal grade with **again**, **hard**, **good**, or **easy** to receive a suggested review date. Repeat practice is voluntary. **Due today** includes overdue reviews and reviews scheduled later in your local calendar day. The labelled demo history is illustrative and is not your progress.
+
 ## Design boundaries
 
 - Supabase stores durable user/profile, problem, progress, and submission data.
@@ -39,4 +47,4 @@ Local Supabase uses API port `55421`, Postgres port `55432`, and Studio port `55
 - Authenticated code execution uses an external sandbox and remains disabled until provider credentials and supported resource limits are confirmed. See [backend setup](docs/backend-setup.md) for Google OAuth, API contracts, migrations and operator requirements.
 - Production deployment is deferred until the local MVP is validated: Vercel hosts `apps/web`, Render hosts `apps/realtime`, and Supabase hosts data/auth.
 
-See [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md) for the step-by-step creation record and verification status.
+See [the continuation guide](docs/continuation.md) for the saved branch handoff and remaining validation.

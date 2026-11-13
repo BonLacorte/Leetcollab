@@ -21,6 +21,7 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   }, []);
   const [quota, setQuota] = useState<JudgeStatusResponse | null>(null);
   const [message, setMessage] = useState("");
+  const [statusError, setStatusError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reviewAt, setReviewAt] = useState<string | null>(null);
   const refreshStatus = useCallback(async () => {
@@ -28,9 +29,12 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
     try {
       const response = await fetch(`/api/judge/status?problemId=${problemId}`, { headers: { Authorization: `Bearer ${token}` } });
       const value = judgeStatusResponseSchema.parse(await response.json());
-      if (mounted.current && generation === statusGeneration.current) setQuota(value);
+      if (mounted.current && generation === statusGeneration.current) {
+        setQuota(value);
+        setStatusError("");
+      }
     } catch {
-      if (mounted.current && generation === statusGeneration.current) { setQuota(null); setMessage("Judge status unavailable. Refresh status to try again."); }
+      if (mounted.current && generation === statusGeneration.current) { setQuota(null); setStatusError("Judge status unavailable. Refresh status to try again."); }
     }
   }, [problemId, token]);
 
@@ -83,7 +87,7 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
     finally { if (mounted.current) setBusy(false); }
   }
 
-  return <div className="editor-progress">
+  return <div className="practice-controls">
     <button disabled={busy || !quota?.available} onClick={run} type="button">{busy ? "Working…" : "Run Java"}</button>
     <button className="secondary" disabled={busy} onClick={() => { void refreshStatus(); }} type="button">Refresh status</button>
     {quota && <p>{quota.remaining} of {quota.limit} shared executions remaining. Reset: {new Date(quota.resetAt).toLocaleString()}. {quota.unavailableReason === "provider_unconfigured" ? "External sandbox is not configured." : ""}</p>}
@@ -91,5 +95,6 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
     <div>Personal review grade: {(["again", "hard", "good", "easy"] as const).map(value => <button className="secondary" key={value} disabled={busy} onClick={() => grade(value)} type="button">{value}</button>)}</div>
     {reviewAt && <p>Suggested review: {new Date(reviewAt).toLocaleString()}. Repeat practice is voluntary.</p>}
     {message && <p role="status">{message}</p>}
+    {statusError && <p role="status">{statusError}</p>}
   </div>;
 }

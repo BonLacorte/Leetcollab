@@ -20,7 +20,7 @@ Follow [README.md](../README.md) for Docker, local Supabase and `pnpm dev`. Copy
 
 [backend-setup.md](backend-setup.md) documents Google client/Supabase redirect configuration, server-only environment variables and the API/data contracts. Retain Supabase's built-in linking for matching verified email; no custom linking is needed. Verify live Google consent, linking, callback errors and session persistence after configuring credentials locally.
 
-Java execution remains disabled until server-only JDoodle credentials, the Java version index and concrete provider capability evidence are supplied. Keep `JDOODLE_LIMITS_CONFIRMED=false` until the plan guarantees the required finite compilation/runtime/memory/output/process bounds, filesystem isolation and no network access. App deadlines and source restrictions do not provide sandbox guarantees. Live execution is unverified. All current original exercises have no source judge and therefore no external fallback destination.
+For execution enablement requirements and fallback rules, follow [Judge integration and the provider capability gate](backend-setup.md#judge-integration). Live execution remains unverified.
 
 ## Validation to resume
 

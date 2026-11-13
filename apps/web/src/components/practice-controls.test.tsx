@@ -34,3 +34,15 @@ it.each([false, true])("ignores an older status success or failure after exhaust
   expect(JSON.stringify(renderer.toJSON())).toContain("This original exercise must wait for quota reset.");
   expect(JSON.stringify(renderer.toJSON())).not.toContain("Judge status unavailable.");
 });
+
+it("clears a status failure after a successful refresh", async () => {
+  vi.stubGlobal("fetch", vi.fn()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, used: 20, limit: 20, remaining: 0, active: 0, resetAt: "2026-11-13T23:55:00.000Z", fallback: null, unavailableReason: "quota_exhausted" }))));
+  await act(async () => { renderer = create(<PracticeControls problemId="problem" code="class Solution {}" />); });
+  expect(JSON.stringify(renderer.toJSON())).toContain("Judge status unavailable.");
+  const refresh = renderer.root.findAllByType("button").find(node => node.children.includes("Refresh status"))!;
+  await act(async () => refresh.props.onClick());
+  expect(JSON.stringify(renderer.toJSON())).not.toContain("Judge status unavailable.");
+  expect(JSON.stringify(renderer.toJSON())).toContain("This original exercise must wait for quota reset.");
+});

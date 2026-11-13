@@ -458,6 +458,29 @@ html[data-theme="light"] .code-editor {
   background: #f8fafc;
 }
 
+.practice-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.practice-controls p,
+.practice-controls > div {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.practice-controls > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .editor-progress {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
