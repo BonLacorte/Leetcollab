@@ -43,6 +43,6 @@ experiments are not backed up by this transfer**, even where this branch has
 files with the same names. They were not reconstructed or imported. This branch
 preserves its own Shadcn migration and committed fixes separately.
 
-See [CONTINUATION.md](../../CONTINUATION.md) for application startup and deferred
-real authentication, room and chat browser testing. Reviewing this simulated
+See [CONTINUATION.md](../../CONTINUATION.md) for application startup, completed
+local browser checks and deferred provider validation. Reviewing this simulated
 prototype does not validate those application flows.

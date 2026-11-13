@@ -20,17 +20,13 @@ The previous checkout has a broken npm installation. Repair/reinstall Node.js if
 6. Run `pnpm dev`.
 7. Open `http://localhost:3000` in two browser sessions, create accounts, create a room, and join it from the second session.
 
-The web app runs on port 3000 and the realtime service runs on port 3001. Supabase manages local Postgres and authentication through Docker. On this Windows development machine, local Supabase Postgres uses port 55432, Studio uses port 55423, and Analytics uses port 55437 because Windows reserves ports 54231–54330. The unused local mail catcher and database pooler are disabled.
+The web app runs on port 3000 and the realtime service runs on port 3001, with health at `http://localhost:3001/health`. Supabase manages local Postgres and authentication through Docker. The unused local mail catcher and database pooler are disabled. See the local-service note below for the configured Supabase ports.
 
 After installation, validate the workspace with `pnpm test`, `pnpm typecheck` and `pnpm build`. In non-interactive CI environments, use `CI=true pnpm install --frozen-lockfile`.
 
-## Windows local-port note
-
-The Supabase API gateway is also remapped to `http://127.0.0.1:55421` on this machine. Use that URL in both generated environment files; do not use the usual `54321` local URL.
-
 ## Windows local-service note
 
-Local Supabase uses API port `55421`, Postgres port `55432`, and Studio port `55423` on this machine because Windows reserves ports 54231-54330. Analytics and Supabase Edge Functions are disabled locally because this MVP does not use them.
+The local ports and enabled services are configured in [`supabase/config.toml`](supabase/config.toml). The API gateway uses `http://127.0.0.1:55421`, Postgres uses port `55432`, and Studio uses port `55423` because Windows reserves ports 54231-54330 on the original development machine. Use the configured API URL in both environment files. Analytics and Supabase Edge Functions are disabled locally because this MVP does not use them.
 
 ## Practice
 
