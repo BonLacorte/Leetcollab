@@ -16,6 +16,8 @@ An operator must configure the following, without putting secrets in tracked fil
 
 No Google credentials are needed for controlled callback tests. Live consent, identity linking and hosted cookies still require operator verification.
 
+The application callback returns a relative `Location` header so the browser retains its public origin even when Next binds to `0.0.0.0`. Redirects use only sanitized internal paths and stable error codes; request origins and forwarding headers do not choose a redirect origin.
+
 References: [Supabase Google setup](https://supabase.com/docs/guides/auth/social-sign-in/auth-google), [identity linking](https://supabase.com/docs/guides/auth/auth-identity-linking).
 
 ## Judge integration

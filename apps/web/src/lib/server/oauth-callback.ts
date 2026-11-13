@@ -3,6 +3,12 @@ import { safeRelativePath } from "../auth-redirect";
 
 type ExchangeCode = (code: string) => Promise<{ error: unknown | null }>;
 
+function redirect(path: string): NextResponse {
+  // A relative Location keeps the browser's origin even when Next's request URL
+  // uses the server bind address. Destinations must remain sanitized internal paths.
+  return new NextResponse(null, { status: 303, headers: { Location: path } });
+}
+
 export async function completeOAuthCallback(request: Request, exchangeCode: ExchangeCode): Promise<NextResponse> {
   const requestUrl = new URL(request.url);
   const next = safeRelativePath(requestUrl.searchParams.get("next"));
@@ -10,18 +16,14 @@ export async function completeOAuthCallback(request: Request, exchangeCode: Exch
   const providerError = requestUrl.searchParams.has("error");
 
   if (!code || providerError) {
-    const target = new URL("/", requestUrl.origin);
-    target.searchParams.set("authError", providerError ? "oauth_denied" : "oauth_missing_code");
-    return NextResponse.redirect(target, 303);
+    return redirect(`/?authError=${providerError ? "oauth_denied" : "oauth_missing_code"}`);
   }
 
   try {
     const result = await exchangeCode(code);
     if (result.error) throw new Error("exchange failed");
-    return NextResponse.redirect(new URL(next, requestUrl.origin), 303);
+    return redirect(next);
   } catch {
-    const target = new URL("/", requestUrl.origin);
-    target.searchParams.set("authError", "oauth_failed");
-    return NextResponse.redirect(target, 303);
+    return redirect("/?authError=oauth_failed");
   }
 }
