@@ -44,7 +44,7 @@ app.use(helmet());
 app.use(cors({ origin, credentials: true }));
 app.get("/health", (_request, response) => response.json({ ok: true }));
 
-type SocketData = { userId: string; username: string };
+type SocketData = { userId: string; username: string; token: string };
 type Room = RoomState;
 type ProblemExample = Problem["examples"][number];
 const rooms = new Map<string, Room>();
@@ -193,8 +193,12 @@ function requirePermission(
   return memberCan(room, userId, capability) ? null : failure(message, "FORBIDDEN");
 }
 
-async function getProblem(problemId: string): Promise<Problem | null> {
-  const { data, error } = await supabase
+async function getProblem(problemId: string, token: string): Promise<Problem | null> {
+  const client = createClient(supabaseUrl!, supabaseAnonKey!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const { data, error } = await client
     .from("problems")
     .select("id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints")
     .eq("id", problemId)
@@ -221,6 +225,7 @@ io.use(async (socket, next) => {
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) return next(new Error("Invalid or expired session."));
 
+  socket.data.token = token;
   socket.data.userId = data.user.id;
   socket.data.username = typeof data.user.user_metadata.username === "string"
     ? data.user.user_metadata.username
@@ -247,7 +252,7 @@ io.on("connection", (socket) => {
 
     const parsed = createRoomSchema.safeParse(payload);
     if (!parsed.success) return callback(failure("Invalid room creation request."));
-    const problem = await getProblem(parsed.data.problemId);
+    const problem = await getProblem(parsed.data.problemId, socket.data.token);
     if (!problem) return callback(failure("Problem not found."));
 
     const roomId = parsed.data.roomId ?? generateUniqueRoomId();
@@ -357,7 +362,7 @@ io.on("connection", (socket) => {
       "You do not have permission to change the problem.",
     );
     if (denied) return callback(denied);
-    const problem = await getProblem(parsed.data.problemId);
+    const problem = await getProblem(parsed.data.problemId, socket.data.token);
     if (!problem) return callback(failure("Problem not found."));
     room.problem = problem;
     room.code = problem.starterCode;

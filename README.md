@@ -13,30 +13,34 @@ The previous checkout has a broken npm installation. Repair/reinstall Node.js if
 ## First local run
 
 1. Start Docker Desktop.
-2. From this directory, run `pnpm install`.
-3. Run `pnpm supabase:start`; copy the printed local API URL and anonymous key.
-4. Copy `apps/web/.env.example` to `apps/web/.env.local` and `apps/realtime/.env.example` to `apps/realtime/.env`, then fill the copied Supabase values.
-5. Run `pnpm supabase:reset` to apply migrations and seed the catalogue.
+2. From this directory, run `corepack enable` and `pnpm install --frozen-lockfile`.
+3. Run `pnpm supabase:start`; copy the printed local API URL, anonymous key and server-only service-role key.
+4. Copy `apps/web/.env.example` to `apps/web/.env.local` and `apps/realtime/.env.example` to `apps/realtime/.env`, then fill the local API URL and anonymous key in both. Set `SUPABASE_SERVICE_ROLE_KEY` only in the web environment; leave JDoodle disabled.
+5. Run `pnpm dlx supabase migration up --local` to apply pending migrations. Never reset an existing database.
 6. Run `pnpm dev`.
 7. Open `http://localhost:3000` in two browser sessions, create accounts, create a room, and join it from the second session.
 
-The web app runs on port 3000 and the realtime service runs on port 3001. Supabase manages local Postgres and authentication through Docker. On this Windows development machine, local Supabase Postgres uses port 55432, Studio uses port 55423, and Analytics uses port 55437 because Windows reserves ports 54231–54330. The unused local mail catcher and database pooler are disabled.
+The web app runs on port 3000 and the realtime service runs on port 3001, with health at `http://localhost:3001/health`. Supabase manages local Postgres and authentication through Docker. The unused local mail catcher and database pooler are disabled. See the local-service note below for the configured Supabase ports.
 
-After installation, validate the workspace with `pnpm typecheck` and `pnpm build`. In non-interactive CI environments, use `CI=true pnpm install --frozen-lockfile`.
-
-## Windows local-port note
-
-The Supabase API gateway is also remapped to `http://127.0.0.1:55421` on this machine. Use that URL in both generated environment files; do not use the usual `54321` local URL.
+After installation, validate the workspace with `pnpm test`, `pnpm typecheck` and `pnpm build`. In non-interactive CI environments, use `CI=true pnpm install --frozen-lockfile`.
 
 ## Windows local-service note
 
-Local Supabase uses API port `55421`, Postgres port `55432`, and Studio port `55423` on this machine because Windows reserves ports 54231-54330. Analytics and Supabase Edge Functions are disabled locally because this MVP does not use them.
+The local ports and enabled services are configured in [`supabase/config.toml`](supabase/config.toml). The API gateway uses `http://127.0.0.1:55421`, Postgres uses port `55432`, and Studio uses port `55423` because Windows reserves ports 54231-54330 on the original development machine. Use the configured API URL in both environment files. Analytics and Supabase Edge Functions are disabled locally because this MVP does not use them.
+
+## Practice
+
+Sign in with email/password or Google. Google sign-in requires the operator configuration in [backend setup](docs/backend-setup.md#google-sign-in).
+
+Choose an exercise to practice alone in a room, or share the room ID with collaborators. The catalogue contains 15 original exercises with Java starter code. Save drafts and solved status independently from other room members. Use **Run Java** for a LeetCollab verdict when the external sandbox is enabled; **Refresh status** retries an unavailable execution-status request. The editor shows the shared execution allowance and reset time. When exhausted, eligible exercises link to a source judge with results labelled unverified; original exercises wait for reset.
+
+Save a personal grade with **again**, **hard**, **good**, or **easy** to receive a suggested review date. Repeat practice is voluntary. **Due today** includes overdue reviews and reviews scheduled later in your local calendar day. The labelled demo history is illustrative and is not your progress.
 
 ## Design boundaries
 
 - Supabase stores durable user/profile, problem, progress, and submission data.
 - Socket.IO owns live-only room presence, code, chat, and whiteboard state. This is intentional for the first MVP; state is lost after a server restart or after a room ends.
-- Code execution is deliberately disabled. A future runner must be isolated from the Socket.IO service.
+- Authenticated code execution uses an external sandbox and remains disabled until provider credentials and supported resource limits are confirmed. See [backend setup](docs/backend-setup.md) for Google OAuth, API contracts, migrations and operator requirements.
 - Production deployment is deferred until the local MVP is validated: Vercel hosts `apps/web`, Render hosts `apps/realtime`, and Supabase hosts data/auth.
 
-See [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md) for the step-by-step creation record and verification status.
+See [the continuation guide](docs/continuation.md) for the saved branch handoff and remaining validation.

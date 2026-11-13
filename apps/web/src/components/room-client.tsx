@@ -22,6 +22,9 @@ import { EditorPanel } from "./room/editor-panel";
 import { type DifficultyFilter, ProblemPanel } from "./room/problem-panel";
 import { RoomHeader } from "./room/room-header";
 import { WorkspacePanel } from "./room/workspace-panel";
+import { Alert, AlertDescription } from "./ui/alert";
+import { Card } from "./ui/card";
+import { Skeleton } from "./ui/skeleton";
 
 type WhiteboardMode = WhiteboardTool | "pan";
 type WhiteboardViewport = { scale: number; offsetX: number; offsetY: number };
@@ -122,7 +125,7 @@ function normalizeProgress(row: ProgressRow): ProblemProgress {
     userId: row.user_id,
     problemId: row.problem_id,
     draftCode: row.draft_code ?? "",
-    draftLanguage: row.draft_language ?? "javascript",
+    draftLanguage: row.draft_language ?? "java",
     lastSavedAt: row.last_saved_at,
     solvedAt: row.solved_at,
     solvedWith: Array.isArray(row.solved_with) ? row.solved_with : [],
@@ -564,7 +567,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
         user_id: userId,
         problem_id: problemId,
         draft_code: code,
-        draft_language: "javascript",
+        draft_language: "java",
         last_saved_at: new Date().toISOString(),
       }, { onConflict: "user_id,problem_id" })
       .select(progressSelect)
@@ -748,8 +751,17 @@ export function RoomClient({ roomId }: { roomId: string }) {
       onResetTimer={() => updateTimer("reset")}
       onLeave={leaveRoom}
     />
-    {status && <p className="error">{status}</p>}
-    {!room ? <div className="workspace-card loading-card">Waiting for room state...</div> : <div className="room-workspace">
+    {status && (
+      <Alert className="room-alert" variant="destructive">
+        <AlertDescription>{status}</AlertDescription>
+      </Alert>
+    )}
+    {!room ? (
+      <Card className="workspace-card loading-card">
+        <Skeleton className="room-loading-line" />
+        <span>Waiting for room state...</span>
+      </Card>
+    ) : <div className="room-workspace">
       <section className="problem-region">
         <ProblemPanel
           problem={room.problem}
@@ -767,6 +779,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       </section>
       <section className="editor-region">
         <EditorPanel
+          problemId={room.problem?.id ?? null}
           code={code}
           canEditCode={canEditCode}
           progress={progress}

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "pnpm --filter @leetcollab/contracts build && concurrently -n realtime,web -c magenta,cyan \"pnpm --filter @leetcollab/realtime dev\" \"pnpm --filter @leetcollab/web dev\"",
     "build": "pnpm --filter @leetcollab/contracts build && pnpm --filter @leetcollab/realtime build && pnpm --filter @leetcollab/web build",
+    "test": "pnpm --filter @leetcollab/contracts build && pnpm --filter @leetcollab/web test",
     "typecheck": "pnpm --filter @leetcollab/contracts build && pnpm --filter @leetcollab/realtime typecheck && pnpm --filter @leetcollab/web typecheck",
     "supabase:start": "pnpm dlx supabase start",
     "supabase:stop": "pnpm dlx supabase stop",
