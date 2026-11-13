@@ -22,7 +22,7 @@ function quota(value: RpcQuota): JudgeQuota {
     used: Number(value.used),
     limit: Number(value.limit),
     active: Number(value.active),
-    resetAt: value.resetAt,
+    resetAt: new Date(value.resetAt).toISOString(),
   });
 }
 
@@ -37,7 +37,7 @@ function submission(row: Record<string, unknown>): StoredSubmission {
     testsTotal: Number(row.tests_total),
     durationMs: row.duration_ms === null ? null : Number(row.duration_ms),
     diagnostics: row.diagnostics === null ? null : String(row.diagnostics),
-    createdAt: String(row.created_at),
+    createdAt: new Date(String(row.created_at)).toISOString(),
     judgeState: String(row.judge_state) as StoredSubmission["judgeState"],
   };
 }

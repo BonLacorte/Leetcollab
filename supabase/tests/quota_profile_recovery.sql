@@ -1,6 +1,5 @@
 \set ON_ERROR_STOP on
 begin;
-\ir ../migrations/202611130001_preserve_quota_usage.sql
 
 insert into public.judge_quota_periods(period_start, period_end, quota_limit, used)
 values ('2190-01-01', '2190-01-02', 20, 15), ('2190-01-02', '2190-01-03', 20, 15);
@@ -22,9 +21,19 @@ begin
     or (result->>'limit')::int <> 10 then
     raise exception 'lowered reservation must reject execution and preserve usage';
   end if;
+  result := public.exhaust_judge_quota('2190-01-02');
+  if (result->>'used')::int <> 15 or (result->>'limit')::int <> 10 then
+    raise exception 'provider exhaustion must preserve usage above a lowered limit';
+  end if;
   result := public.get_judge_quota_status('2190-01-01', '2190-01-02', 20);
   if (result->>'limit')::int <> 10 then
     raise exception 'higher configuration must not restore spent capacity';
+  end if;
+  insert into public.judge_quota_periods(period_start, period_end, quota_limit, used)
+  values ('2190-01-03', '2190-01-04', 20, 1);
+  result := public.exhaust_judge_quota('2190-01-03');
+  if (result->>'used')::int <> 20 then
+    raise exception 'provider exhaustion must consume remaining capacity';
   end if;
 end;
 $$;
