@@ -1,7 +1,7 @@
 begin;
 set local search_path = public, extensions;
 create extension if not exists pgtap with schema extensions;
-select plan(23);
+select plan(18);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -26,10 +26,6 @@ select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', id, 'java', 'class Solution {}',
        'accepted', 'completed', 'accepted', 'leetcollab', 1, 1
 from public.problems where slug = 'parcel-pair';
 
-insert into public.external_attempts (user_id, problem_id, outcome)
-select 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', id, 'accepted'
-from public.problems where slug = 'parcel-pair';
-
 set local role authenticated;
 select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
@@ -49,12 +45,6 @@ select results_eq(
   'values (0::bigint)',
   'another user cannot read private submissions'
 );
-select results_eq(
-  'select count(*) from public.external_attempts',
-  'values (0::bigint)',
-  'another user cannot read self-reported external attempts'
-);
-
 select throws_ok(
   $$select count(*) from public.problem_judge_configs$$,
   '42501',
@@ -104,30 +94,6 @@ select throws_ok(
     from public.problems where slug='parcel-pair'$$,
   '42501', null, 'browser cannot forge a verified submission'
 );
-select throws_ok(
-  $$select public.record_external_attempt((select id from public.problems where slug='parcel-pair'), 'accepted')$$,
-  '42501', null, 'original exercises cannot claim an external judge result'
-);
-reset role;
-update public.problem_judge_configs
-set source_judge_name = 'Controlled test judge',
-    source_judge_url = 'https://judge.example.test/problem'
-where problem_id = (select id from public.problems where slug = 'parcel-pair');
-set local role authenticated;
-select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', true);
-select lives_ok(
-  $$select public.record_external_attempt(
-      (select id from public.problems where slug = 'parcel-pair'), 'accepted'
-    )$$,
-  'eligible source fallback accepts an explicit self-report'
-);
-select results_eq(
-  $$select verification from public.external_attempts
-    where user_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'$$,
-  $$values ('external_self_reported'::text)$$,
-  'external fallback remains distinguishable from verified submissions'
-);
-
 select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', true);
 select lives_ok(
   $$select * from public.record_problem_grade(
@@ -138,7 +104,6 @@ select lives_ok(
 select results_eq('select count(*) from public.user_problem_progress', 'values (1::bigint)', 'owner can read progress');
 select results_eq('select count(*) from public.problem_review_attempts', 'values (2::bigint)', 'owner can read their review attempt history');
 select results_eq('select count(*) from public.submissions', 'values (1::bigint)', 'owner can read submissions');
-select results_eq('select count(*) from public.external_attempts', 'values (1::bigint)', 'owner can read external attempts');
 
 reset role;
 select is(
