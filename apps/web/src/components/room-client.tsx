@@ -767,7 +767,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       </section>
       <section className="editor-region">
         <EditorPanel
-          problemId={room.problem.id}
+          problemId={room.problem?.id ?? null}
           code={code}
           canEditCode={canEditCode}
           progress={progress}

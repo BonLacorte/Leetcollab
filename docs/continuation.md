@@ -1,6 +1,6 @@
 # Continue on another device
 
-This is an unfinished progress snapshot published at the owner's request. Further implementation, validation, merges and deployment are deferred.
+This branch was published as an unfinished progress snapshot at the owner's request. Backend validation resumed on 2026-11-13. Keep the backend and frontend branches separate until the combined application test; merge and deployment remain unapproved.
 
 ## Get the saved work
 
@@ -26,6 +26,8 @@ Java execution remains disabled until server-only JDoodle credentials, the Java 
 
 The previous no-mistakes run `01M75K8DPTKD7CG8Y4VWTQM572` completed Review and failed at Test because its agent hit a usage limit. Its unpublished fixes were recovered with supported custody sync. No validation run remains active. Document, Lint, Push, PR and CI did not complete in that run. This transfer does not claim a green build, tests or CI for the final snapshot.
 
-Before the review fixes, recorded checks passed: 41 mocked application tests, typecheck, build with placeholder public Supabase values, 23 pgTAP checks in disposable local Postgres, and a two-connection quota concurrency regression. These results do not validate the later fixes. Real Google/Supabase hosted auth and JDoodle execution were not exercised.
+Fresh checks on 2026-11-13 passed after the preserved review fixes: 45 application tests, typecheck, build with placeholder public Supabase values, 23 pgTAP checks in disposable local Postgres, and a two-connection quota concurrency regression. Application tests use controlled Auth, provider and component fakes. The two quota-status tests now use a fixed clock and realistic daily reset rather than a timer-overflowing 2099 fixture. A component regression reproduced and now prevents a room crash when no problem is selected. Component tests report the existing react-test-renderer deprecation warning. The available local Node version was 24.18.0; Node 22 remains the documented target.
+
+Browser E2E and real Google/Supabase hosted auth and JDoodle execution have not been verified by these checks. Browser dependency restoration is coordinated separately by Firstmate; do not disrupt the frontend worker's browser or shared auth services.
 
 On the next device, rerun `pnpm test`, `pnpm typecheck` and `pnpm build`, then the RLS and concurrency checks described in [backend-setup.md](backend-setup.md) using a disposable database. Validate auth redirects and cross-user isolation, independent review state, quota exhaustion/concurrency, and fallback eligibility. Resume the standard no-mistakes review/test/lint/PR/CI path after setup; initialize its device-local tooling if required. No merge or deployment is authorized by this handoff.

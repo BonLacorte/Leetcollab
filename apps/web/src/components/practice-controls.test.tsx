@@ -1,6 +1,6 @@
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PracticeControls } from "./practice-controls";
 
 vi.mock("./auth-provider", () => ({ useAuth: () => ({ session: { access_token: "token", user: { id: "user" } } }) }));
@@ -8,12 +8,20 @@ vi.mock("../lib/supabase", () => ({ supabase: { from: () => ({ select: () => ({ 
 
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer;
-afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); vi.unstubAllGlobals(); });
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-13T12:00:00.000Z"));
+});
+afterEach(async () => {
+  if (renderer) await act(async () => renderer.unmount());
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 it.each([false, true])("ignores an older status success or failure after exhaustion (failure=%s)", async failure => {
   const pending: { resolve: (value: Response) => void; reject: (reason: Error) => void }[] = [];
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({ resolve, reject }))));
-  const status = (remaining: number) => new Response(JSON.stringify({ available: remaining > 0, used: 20 - remaining, limit: 20, remaining, active: 0, resetAt: "2099-01-01T00:00:00.000Z", fallback: null, unavailableReason: remaining ? null : "quota_exhausted" }));
+  const status = (remaining: number) => new Response(JSON.stringify({ available: remaining > 0, used: 20 - remaining, limit: 20, remaining, active: 0, resetAt: "2026-11-13T23:55:00.000Z", fallback: null, unavailableReason: remaining ? null : "quota_exhausted" }));
   await act(async () => { renderer = create(<PracticeControls problemId="problem" code="class Solution {}" />); });
   await act(async () => pending[0].resolve(status(1)));
   const button = (label: string) => renderer.root.findAllByType("button").find(node => node.children.includes(label))!;

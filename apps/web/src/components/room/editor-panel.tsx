@@ -8,7 +8,7 @@ import type { ProblemProgress } from "@leetcollab/contracts";
 import { useTheme } from "../theme-provider";
 
 type EditorPanelProps = {
-  problemId: string;
+  problemId: string | null;
   code: string;
   canEditCode: boolean;
   progress: ProblemProgress | null;
@@ -57,7 +57,7 @@ export function EditorPanel({
 
         </div>
       </div>
-      <PracticeControls problemId={problemId} code={code} />
+      {problemId && <PracticeControls problemId={problemId} code={code} />}
       <div className="code-editor">
         <CodeMirror
           basicSetup={{ lineNumbers: true, foldGutter: true }}
