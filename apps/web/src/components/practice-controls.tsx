@@ -16,6 +16,7 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   const mounted = useRef(false);
   const statusGeneration = useRef(0);
   const reviewGeneration = useRef(0);
+  const completionGeneration = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -24,6 +25,7 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   const [message, setMessage] = useState("");
   const [statusError, setStatusError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [completion, setCompletion] = useState<"loading" | "solved" | "unsolved" | "unavailable">("loading");
   const [reviewAt, setReviewAt] = useState<string | null>(null);
   const refreshStatus = useCallback(async () => {
     const generation = ++statusGeneration.current;
@@ -39,14 +41,33 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
     }
   }, [problemId, token]);
 
+  const refreshCompletion = useCallback(async () => {
+    const generation = ++completionGeneration.current;
+    try {
+      // Submissions are server-owned. Historical client progress and grades are not evidence.
+      const { data, error } = await supabase.from("submissions")
+        .select("verification, judge_state, verdict, tests_passed, tests_total")
+        .eq("user_id", userId).eq("problem_id", problemId)
+        .eq("verification", "leetcollab").eq("judge_state", "completed").eq("verdict", "accepted");
+      if (error) throw error;
+      const solved = (data ?? []).some(row => row.verification === "leetcollab"
+        && row.judge_state === "completed" && row.verdict === "accepted"
+        && row.tests_total > 0 && row.tests_passed === row.tests_total);
+      if (mounted.current && generation === completionGeneration.current) setCompletion(solved ? "solved" : "unsolved");
+    } catch {
+      if (mounted.current && generation === completionGeneration.current) setCompletion("unavailable");
+    }
+  }, [problemId, userId]);
+
   useEffect(() => {
     let current = true;
     void refreshStatus();
+    void refreshCompletion();
     const generation = reviewGeneration.current;
     supabase.from("user_problem_progress").select("suggested_review_at").eq("user_id", userId).eq("problem_id", problemId).maybeSingle()
       .then(({ data }) => { if (current && generation === reviewGeneration.current) setReviewAt(data?.suggested_review_at ?? null); });
     return () => { current = false; };
-  }, [problemId, userId, refreshStatus]);
+  }, [problemId, userId, refreshStatus, refreshCompletion]);
 
   useEffect(() => {
     if (!quota || busy) return;
@@ -70,7 +91,7 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
       if (!mounted.current) return;
       setMessage(result.ok ? `LeetCollab verdict: ${result.submission.verdict}` : result.error.message);
       setQuota(null);
-      await refreshStatus();
+      await Promise.all([refreshStatus(), refreshCompletion()]);
     } catch { if (mounted.current) { setQuota(null); setMessage("Judge unavailable. Refresh status before trying again."); } }
     finally { if (mounted.current) setBusy(false); }
   }
@@ -89,11 +110,15 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   }
 
   return <div className="practice-controls">
-    <Button size="sm" disabled={busy || !quota?.available} onClick={run} type="button">{busy ? "Working…" : "Run Java"}</Button>
-    <Button size="sm" variant="secondary" disabled={busy} onClick={() => { void refreshStatus(); }} type="button">Refresh status</Button>
+    <Button size="sm" variant="secondary" disabled={busy || !quota?.available} onClick={run} type="button">{busy ? "Working…" : "Run"}</Button>
+    <Button size="sm" disabled={busy || !quota?.available} onClick={run} type="button">Submit</Button>
+    <Button size="sm" variant="secondary" disabled={busy} onClick={() => { void refreshStatus(); void refreshCompletion(); }} type="button">Refresh status</Button>
+    <p>Run and Submit both judge all test cases and save a submission. Only a LeetCollab-verified pass marks this problem solved.</p>
+    <p role="status">{completion === "solved" ? "Solved - LeetCollab verified" : completion === "unavailable" ? "Completion status unavailable. Refresh status to try again." : completion === "loading" ? "Loading completion status…" : "Not solved"}</p>
     {quota && <p>{quota.remaining} of {quota.limit} shared executions remaining. Reset: {new Date(quota.resetAt).toLocaleString()}. {quota.unavailableReason === "provider_unconfigured" ? "External sandbox is not configured." : ""}</p>}
     {quota?.unavailableReason === "quota_exhausted" && (quota.fallback ? <p><a href={quota.fallback.url} target="_blank" rel="noreferrer">Practice on {quota.fallback.name}</a>. External results are not LeetCollab-verified.</p> : <p>This original exercise must wait for quota reset.</p>)}
     <div>Personal review grade: {(["again", "hard", "good", "easy"] as const).map(value => <Button size="sm" variant="secondary" key={value} disabled={busy} onClick={() => grade(value)} type="button">{value}</Button>)}</div>
+    <p>Personal grades schedule your next review: again in 1 day, hard in 3, good in 7, easy in 14. They do not mark a problem solved.</p>
     {reviewAt && <p>Suggested review: {new Date(reviewAt).toLocaleString()}. Repeat practice is voluntary.</p>}
     {message && <p role="status">{message}</p>}
     {statusError && <p role="status">{statusError}</p>}

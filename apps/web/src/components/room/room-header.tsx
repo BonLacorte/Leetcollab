@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ChevronLeft, ChevronRight, Code2, LogOut, Moon, Pause, Play, RotateCcw, Sun } from "lucide-react";
 import { useTheme } from "../theme-provider";
 import { Badge } from "../ui/badge";
@@ -36,10 +37,10 @@ export function RoomHeader({
 
   return (
     <header className="room-header">
-      <div className="brand">
+      <Link className="brand" href="/" aria-label="LeetCollab home">
         <span className="brand-icon"><Code2 aria-hidden="true" /></span>
         <span>LeetCollab</span>
-      </div>
+      </Link>
       <nav className="problem-nav" aria-label="Problem navigation">
         <Button disabled={!canChangeProblem} onClick={onPreviousProblem} size="sm" variant="outline">
           <ChevronLeft aria-hidden="true" />

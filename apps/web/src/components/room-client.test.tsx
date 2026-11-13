@@ -55,6 +55,9 @@ it("keeps a room with no selected problem usable without judge or review control
   });
   const buttons = Array.from(container.querySelectorAll("button"), button => button.textContent);
   expect(buttons).toContain("Leave Room");
-  expect(buttons).not.toContain("Run Java");
+  expect(buttons).not.toContain("Run");
+  expect(buttons).not.toContain("Submit");
+  expect(buttons).not.toContain("Mark solved");
+  expect(container.querySelector('a[aria-label="LeetCollab home"]')?.getAttribute("href")).toBe("/");
   expect(buttons).not.toContain("again");
 });
