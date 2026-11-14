@@ -2,6 +2,74 @@
 
 Apply new migrations with `supabase migration up --local` for an existing local project, or review `supabase db push --dry-run` before an operator applies hosted migrations. Never reset an existing database. The migrations preserve prior rows and introduce 15 original exercises with private Java fixture harnesses. The profile backfill recovers existing Auth users with missing profiles using the signup normalization and collision rules, without replacing existing profiles. No proprietary statements or hidden tests were copied. The original exercises have no source judge, so their fallback is null.
 
+## Staging setup
+
+Use the existing Vercel web/API, Render realtime and Supabase database/auth split.
+Next.js serves dynamic API and OAuth callback routes; deploy it as a server-capable
+application. Use Node 22 (`.nvmrc`) and pnpm 11.16.0 (`package.json`). Both apps need
+the repository workspace, root lockfile and `packages/contracts`; retain development
+dependencies such as TypeScript and tsup during installation.
+
+For Vercel, select Next.js with `apps/web` as project root and enable access to
+workspace files outside that directory. Install from the repository workspace
+with `CI=true pnpm install --frozen-lockfile`. Build contracts before web:
+
+```sh
+pnpm --filter @leetcollab/contracts build && pnpm --filter @leetcollab/web build
+```
+
+Confirm the configured install/build working directories resolve the workspace
+and preserve the dynamic routes in actual deployment output.
+
+For Render realtime, use the repository root as build context. Build:
+
+```sh
+CI=true pnpm install --frozen-lockfile && pnpm --filter @leetcollab/contracts build && pnpm --filter @leetcollab/realtime build
+```
+
+Start with `pnpm --filter @leetcollab/realtime start`, use `/health` for process
+health and keep one instance with autoscaling disabled. Rooms, shared code, chat,
+timer and whiteboard are in memory and disappear on process replacement. A disk
+does not persist these Maps; personal saved drafts and grades live in Supabase.
+
+| Location | Environment names and boundary |
+| --- | --- |
+| Web public build configuration | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SOCKET_URL`. Use the hosted Supabase URL/key and Render public HTTPS origin. Rebuild when these values change. |
+| Web server runtime | `SUPABASE_SERVICE_ROLE_KEY`; optional `SUPABASE_URL` override must select the same project. The service-role key is required even for disabled-judge status paths that instantiate the admin client. |
+| Realtime runtime | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN` set to the exact frontend origin. Render supplies `PORT`. Realtime needs no service-role key. |
+| Deferred judge, web server only | `JDOODLE_CLIENT_ID`, `JDOODLE_CLIENT_SECRET`, `JDOODLE_JAVA_VERSION_INDEX`, `JDOODLE_LIMITS_CONFIRMED`; tuning: `JUDGE_DAILY_LIMIT`, `JUDGE_MAX_CONCURRENCY`, `JUDGE_RESERVATION_SECONDS`, `JUDGE_REQUEST_TIMEOUT_MS`. Keep `JDOODLE_LIMITS_CONFIRMED=false` and execution disabled. |
+
+The anonymous key is public by design and relies on RLS. Never prefix service-role
+or provider credentials with `NEXT_PUBLIC_`, expose them in browser assets/network,
+or commit values. Keep the Google client secret in Supabase provider configuration.
+The tracked app `.env.example` files list local defaults; loopback addresses cannot
+serve hosted apps.
+
+Choose a stable staging frontend HTTPS origin. Match it in realtime `CORS_ORIGIN`,
+Google JavaScript origins and Supabase Site URL/redirect allowlists. Configure
+Google's Supabase `/auth/v1/callback` separately from the application's
+`/auth/callback`, including intended `next` patterns, as described below. Avoid
+arbitrary preview-domain wildcards and ensure preview protection permits the test
+browsers and callback. The browser forces WebSocket transport: confirm its actual
+authenticated connection to Render. HTTP CORS configuration alone does not enforce
+a WebSocket Origin allowlist or prove authorization.
+
+Before applying hosted schema, inventory migration history against
+`supabase/migrations`, review `supabase db push --dry-run` for additive changes,
+and preserve existing rows. Never reset or blindly replay historical migrations.
+Review all migrations, including grade fixes, quota preservation, profile backfill
+and retired external-recording permissions. Verify the 15 enabled exercises and
+private fixtures supplied by migrations, profile coverage and actual grants/RLS
+under dedicated user tokens. `supabase/seed.sql` is intentionally empty. Run the
+existing database regressions only in a separately disposable database.
+
+Use the [two-user staging checklist](../CONTINUATION.md#staging-handoff) and record
+the deployed revision and results. A successful build, `/health` response or local
+browser pass does not establish hosted Auth, schema parity, WebSockets or privacy.
+Retain the previous app revision for rollback and review schema compatibility;
+rolling back the app does not roll back database changes. Production release
+follows the scoped hosted checks; full product E2E also requires live execution.
+
 ## Google sign-in
 
 Retain email/password. Render `GoogleSignInButton` on the sign-in surface; its optional `next` prop is a relative application path. Styling may change without duplicating its OAuth logic. The shared Supabase browser client uses PKCE cookies. `/auth/callback` exchanges the code and redirects only to a sanitized internal path. Errors return stable `authError` codes without provider details. Use a single origin consistently when starting and completing a flow.
@@ -14,7 +82,7 @@ An operator must configure the following, without putting secrets in tracked fil
 4. Set Supabase Site URL to the real application origin. Add the application's `/auth/callback` URL to its redirect allow list, including the `next` query pattern for the intended internal destinations. Prefer explicit production origins; do not allow arbitrary preview domains. Local example: `http://localhost:3000/auth/callback?next=/**` plus the callback with no query.
 5. Supabase's built-in automatic identity linking for matching verified email is accepted. Do not implement custom linking or enable manual linking. Verify that an existing confirmed email/password account retains its user ID and progress after Google sign-in, and that a distinct verified email creates a separate account.
 
-No Google credentials are needed for controlled callback tests. Live consent, identity linking and hosted cookies still require operator verification.
+No Google credentials are needed for controlled callback tests. The later Google live follow-up, summarized in the 2026-11-14 readiness assessment, records a user report of same-email Google sign-in loading a previous draft. This establishes observed local access/continuity, not an independent measurement of stable user IDs, distinct-email separation or all progress/submission continuity. Verify those properties and HTTPS cookies on the target hosted environment; do not treat historical local success as hosted verification.
 
 The application callback returns a relative `Location` header so the browser retains its public origin even when Next binds to `0.0.0.0`. Redirects use only sanitized internal paths and stable error codes; request origins and forwarding headers do not choose a redirect origin.
 
@@ -38,4 +106,4 @@ References: [REST contract](https://www.jdoodle.com/docs/api/rest), [quota and r
 
 ## Validation
 
-Run `pnpm test`, `pnpm typecheck` and `pnpm build` with placeholder public Supabase variables if no local configuration exists. Run `supabase/tests/backend_mvp_rls.sql` through psql in a disposable local Supabase database with pgTAP. Also run `supabase/tests/quota_profile_recovery.sql` and `supabase/tests/external_recording_retired.sql` through psql against the migrated disposable database for quota/profile recovery and retired-recording permissions. Run `TEST_POSTGRES_CONTAINER=<local container> TEST_DATABASE_NAME=<test database> python3 supabase/tests/quota_concurrency.py` against that disposable database. The concurrency test uses two database connections and is unsuitable for shared or production databases. Mock execution proves broker behavior, not sandbox security or live Java execution. No deployment, provider request or hosted database mutation is part of this delivery.
+Run `pnpm test`, `pnpm typecheck` and `pnpm build` with placeholder public Supabase variables if no local configuration exists. Run `supabase/tests/backend_mvp_rls.sql` through psql in a disposable local Supabase database with pgTAP. Also run `supabase/tests/quota_profile_recovery.sql` and `supabase/tests/external_recording_retired.sql` through psql against the migrated disposable database for quota/profile recovery and retired-recording permissions. Run `TEST_POSTGRES_CONTAINER=<local container> TEST_DATABASE_NAME=<test database> python3 supabase/tests/quota_concurrency.py` against that disposable database. The concurrency test uses two database connections and is unsuitable for shared or production databases. Mock execution proves broker behavior, not sandbox security or live Java execution. These local checks do not establish a deployment, live provider execution or hosted database parity.
