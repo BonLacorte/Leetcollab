@@ -3,8 +3,9 @@
 `apps/web/src/lib/server/judge/render.ts` is offline groundwork only. It does
 not make Run or Submit usable through Render or safe for public Java execution.
 Production `context.ts` still selects JDoodle. The production route duration, JDoodle selection, credential configuration and
-preview settings are unchanged. Submission ingress now counts at most 256 KiB of
-raw JSON before parsing. Private additive admission RPCs remain unused in production.
+preview settings are unchanged. Submission ingress follows the bounded
+[judge API contract](backend-setup.md#judge-integration). Private additive admission
+RPCs remain unused in production.
 
 `RenderProvider.inactive()` is always unconfigured. The only configured construction
 path is the explicitly named `forOfflineTests(config, transport)` seam, requiring
