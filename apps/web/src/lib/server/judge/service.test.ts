@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { JudgeQuota, JudgeSubmissionRequest, JudgeVerdict } from "@leetcollab/contracts";
 import { JudgeService } from "./service";
+import { OnlineCompilerProvider } from "./onlinecompiler";
 import type {
   ExecutionProvider,
   JudgeCompletion,
@@ -228,4 +229,46 @@ it.each(["busy", "exhausted", "unconfigured"] as const)("keeps private Render ad
   const result = await new JudgeService(bound, provider, { renderPolicyId: "synthetic" }).status(problemId);
   expect(result.body).toMatchObject({ available: false, used: 0 });
   expect(result.body).not.toHaveProperty("admission");
+});
+
+describe("OnlineCompiler uses the existing verified comparison and persistence path", () => {
+  const success = { output: "42\n", error: "", status: "success", exit_code: 0, signal: null, truncated: false };
+  const options = { apiKey: "synthetic-rest-key", limitsConfirmed: true, executionApproved: true };
+
+  it.each([
+    [success, "accepted", 1],
+    [{ ...success, output: "41\n" }, "wrong_answer", 0],
+    [{ ...success, output: "", error: "Main.java:2: error: cannot find symbol", status: "error", exit_code: 1 }, "compile_error", 0],
+  ] as const)("persists only the verdict supported by provider evidence and fixtures: %s", async (payload, verdict, passed) => {
+    const repository = new MemoryRepository(config());
+    const reserve = vi.spyOn(repository, "reserve");
+    const send = vi.fn(async () => new Response(JSON.stringify(payload)));
+    const provider = new OnlineCompilerProvider({ ...options, fetch: send as typeof fetch });
+    const service = new JudgeService(repository, provider, { now: () => now });
+    const input = request();
+    const first = await service.submit("user-a", input);
+    expect(first.body).toMatchObject({ ok: true, submission: {
+      judgeState: "completed", verdict, verification: "leetcollab", testsPassed: passed, testsTotal: 1,
+    }, quota: { used: 1, active: 0 } });
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ runner: "onlinecompiler" }));
+    expect(await service.submit("user-a", input)).toEqual(first);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await repository.getSubmission("user-b", [...repository.submissions.keys()][0])).toBeNull();
+  });
+
+  it("retains an ambiguous capacity refusal without declaring the entire account quota exhausted", async () => {
+    const repository = new MemoryRepository(config());
+    const exhaust = vi.spyOn(repository, "exhaust");
+    const send = vi.fn(async () => new Response(JSON.stringify(success), { status: 429 }));
+    const service = new JudgeService(repository,
+      new OnlineCompilerProvider({ ...options, fetch: send as typeof fetch }), { now: () => now });
+    const input = request();
+    expect((await service.submit("user-a", input)).body).toMatchObject({
+      ok: false, error: { code: "JUDGE_UNAVAILABLE" }, quota: { used: 1, remaining: 19 },
+    });
+    expect([...repository.submissions.values()][0]).toMatchObject({ judgeState: "failed", testsPassed: 0 });
+    await service.submit("user-a", input);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(exhaust).not.toHaveBeenCalled();
+  });
 });

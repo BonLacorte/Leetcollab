@@ -94,3 +94,56 @@ describe("server-owned Render RPC binding", () => {
     }
   });
 });
+
+describe("server-owned OnlineCompiler reservation binding", () => {
+  it.each([
+    [undefined, "reserve_judge_submission"],
+    ["onlinecompiler", "reserve_onlinecompiler_submission"],
+  ] as const)("binds runner %s to its trusted quota RPC", async (runner, name) => {
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      result: "reserved", submissionId, used: 1, limit: 20, active: 1,
+      resetAt: period.end,
+    }, error: null });
+    const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient);
+    const result = await repo.reserve({
+      userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
+      period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45, runner,
+    });
+    expect(rpc).toHaveBeenCalledExactlyOnceWith(name, {
+      p_user_id: userId, p_problem_id: problemId, p_idempotency_key: submissionId,
+      p_language: "java", p_source_code: "class Solution {}",
+      p_period_start: period.start, p_period_end: period.end, p_quota_limit: 20,
+      p_active_limit: 4, p_reservation_seconds: 45,
+    });
+    expect(result).toMatchObject({ result: "reserved", submissionId,
+      quota: { used: 1, active: 1, remaining: 19 } });
+    expect(result).not.toHaveProperty("attempt");
+  });
+
+  it("does not retry or fall back after a runner-bound reservation refusal", async () => {
+    const refusal = new Error("idempotency key belongs to another judge runner");
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: refusal });
+    const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient);
+    await expect(repo.reserve({
+      userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
+      period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
+      runner: "onlinecompiler",
+    })).rejects.toBe(refusal);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects mixed Render and OnlineCompiler execution authority before a reservation", async () => {
+    const rpc = vi.fn();
+    const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient);
+    await expect(repo.reserve({
+      userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
+      period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
+      runner: "onlinecompiler",
+      render: { policyId: "synthetic", provenance: {
+        provider: "render", workspaceId: "fixture", groupId: "fixture",
+        imageId: "fixture", toolchain: "synthetic",
+      } },
+    })).rejects.toThrow("Invalid server-owned judge runner selection.");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});

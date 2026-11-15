@@ -59,3 +59,5 @@ jobs:
         run: |
           python3 "$GITHUB_WORKSPACE/supabase/tests/render_admission.py"
           python3 "$GITHUB_WORKSPACE/supabase/tests/quota_concurrency.py"
+          docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/onlinecompiler_reservations.sql"
+          python3 "$GITHUB_WORKSPACE/supabase/tests/onlinecompiler_concurrency.py"

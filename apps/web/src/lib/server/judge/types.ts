@@ -76,6 +76,7 @@ export interface JudgeRepository {
     quotaLimit: number;
     activeLimit: number;
     reservationSeconds: number;
+    runner?: "onlinecompiler";
     render?: { policyId: string; provenance: RenderProvenance };
   }): Promise<Reservation>;
   getSubmission(userId: string, submissionId: string): Promise<StoredSubmission | null>;
@@ -101,6 +102,7 @@ export type ExecutionResult =
     };
 
 export interface ExecutionProvider {
+  readonly id?: "jdoodle" | "onlinecompiler" | "render";
   readonly configured: boolean;
   readonly provenance?: RenderProvenance;
   execute(source: string, attempt?: ExecutionAttempt): Promise<ExecutionResult>;

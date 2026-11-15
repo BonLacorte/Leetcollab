@@ -170,6 +170,7 @@ export class JudgeService {
       quotaLimit: this.quotaLimit,
       activeLimit: this.activeLimit,
       reservationSeconds: this.reservationSeconds,
+      ...(this.provider.id === "onlinecompiler" ? { runner: "onlinecompiler" as const } : {}),
       ...(this.provider.provenance && this.renderPolicyId ? { render: {
         policyId: this.renderPolicyId, provenance: this.provider.provenance,
       } } : {}),

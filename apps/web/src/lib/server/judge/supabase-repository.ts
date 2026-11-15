@@ -88,8 +88,12 @@ export class SupabaseJudgeRepository implements JudgeRepository {
   }
 
   async reserve(input: Parameters<JudgeRepository["reserve"]>[0]): Promise<Reservation> {
+    if (input.runner && (input.runner !== "onlinecompiler" || input.render)) {
+      throw new Error("Invalid server-owned judge runner selection.");
+    }
     if (input.render) return this.reserveRender(input);
-    const { data, error } = await this.client.rpc("reserve_judge_submission", {
+    const { data, error } = await this.client.rpc(input.runner === "onlinecompiler"
+      ? "reserve_onlinecompiler_submission" : "reserve_judge_submission", {
       p_user_id: input.userId,
       p_problem_id: input.problemId,
       p_idempotency_key: input.idempotencyKey,

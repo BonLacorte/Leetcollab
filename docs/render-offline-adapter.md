@@ -2,7 +2,7 @@
 
 `apps/web/src/lib/server/judge/render.ts` is offline groundwork only. It does
 not make Run or Submit usable through Render or safe for public Java execution.
-Production `context.ts` still selects JDoodle. The production route duration, JDoodle selection, credential configuration and
+Production `context.ts` supports explicit JDoodle or OnlineCompiler selection; Render remains unselectable. The production route duration, credential configuration and
 preview settings are unchanged. Submission ingress follows the bounded
 [judge API contract](backend-setup.md#judge-integration). Private additive admission
 RPCs remain unused in production.
