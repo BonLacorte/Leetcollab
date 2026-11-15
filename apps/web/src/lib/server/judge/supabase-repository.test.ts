@@ -50,3 +50,47 @@ describe("PostgreSQL timestamps satisfy the public judge response contract", () 
     expect(judgeSubmissionSchema.parse(stored).createdAt).toBe("2026-11-13T23:55:00.000Z");
   });
 });
+
+describe("server-owned Render RPC binding", () => {
+  it("uses private admission and lifecycle RPCs with the durable identity and authenticated owner", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      result: "reserved", submissionId, used: 1, limit: 9, active: 1, resetAt: period.end,
+    }, error: null });
+    const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient);
+    const provenance = { provider: "render" as const, workspaceId: "fixture", groupId: "fixture", imageId: "fixture", toolchain: "synthetic JDK" };
+    const result = await repo.reserve({
+      userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
+      period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
+      render: { policyId: "reviewed-fixture", provenance },
+    });
+    expect(rpc.mock.calls[0]).toEqual(["reserve_render_submission", {
+      p_user_id: userId, p_problem_id: problemId, p_idempotency_key: submissionId,
+      p_source_code: "class Solution {}", p_policy_id: "reviewed-fixture", p_provenance: provenance,
+    }]);
+    expect(result.result).toBe("reserved");
+    if (result.result !== "reserved") throw new Error("Expected an admitted attempt");
+    expect(result.attempt?.id).toBe(submissionId);
+    await result.attempt!.begin();
+    await result.attempt!.acknowledge("sbx-fixture");
+    await result.attempt!.cleanupAcknowledged("sbx-fixture");
+    expect(rpc.mock.calls.slice(1)).toEqual(["creating", "acknowledged", "settled"].map((phase) => ["record_render_attempt", {
+      p_user_id: userId, p_submission_id: submissionId, p_phase: phase,
+      p_resource_id: phase === "creating" ? null : "sbx-fixture",
+    }]));
+    await repo.getQuota(period, 20, "reviewed-fixture");
+    expect(rpc).toHaveBeenLastCalledWith("get_render_quota_status", { p_policy_id: "reviewed-fixture" });
+  });
+  it("does not hand out execution authority on a duplicate or admission failure", async () => {
+    const rpc = vi.fn();
+    const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient);
+    for (const result of ["existing", "in_progress", "busy", "exhausted"]) {
+      rpc.mockResolvedValue({ data: { result, submissionId, used: 1, limit: 9, active: 1, resetAt: period.end }, error: null });
+      const reservation = await repo.reserve({
+        userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}", period,
+        quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
+        render: { policyId: "synthetic", provenance: { provider: "render", workspaceId: "fixture", groupId: "fixture", imageId: "fixture", toolchain: "synthetic" } },
+      });
+      expect(reservation).not.toHaveProperty("attempt");
+    }
+  });
+});

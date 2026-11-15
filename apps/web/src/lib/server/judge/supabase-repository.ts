@@ -8,6 +8,8 @@ import type {
   QuotaPeriod,
   Reservation,
   StoredSubmission,
+  ExecutionAttempt,
+  AdmissionQuota,
 } from "./types";
 
 type RpcQuota = {
@@ -15,6 +17,7 @@ type RpcQuota = {
   limit: number;
   active: number;
   resetAt: string;
+  admission?: AdmissionQuota["admission"];
 };
 
 function quota(value: RpcQuota): JudgeQuota {
@@ -69,7 +72,12 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     };
   }
 
-  async getQuota(period: QuotaPeriod, limit: number): Promise<JudgeQuota> {
+  async getQuota(period: QuotaPeriod, limit: number, renderPolicyId?: string): Promise<AdmissionQuota> {
+    if (renderPolicyId) {
+      const { data, error } = await this.client.rpc("get_render_quota_status", { p_policy_id: renderPolicyId });
+      if (error) throw error;
+      return { ...quota(data as RpcQuota), admission: (data as RpcQuota).admission };
+    }
     const { data, error } = await this.client.rpc("get_judge_quota_status", {
       p_period_start: period.start,
       p_period_end: period.end,
@@ -80,6 +88,7 @@ export class SupabaseJudgeRepository implements JudgeRepository {
   }
 
   async reserve(input: Parameters<JudgeRepository["reserve"]>[0]): Promise<Reservation> {
+    if (input.render) return this.reserveRender(input);
     const { data, error } = await this.client.rpc("reserve_judge_submission", {
       p_user_id: input.userId,
       p_problem_id: input.problemId,
@@ -100,6 +109,40 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     if (result.result === "reserved" || result.result === "existing" || result.result === "in_progress") {
       if (!result.submissionId) throw new Error("Judge reservation did not return a submission ID.");
       return { result: result.result, submissionId: result.submissionId, quota: resultQuota };
+    }
+    return { result: result.result, quota: resultQuota };
+  }
+
+  private async reserveRender(input: Parameters<JudgeRepository["reserve"]>[0]): Promise<Reservation> {
+    const { policyId, provenance } = input.render!;
+    const { data, error } = await this.client.rpc("reserve_render_submission", {
+      p_user_id: input.userId, p_problem_id: input.problemId,
+      p_idempotency_key: input.idempotencyKey, p_source_code: input.sourceCode,
+      p_policy_id: policyId, p_provenance: provenance,
+    });
+    if (error) throw error;
+    const result = data as RpcQuota & { result: Reservation["result"]; submissionId?: string };
+    const resultQuota = quota(result);
+    if (result.result === "reserved" || result.result === "existing" || result.result === "in_progress") {
+      if (!result.submissionId) throw new Error("Missing durable Render attempt identity.");
+      const id = result.submissionId;
+      const transition = async (phase: string, resourceId: string | null = null) => {
+        const { error } = await this.client.rpc("record_render_attempt", {
+          p_user_id: input.userId, p_submission_id: id, p_phase: phase, p_resource_id: resourceId,
+        });
+        if (error) throw error;
+      };
+      const attempt: ExecutionAttempt = {
+        id, begin: () => transition("creating"),
+        acknowledge: (resourceId) => transition("acknowledged", resourceId),
+        cleanupAcknowledged: (resourceId) => transition("settled", resourceId),
+      };
+      return result.result === "reserved"
+        ? { result: "reserved", submissionId: id, quota: resultQuota, attempt }
+        : { result: result.result, submissionId: id, quota: resultQuota };
+    }
+    if (!["busy", "exhausted", "problem_not_found"].includes(result.result)) {
+      throw new Error("Invalid Render admission response.");
     }
     return { result: result.result, quota: resultQuota };
   }

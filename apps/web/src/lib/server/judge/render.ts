@@ -1,4 +1,4 @@
-import { ProviderFailure, type ExecutionProvider, type ExecutionResult } from "./types";
+import { ProviderFailure, type ExecutionProvider, type ExecutionResult, type ExecutionAttempt, type RenderProvenance } from "./types";
 
 // Offline preparation only. No environment reader, default fetch, or production selection.
 // Wire contract: render-oss/sdk typescript/v1.8.0, commit
@@ -15,6 +15,7 @@ type MockConfig = Readonly<{
   workspaceId: string;
   groupId: string;
   imageId: string;
+  toolchain: string;
 }>;
 type Transport = (url: string, init: RequestInit) => Promise<Response>;
 type Budget = { bytes: number };
@@ -156,9 +157,11 @@ async function commandResult(response: Response, signal: AbortSignal, budget: Bu
 
 export class RenderProvider implements ExecutionProvider {
   readonly configured: boolean;
+  readonly provenance?: RenderProvenance;
 
   private constructor(private readonly mock?: { config: MockConfig; transport: Transport }) {
     this.configured = Boolean(mock);
+    if (mock) this.provenance = Object.freeze({ provider: "render", ...mock.config });
   }
 
   static inactive(): RenderProvider { return new RenderProvider(); }
@@ -167,12 +170,15 @@ export class RenderProvider implements ExecutionProvider {
   static forOfflineTests(config: MockConfig, transport: Transport): RenderProvider {
     if (!/^tea-[0-9a-v]{20}$/.test(config.workspaceId)
       || !/^sbg-[0-9a-v]{20}$/.test(config.groupId)
-      || !/^sbb-[0-9a-v]{20}$/.test(config.imageId)) fail();
+      || !/^sbb-[0-9a-v]{20}$/.test(config.imageId)
+      || !config.toolchain?.trim() || config.toolchain.length > 256) fail();
     return new RenderProvider({ config: Object.freeze({ ...config }), transport });
   }
 
-  async execute(source: string, signal?: AbortSignal): Promise<ExecutionResult> {
+  async execute(source: string, context?: AbortSignal | ExecutionAttempt): Promise<ExecutionResult> {
     if (!this.mock || Buffer.byteLength(source, "utf8") > ENVELOPE) fail();
+    const signal = context instanceof AbortSignal ? context : undefined;
+    const attempt = context && !(context instanceof AbortSignal) ? context : undefined;
     const { config, transport } = this.mock;
     const started = performance.now();
     const budget = { bytes: 0 };
@@ -219,14 +225,18 @@ export class RenderProvider implements ExecutionProvider {
     try {
       // At most 22s main + 3s independent termination, within the unchanged 30s route.
       return await deadline<ExecutionResult>(22_000, signal, async (main) => {
+        // Persist creating before the only POST. A crash/lost acknowledgement holds admission.
+        if (attempt) await attempt.begin();
         let sandbox = await deadline(3_000, main, async (active) => {
           const created = await control("/sandboxes", active, {
+            ...(attempt ? { name: `leetcollab-${attempt.id}` } : {}),
             ownerId: config.workspaceId, sandboxGroupId: config.groupId, buildId: config.imageId,
             plan: "1c-2g", timeoutSeconds: 60, idleTimeoutSeconds: 300,
             networkPolicy: { type: "deny-all" }, env: {},
           });
           if (typeof created.id !== "string" || !/^sbx-[0-9a-v]{1,64}$/.test(created.id)) fail();
           id = created.id; // Capture before validating readiness or other metadata.
+          if (attempt) await attempt.acknowledge(id);
           return created;
         });
         await deadline(5_000, main, async (active) => {
@@ -276,6 +286,7 @@ export class RenderProvider implements ExecutionProvider {
               fail();
             }
             await read(response, active, { bytes: 0 }, () => {});
+            if (attempt) await attempt.cleanupAcknowledged(id!);
           });
         } catch { fail(); }
       }

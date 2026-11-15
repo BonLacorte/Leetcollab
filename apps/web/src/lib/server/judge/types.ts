@@ -5,6 +5,11 @@ import type {
   JudgeVerdict,
 } from "@leetcollab/contracts";
 
+// Internal admission status is stripped before any public response.
+export type AdmissionQuota = JudgeQuota & {
+  admission?: "available" | "busy" | "exhausted" | "unconfigured";
+};
+
 export type QuotaPeriod = {
   start: string;
   end: string;
@@ -22,8 +27,24 @@ export type StoredSubmission = JudgeSubmission & {
   judgeState: "reserved" | "completed" | "failed";
 };
 
+export type RenderProvenance = Readonly<{
+  provider: "render";
+  workspaceId: string;
+  groupId: string;
+  imageId: string;
+  toolchain: string;
+}>;
+
+// Server-owned callbacks. The durable submission ID is also the provider attempt label.
+export type ExecutionAttempt = {
+  id: string;
+  begin(): Promise<void>;
+  acknowledge(resourceId: string): Promise<void>;
+  cleanupAcknowledged(resourceId: string): Promise<void>;
+};
+
 export type Reservation =
-  | { result: "reserved"; submissionId: string; quota: JudgeQuota }
+  | { result: "reserved"; submissionId: string; quota: JudgeQuota; attempt?: ExecutionAttempt }
   | { result: "existing"; submissionId: string; quota: JudgeQuota }
   | { result: "in_progress"; submissionId: string; quota: JudgeQuota }
   | { result: "exhausted"; quota: JudgeQuota }
@@ -45,7 +66,7 @@ export type JudgeCompletion = {
 
 export interface JudgeRepository {
   getConfig(problemId: string): Promise<JudgeConfig | null>;
-  getQuota(period: QuotaPeriod, limit: number): Promise<JudgeQuota>;
+  getQuota(period: QuotaPeriod, limit: number, renderPolicyId?: string): Promise<AdmissionQuota>;
   reserve(input: {
     userId: string;
     problemId: string;
@@ -55,6 +76,7 @@ export interface JudgeRepository {
     quotaLimit: number;
     activeLimit: number;
     reservationSeconds: number;
+    render?: { policyId: string; provenance: RenderProvenance };
   }): Promise<Reservation>;
   getSubmission(userId: string, submissionId: string): Promise<StoredSubmission | null>;
   complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota }>;
@@ -80,7 +102,8 @@ export type ExecutionResult =
 
 export interface ExecutionProvider {
   readonly configured: boolean;
-  execute(source: string): Promise<ExecutionResult>;
+  readonly provenance?: RenderProvenance;
+  execute(source: string, attempt?: ExecutionAttempt): Promise<ExecutionResult>;
 }
 
 export class ProviderFailure extends Error {

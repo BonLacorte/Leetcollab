@@ -2,12 +2,14 @@
 
 `apps/web/src/lib/server/judge/render.ts` is offline groundwork only. It does
 not make Run or Submit usable through Render or safe for public Java execution.
-Production `context.ts` still selects JDoodle. No route, duration, reservation,
-comparison, persistence, schema, credential configuration or preview setting changes.
+Production `context.ts` still selects JDoodle. The production route duration, JDoodle selection, credential configuration and
+preview settings are unchanged. Submission ingress now counts at most 256 KiB of
+raw JSON before parsing. Private additive admission RPCs remain unused in production.
 
 `RenderProvider.inactive()` is always unconfigured. The only configured construction
 path is the explicitly named `forOfflineTests(config, transport)` seam, requiring
-injected workspace/group/immutable image identity and a mock HTTP transport. There
+injected workspace/group/immutable image and reviewed toolchain identity plus a mock
+HTTP transport. There
 is no default transport, environment reader, live credential support or activation
 flag. Tests supply fabricated HTTP responses and never compile source or contact
 Render. Future live integration requires a separately reviewed code change.
@@ -35,7 +37,8 @@ failure overrides an otherwise completed result. A successful termination HTTP
 response follows the pinned SDK contract; actual provider destruction timing is
 unproven. A lost create acknowledgement leaves the resource identity unknown;
 this module cannot reconcile it or prove independent expiry. Future admission must
-retain quota and halt further admission until reconciliation.
+retain quota and halt further admission until reconciliation. The offline
+integration now provides durable callbacks for this, described below.
 
 Raw main-response bytes share a 64 KiB envelope, checked before decoding or
 accumulating incomplete SSE lines/events, including multiline frames. Cleanup
@@ -50,13 +53,10 @@ No provider response supplies acceptance or resource-limit attribution.
 
 Before any live activation, separately establish and approve:
 
-- Correct provider/toolchain/attempt provenance through an additive migration;
-  existing reservations still record JDoodle. Preserve the shared Run/Submit
-  validation, assembled-source bound, comparison, idempotency and persistence.
-- Atomic durable Render admission and monthly budget accounting, ambiguity
-  reconciliation, effective group concurrency one, cost ceilings and quotas.
-  Existing JDoodle reset/accounting is insufficient for Render billing.
-- Bounded raw request ingress before JSON parsing; proposed 256 KiB maximum.
+- Install a separately approved Render policy only after all live prerequisites
+  below are established. The offline migration supplies no policy, defaults or prices.
+  Review the production composition and confirm effective group concurrency before
+  activation. Existing JDoodle accounting remains separate from Render admission.
 - Proven non-raiseable compiler/JVM descendant CPU, memory, process/thread and
   aggregate writable-byte/inode confinement, privilege separation, network denial,
   and whole-tree cleanup. VM size, Java heap flags and shell timeouts do not prove
@@ -76,3 +76,74 @@ remains parked and is outside this change.
 Validation: `pnpm test` includes mocked wire/failure/bounds tests, the production
 selection regression and existing service idempotency tests. `pnpm typecheck`
 checks interface compatibility. No local Java or provider HTTP is needed.
+
+
+## Offline durable admission
+
+`202611150001_render_offline_admission.sql` adds private Render policy, attempt and
+operator-evidence tables, without rewriting historical migrations or data. The
+existing `submissions.id` is the durable attempt ID, labeled `leetcollab-<id>` in
+mock create requests; `runner` records `render`, not JDoodle. Private provenance
+records the exact selected workspace/group/build and the reviewed immutable-image
+toolchain declaration. This is not a claimed live observation of `java -version`.
+No provider identity, budget, lifecycle or verdict authority comes from the browser.
+
+A policy must explicitly supply a review reference, validity, exact identities,
+daily/monthly attempt ceilings, active ceiling, a positive all-in worst-case cost
+per attempt and a monthly admission budget in integer micro USD. Unknown/null/zero
+cost or missing/expired/mismatched policy rejects admission. No proposed live
+$5/600-per-month values are installed or approved. Fixture numbers are synthetic.
+Policy and terminal-evidence tables deny direct writes even to `service_role`;
+installing policy/evidence requires a separately authorized operator. This change
+performs neither operation outside disposable tests.
+
+A row lock on the single provider policy serializes admission and transitions.
+Indexed attempt records supply shared UTC day/month counts, monthly reserved cost
+and all-period active capacity atomically. Counts/cost include failed and unknown
+attempts; no refund, automatic retry or expiry releases a Render reservation.
+Policy revisions never reset these records. These are admission-period spending
+reservations, not provider invoice measurements or a provider-enforced dollar cap. Private admission
+status also disables the existing status response on monthly/cost exhaustion,
+active-capacity saturation, ambiguity or policy expiry without publishing metadata.
+Actual pricing must bound all applicable charge paths before any policy is valid.
+
+The offline broker option `renderPolicyId` and injected provider provenance select
+these narrow RPCs through the existing repository/service and trusted comparison
+and completion contract. Production `context.ts` supplies neither. A reserved
+attempt's server callbacks persist `creating` before its one POST, then the known
+resource ID and cleanup acknowledgement. A second begin cannot authorize another
+POST. Completed results require settled cleanup evidence. Normal acknowledged-ID
+termination follows the existing adapter's HTTP contract; finite physical cleanup
+and final billing remain unproven activation prerequisites.
+
+If creation, acknowledgement persistence, execution or cleanup fails without a
+recorded settled state, failed completion records `unknown`, keeping usage, cost
+and active capacity. A crash in `creating` also blocks new admission without a
+lease timer. Unknown/creating attempts block the whole Render admission scope,
+including across period boundaries and policy revisions. A late ID can be saved
+without clearing unknown status. Cleanup callbacks cannot reconcile an unknown
+attempt. If completion persistence itself fails, the prior durable phase still
+holds capacity. Failures before any POST keep spent admission but release capacity.
+
+`reconcile_render_attempt` requires a preexisting operator terminal-evidence record
+for that attempt, including nonempty operator/evidence references, observation time
+and all discovered resource IDs. A known ID must be included. The broker has no
+write permission for that evidence. An operator must establish noncreation or
+terminal cleanup of every match using separately reviewed provider facts; an empty
+list or elapsed timer is not evidence. Reconciliation marks an unfinished attempt
+failed and releases capacity only; it never refunds quota/cost or authorizes a
+retry with the same key. Attempt records restrict cascading deletion so account or
+problem removal cannot silently discard unresolved cost or lifecycle evidence.
+
+Validation uses `supabase/tests/render_admission.py` against an owned disposable
+PostgreSQL database with all migrations applied, plus injected provider/repository,
+route and existing JDoodle tests. Run the database regression with
+`TEST_POSTGRES_CONTAINER=<owned-test-container> TEST_DATABASE_NAME=<disposable-db>
+python3 supabase/tests/render_admission.py`. It truncates Render test records and
+must never point at a shared or hosted database. No credentials, provider requests,
+live Java, infrastructure, deployment or public activation are part of these tests.
+
+CI applies all migrations to a fresh PostgreSQL service using the minimal test-only
+auth contract in `supabase/tests/disposable_auth.sql`, then runs the Render and
+existing JDoodle concurrency regressions. This is database transaction/permission
+coverage, not hosted Supabase auth parity or live provider evidence.
