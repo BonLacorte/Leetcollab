@@ -30,9 +30,11 @@ Quota is shared by the application account and reserved atomically before any pr
 
 ## Provider capability gate
 
+Production provider selection remains JDoodle. See [Render adapter preparation](render-offline-adapter.md) for the mock-only Render contract and its separate activation prerequisites.
+
 Live execution is disabled by default, even with credentials. JDoodle REST documents no caller-configurable numeric compilation/runtime/memory/output ceilings. Broker deadlines, output caps and source restrictions are not sandbox enforcement. The operator must obtain concrete provider confirmation of finite compilation, runtime, memory, output and process limits, per-run filesystem isolation, no network access and the selected Java version/entry-point behavior before setting `JDOODLE_LIMITS_CONFIRMED=true`. If those guarantees cannot be obtained for the free plan, keep it false and report the capability blocker. Do not execute submissions locally as a workaround.
 
-Server-only environment variables are listed in `apps/web/.env.example`. The adapter pins Java, accepts no extra libraries or compiler/runtime arguments, bounds the broker deadline to 30 seconds, limits source+harness to 64 KB, bounds response reading to 64 KB and output to 16 KB, and stores at most 4 KB of diagnostics. Provider CPU/memory fields are retained as opaque measurements; no undocumented memory unit is assumed. These application bounds do not stop remote execution. Regex source rejection is a usability restriction, not a security sandbox.
+Server-only environment variables are listed in `apps/web/.env.example`. The JDoodle adapter pins Java, accepts no extra libraries or compiler/runtime arguments, bounds the broker deadline to 30 seconds, limits source+harness to 64 KB, bounds response reading to 64 KB and output to 16 KB, and stores at most 4 KB of diagnostics. Provider CPU/memory fields are retained as opaque measurements; no undocumented memory unit is assumed. These application bounds do not stop remote execution. Regex source rejection is a usability restriction, not a security sandbox.
 
 References: [REST contract](https://www.jdoodle.com/docs/api/rest), [quota and reset](https://www.jdoodle.com/docs/api/credits), [failures](https://www.jdoodle.com/docs/api/errors).
 
