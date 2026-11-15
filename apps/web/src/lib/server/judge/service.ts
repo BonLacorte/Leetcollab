@@ -23,6 +23,8 @@ export type JudgeServiceOptions = {
   activeLimit?: number;
   reservationSeconds?: number;
   now?: () => Date;
+  // Offline injection only. Production composition never supplies this.
+  renderPolicyId?: string;
 };
 
 function quotaPeriod(now: Date): QuotaPeriod {
@@ -98,6 +100,7 @@ export class JudgeService {
   private readonly activeLimit: number;
   private readonly reservationSeconds: number;
   private readonly now: () => Date;
+  private readonly renderPolicyId?: string;
 
   constructor(
     private readonly repository: JudgeRepository,
@@ -107,6 +110,8 @@ export class JudgeService {
     this.quotaLimit = Math.min(20, Math.max(1, options.quotaLimit ?? 20));
     this.activeLimit = Math.max(1, options.activeLimit ?? 4);
     this.reservationSeconds = Math.min(120, Math.max(35, options.reservationSeconds ?? 45));
+    if (options.renderPolicyId && !provider.provenance) throw new Error("Render policy requires Render provenance.");
+    this.renderPolicyId = options.renderPolicyId;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -117,9 +122,10 @@ export class JudgeService {
     }
 
     const period = quotaPeriod(this.now());
-    const quota = await this.repository.getQuota(period, this.quotaLimit);
-    const exhausted = quota.remaining === 0;
-    const available = this.provider.configured && !exhausted;
+    const { admission, ...quota } = await this.repository.getQuota(period, this.quotaLimit, this.renderPolicyId);
+    const exhausted = quota.remaining === 0 || admission === "exhausted";
+    const available = this.provider.configured && (!this.provider.provenance || Boolean(this.renderPolicyId))
+      && (!admission || admission === "available") && !exhausted;
     return {
       status: 200,
       body: {
@@ -128,7 +134,7 @@ export class JudgeService {
         fallback: exhausted ? config.fallback : null,
         unavailableReason: exhausted
           ? "quota_exhausted"
-          : this.provider.configured ? null : "provider_unconfigured",
+          : available ? null : "provider_unconfigured",
       },
     };
   }
@@ -146,8 +152,8 @@ export class JudgeService {
     }
 
     const period = quotaPeriod(this.now());
-    if (!this.provider.configured) {
-      const quota = await this.repository.getQuota(period, this.quotaLimit);
+    if (!this.provider.configured || (this.provider.provenance && !this.renderPolicyId)) {
+      const { admission: _admission, ...quota } = await this.repository.getQuota(period, this.quotaLimit, this.renderPolicyId);
       return errorResponse(
         "JUDGE_UNAVAILABLE",
         "In-app execution is not configured. No external sandbox request was made.",
@@ -164,6 +170,9 @@ export class JudgeService {
       quotaLimit: this.quotaLimit,
       activeLimit: this.activeLimit,
       reservationSeconds: this.reservationSeconds,
+      ...(this.provider.provenance && this.renderPolicyId ? { render: {
+        policyId: this.renderPolicyId, provenance: this.provider.provenance,
+      } } : {}),
     });
 
     if (reservation.result === "problem_not_found") {
@@ -174,7 +183,7 @@ export class JudgeService {
         status: 429,
         body: {
           ok: false,
-          error: { code: "QUOTA_EXHAUSTED", message: "The shared daily execution quota is exhausted." },
+          error: { code: "QUOTA_EXHAUSTED", message: this.provider.provenance ? "The shared execution allowance is exhausted." : "The shared daily execution quota is exhausted." },
           quota: reservation.quota,
           fallback: config.fallback,
         },
@@ -196,7 +205,8 @@ export class JudgeService {
     }
 
     try {
-      const execution = await this.provider.execute(program);
+      if (this.provider.provenance && !reservation.attempt) throw new Error("Durable Render attempt required.");
+      const execution = await this.provider.execute(program, reservation.attempt);
       const completionBase = {
         userId,
         submissionId: reservation.submissionId,
@@ -250,10 +260,10 @@ export class JudgeService {
         });
         quota = completed.quota;
       } catch {
-        // The database lease expires and releases active capacity if completion cannot be recorded.
+        // JDoodle leases expire. Render retains active capacity until durable cleanup evidence or operator reconciliation.
       }
 
-      if (failure.kind === "quota_exhausted") {
+      if (failure.kind === "quota_exhausted" && !this.provider.provenance) {
         try {
           quota = await this.repository.exhaust(period.start);
         } catch {

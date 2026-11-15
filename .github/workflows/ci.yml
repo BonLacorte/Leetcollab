@@ -26,3 +26,36 @@ jobs:
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm build
+
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: render_safeguards_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_NAME: render_safeguards_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Apply migrations to disposable database
+        env:
+          TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/disposable_auth.sql"
+          for migration in "$GITHUB_WORKSPACE"/supabase/migrations/*.sql; do
+            docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$migration"
+          done
+      - name: Exercise shared admission transactions and permissions
+        env:
+          TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          python3 "$GITHUB_WORKSPACE/supabase/tests/render_admission.py"
+          python3 "$GITHUB_WORKSPACE/supabase/tests/quota_concurrency.py"

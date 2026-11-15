@@ -7,6 +7,7 @@ const config = {
   workspaceId: "tea-csprhmi3esus73alsv70",
   groupId: "sbg-cph1rs3idesc73a2b2mg",
   imageId: "sbb-cph1rs3idesc73a2b2mg",
+  toolchain: "synthetic-jdk-21-image",
 };
 const id = "sbx-1cd4gcph1rs3idesc73a2b2mg";
 const proxy = `https://${id}.oregon.sandbox.onrender.com`;
@@ -259,5 +260,51 @@ describe("Render offline preparation", () => {
     await expect(provider.execute("界".repeat(21_846))).rejects.toMatchObject({ kind: "unavailable" });
     await expect(provider.execute("source", AbortSignal.abort())).rejects.toMatchObject({ kind: "unavailable" });
     expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("durable Render attempt callbacks through injected transport", () => {
+  const attemptId = "11111111-1111-4111-8111-111111111111";
+  it("persists creating before POST, labels it, and records ID and cleanup in order", async () => {
+    const events: string[] = [];
+    const { provider, request } = fixture((url) => {
+      if (url.pathname === "/v1/sandboxes") events.push("POST");
+      if (url.pathname.endsWith("/terminate")) events.push("terminate");
+      return undefined;
+    });
+    await provider.execute("source", {
+      id: attemptId,
+      begin: async () => { events.push("begin"); },
+      acknowledge: async (resource) => { expect(resource).toBe(id); events.push("ack"); },
+      cleanupAcknowledged: async (resource) => { expect(resource).toBe(id); events.push("cleanup ack"); },
+    });
+    expect(events).toEqual(["begin", "POST", "ack", "terminate", "cleanup ack"]);
+    expect(JSON.parse(String(request.mock.calls[0][1].body)).name).toBe(`leetcollab-${attemptId}`);
+    expect(provider.provenance).toEqual({ provider: "render", ...config });
+  });
+  it("never creates when durable begin fails", async () => {
+    const { provider, request } = fixture();
+    await expect(provider.execute("source", {
+      id: attemptId, begin: async () => { throw new Error("Database unavailable"); },
+      acknowledge: vi.fn(), cleanupAcknowledged: vi.fn(),
+    })).rejects.toMatchObject({ kind: "unavailable" });
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("leaves a lost create acknowledgement unresolved without retry or cleanup fabrication", async () => {
+    const { provider, request } = fixture(() => { throw new Error("Lost acknowledgement"); });
+    const attempt = { id: attemptId, begin: vi.fn(), acknowledge: vi.fn(), cleanupAcknowledged: vi.fn() };
+    await expect(provider.execute("source", attempt)).rejects.toMatchObject({ kind: "unavailable" });
+    expect(attempt.begin).toHaveBeenCalledOnce();
+    expect(attempt.acknowledge).not.toHaveBeenCalled();
+    expect(attempt.cleanupAcknowledged).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledOnce();
+  });
+  it("rejects completion when cleanup evidence cannot be persisted", async () => {
+    const { provider, request } = fixture();
+    await expect(provider.execute("source", {
+      id: attemptId, begin: vi.fn(), acknowledge: vi.fn(),
+      cleanupAcknowledged: async () => { throw new Error("Lost database acknowledgement"); },
+    })).rejects.toMatchObject({ kind: "unavailable" });
+    expect(terminated(request)).toHaveLength(1);
   });
 });

@@ -194,3 +194,38 @@ it("uses the provider reset boundary rather than UTC midnight", async () => {
     start: "2026-11-11T23:55:00.000Z", end: "2026-11-12T23:55:00.000Z",
   });
 });
+
+describe("Render policy admission stays inside the shared judge service", () => {
+  const provenance = { provider: "render" as const, workspaceId: "synthetic workspace", groupId: "synthetic group", imageId: "synthetic image", toolchain: "synthetic JDK" };
+  it("does not execute or reserve Render without an explicit policy", async () => {
+    const repository = new MemoryRepository(config());
+    const provider = Object.assign(new OutputProvider(), { provenance });
+    const service = new JudgeService(repository, provider);
+    expect((await service.status(problemId)).body).toMatchObject({ available: false });
+    expect((await service.submit("user-a", request())).status).toBe(503);
+    expect(repository.used).toBe(0);
+    expect(provider.calls).toBe(0);
+  });
+  it("requires the durable attempt contract and never silently falls back to JDoodle admission", async () => {
+    const repository = new MemoryRepository(config());
+    const provider = Object.assign(new OutputProvider(), { provenance });
+    const result = await new JudgeService(repository, provider, { renderPolicyId: "synthetic-policy" }).submit("user-a", request());
+    expect(result.status).toBe(503);
+    expect(provider.calls).toBe(0);
+  });
+  it("rejects attaching Render policy to a different provider", () => {
+    expect(() => new JudgeService(new MemoryRepository(config()), new OutputProvider(), { renderPolicyId: "synthetic-policy" })).toThrow();
+  });
+});
+
+it.each(["busy", "exhausted", "unconfigured"] as const)("keeps private Render admission %s out of public status", async (admission) => {
+  const repository = new MemoryRepository(config());
+  const getQuota = async () => ({ ...repository.quota(), admission });
+  const bound = Object.assign(repository, { getQuota });
+  const provider = Object.assign(new OutputProvider(), { provenance: {
+    provider: "render" as const, workspaceId: "fixture", groupId: "fixture", imageId: "fixture", toolchain: "fixture",
+  } });
+  const result = await new JudgeService(bound, provider, { renderPolicyId: "synthetic" }).status(problemId);
+  expect(result.body).toMatchObject({ available: false, used: 0 });
+  expect(result.body).not.toHaveProperty("admission");
+});

@@ -1,6 +1,7 @@
 import { judgeSubmissionRequestSchema } from "@leetcollab/contracts";
 import { NextResponse } from "next/server";
 import { authenticateBearer } from "../../../../lib/server/authenticate";
+import { readSubmissionJson } from "../../../../lib/server/judge/request-body";
 import { getJudgeService } from "../../../../lib/server/judge/context";
 import { getSupabaseAdmin } from "../../../../lib/server/supabase-admin";
 
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
 
   let payload: unknown;
   try {
-    payload = await request.json();
+    payload = await readSubmissionJson(request);
   } catch {
     return json({ ok: false, error: { code: "INVALID_REQUEST", message: "Request body must be valid JSON." } }, 400);
   }
