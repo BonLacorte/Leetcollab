@@ -145,3 +145,17 @@ For that isolated runtime, start Next with `--hostname 127.0.0.1`, set realtime
 Realtime's default host remains `0.0.0.0` for existing deployments. Provider CORS
 settings do not restrict listener exposure. No fixture-only production bypass or
 local composition has been enabled by this change.
+
+The latest follow-up reached the existing Windows Docker engine using its supplied
+CLI path after port coordination was completed. Actual publication of database
+port `127.0.0.1:55442` failed with an address-in-use error, despite a successful WSL
+availability probe. Startup stopped at that collision. Only the distinctly named
+network and never-started database container in the room evaluation record were
+created; no Auth service, app listener, synthetic account or provider execution
+was started. Do not switch ports or modify shared engine configuration to proceed.
+
+The fixture-only composition now lives in `tools/onlinecompiler-room`, outside
+normal production builds. Its prepare command creates a separate disposable web
+copy and guards identity, room URL, problem/config, exact draft/assembled bytes,
+prior persisted outcome and two durable attempt files. It remains unverified as an
+authenticated end-to-end runtime until the concrete port collision is resolved.
