@@ -1,4 +1,8 @@
 This directory contains only the approved one-off local room fixture composition.
+The evaluation is complete and its authorized attempts are spent. Do not rerun
+the fixtures. See the [evaluation record](../../docs/onlinecompiler-room-evaluation.json)
+for outcomes and the [integration guide](../../docs/onlinecompiler-integration.md#authorized-private-evaluation)
+for scope and production limitations. The setup below describes the evaluated runtime.
 It is outside both application source trees. `prepare.mjs` copies the web app to
 `.onlinecompiler-room/web` and replaces the judge context only in that disposable
 copy. Normal builds never load `fixture-context.ts`. Run from the repository root.
@@ -15,12 +19,9 @@ real OnlineCompiler transport. No arbitrary draft is eligible.
 Start Next dev with `--webpack --hostname 127.0.0.1 --port 3320` in the prepared
 copy; realtime uses `HOST=127.0.0.1 PORT=3321`. Both must use only the task-owned
 Supabase URL `http://127.0.0.1:58550`. Never enable production confirmation flags.
-Only the two approved browser actions may spend the remaining provider allowance.
 Before startup verify the assigned ports are still free and publish disposable
 Auth/API/database ports only on loopback. Do not use shared/hosted databases.
 
-Account checks require usage to remain exactly consistent with three historical
-attempts and these two additional requests. The documented Free allowance is
-100,000/month; standard plans stop at their limit without automatic overages
-([pricing](https://onlinecompiler.io/pricing)). Any uncertainty stops execution.
-A successful local demo still does not establish production sandbox eligibility.
+The composition checks account usage against the historical attempts recorded in
+the evaluation record. Preserve its durable attempt files; preparing a new copy
+does not authorize additional execution.

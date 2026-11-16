@@ -20,6 +20,11 @@ OnlineCompiler requires all of the following server-only values:
 - `ONLINECOMPILER_EXECUTION_APPROVED=true`: explicit authority for the intended runtime
 - `ONLINECOMPILER_LIMITS_CONFIRMED=true`: reviewed evidence for the applicable safety contract
 
+For local development, put the REST key in `ONLINECOMPILER_API_KEY` in
+`apps/web/.env.local`, using `apps/web/.env.example` as the template. For a hosted
+web app, use its server runtime environment settings. Keep approval flags false
+until their prerequisites are met.
+
 A key or selector alone leaves status unavailable. Do not set either approval flag
 just to make buttons clickable. The constructor's injected options let tests use
 synthetic credentials and responses without attesting provider capabilities.

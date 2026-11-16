@@ -100,7 +100,7 @@ Quota is shared by the application account and reserved atomically before any pr
 
 ## Provider capability gate
 
-Provider selection is server-only: `JUDGE_PROVIDER=disabled`, `jdoodle`, or `onlinecompiler`. Existing deployments without a selector retain their JDoodle configuration. New environment examples default to disabled. Unknown selections refuse execution; a provider failure never falls back to another provider. See [OnlineCompiler integration](onlinecompiler-integration.md) for its disabled-by-default contract and evaluation prerequisites, and [Render adapter preparation](render-offline-adapter.md) for the mock-only Render contract.
+See [provider selection and approval](onlinecompiler-integration.md#selection-and-approval) for the server-only selector, compatibility defaults and OnlineCompiler credential setup, and [Render adapter preparation](render-offline-adapter.md) for the mock-only Render contract.
 
 Live execution is disabled by default, even with credentials. JDoodle REST documents no caller-configurable numeric compilation/runtime/memory/output ceilings. Broker deadlines, output caps and source restrictions are not sandbox enforcement. The operator must obtain concrete provider confirmation of finite compilation, runtime, memory, output and process limits, per-run filesystem isolation, no network access and the selected Java version/entry-point behavior before setting `JDOODLE_LIMITS_CONFIRMED=true`. If those guarantees cannot be obtained for the free plan, keep it false and report the capability blocker. Do not execute submissions locally as a workaround.
 
