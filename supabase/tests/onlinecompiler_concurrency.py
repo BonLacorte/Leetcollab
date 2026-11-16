@@ -80,6 +80,58 @@ class RunnerReservationConcurrencyTest(unittest.TestCase):
         self.assertEqual(self.query(f"select runner from public.submissions where user_id='{self.user}'"),
                          "onlinecompiler")
 
+    def test_evaluation_two_remaining_slots_preserve_baseline_under_races(self):
+        # Independent oracle: used 7 + TWO approved slots = 9, concurrency one.
+        # Fixed UTC period avoids wall-clock reset/lease timing dependencies.
+        self.start = "2194-01-01T23:55:00+00:00"
+        self.end = "2194-01-02T23:55:00+00:00"
+        self.query("insert into public.judge_quota_periods "
+                   "(period_start,period_end,used,quota_limit,active) values "
+                   f"('{self.start}','{self.end}',7,20,0)")
+
+        def race(round_number):
+            barrier = threading.Barrier(8)
+
+            def request(index):
+                # Fixed, distinct keys in each wave; duplicates tested below.
+                key = str(uuid.UUID(int=round_number * 100 + index + 1))
+                barrier.wait()
+                return json.loads(self.query(
+                    "select public.reserve_onlinecompiler_submission("
+                    f"'{self.user}','{self.problem}','{key}','java','class Solution {{}}',"
+                    f"'{self.start}','{self.end}',9,1,45)"))
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                return list(pool.map(request, range(8)))
+
+        first = race(1)
+        self.assertEqual(sorted(r["result"] for r in first), ["busy"] * 7 + ["reserved"])
+        first_id = next(r["submissionId"] for r in first if r["result"] == "reserved")
+        self.assertEqual(self.query("select used::text || ',' || quota_limit::text || ',' || active::text "
+                                    "from public.judge_quota_periods "
+                                    f"where period_start='{self.start}'"), "8,9,1")
+        self.query(f"select public.complete_judge_submission('{self.user}','{first_id}',"
+                   "'completed','wrong_answer',0,3,1,'synthetic',null,null)")
+        second = race(2)
+        self.assertEqual(sorted(r["result"] for r in second), ["exhausted"] * 7 + ["reserved"])
+        second_id = next(r["submissionId"] for r in second if r["result"] == "reserved")
+        self.query(f"select public.complete_judge_submission('{self.user}','{second_id}',"
+                   "'failed','runtime_error',0,3,0,'synthetic retained charge',null,null)")
+        # Completed and failed duplicate keys remain charged and never re-execute.
+        keys = self.query("select string_agg(idempotency_key::text,',') from public.submissions "
+                          f"where user_id='{self.user}'").split(',')
+        for key in keys:
+            replay = json.loads(self.query("select public.reserve_onlinecompiler_submission("
+                f"'{self.user}','{self.problem}','{key}','java','class Solution {{}}',"
+                f"'{self.start}','{self.end}',9,1,45)"))
+            self.assertEqual(replay["result"], "existing")
+            self.assertEqual(replay["used"], 9)
+        self.assertEqual({r["result"] for r in race(3)}, {"exhausted"})
+        self.assertEqual(self.query("select used::text || ',' || quota_limit::text || ',' || active::text "
+                                    "from public.judge_quota_periods "
+                                    f"where period_start='{self.start}'"), "9,9,0")
+        self.assertEqual(self.query(f"select count(*) from public.submissions where user_id='{self.user}'"), "2")
+
 
 if __name__ == "__main__":
     unittest.main()

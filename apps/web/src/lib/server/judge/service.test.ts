@@ -18,6 +18,7 @@ const now = new Date("2026-11-10T12:00:00.000Z");
 const sourceCode = "class Solution { public static int answer() { return 42; } }";
 
 class MemoryRepository implements JudgeRepository {
+  async readQuota() { return null; }
   used = 0;
   active = 0;
   limit = 20;

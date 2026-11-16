@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ getUser: vi.fn(), submit: vi.fn(), status: vi.fn() }));
+const mocks = vi.hoisted(() => ({ compose: vi.fn(), getUser: vi.fn(), submit: vi.fn(), status: vi.fn() }));
 vi.mock("../../../lib/server/supabase-admin", () => ({ getSupabaseAdmin: () => ({ auth: { getUser: mocks.getUser } }) }));
-vi.mock("../../../lib/server/judge/context", () => ({ getJudgeService: () => ({ submit: mocks.submit, status: mocks.status }) }));
+vi.mock("../../../lib/server/judge/context", () => ({ getJudgeService: (...args: unknown[]) => { mocks.compose(...args); return { submit: mocks.submit, status: mocks.status }; } }));
 import { POST } from "./submissions/route";
 import { GET } from "./status/route";
 const payload = { problemId: "11111111-1111-4111-8111-111111111111", language: "java", sourceCode: "class Solution {}", idempotencyKey: "22222222-2222-4222-8222-222222222222" };
@@ -24,10 +24,19 @@ describe("authenticated judge HTTP boundary", () => {
     mocks.submit.mockResolvedValue({ status: 429, body: { ok: false, error: { code: "QUOTA_EXHAUSTED" }, fallback: null } });
     const response = await POST(request({ ...payload, userId: "victim", verdict: "accepted",
       provenance: { provider: "render" }, quota: { used: 0 }, policyId: "forged", resolution: "gone" }));
+    expect(mocks.compose).toHaveBeenCalledWith("owner", payload.problemId);
     expect(mocks.submit).toHaveBeenCalledWith("owner", payload);
     expect(response.status).toBe(429);
     expect(await response.json()).toMatchObject({ fallback: null });
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+  it("passes the verified identity to status admission and production composition", async () => {
+    mocks.status.mockResolvedValue({ status: 200, body: { available: false } });
+    expect((await GET(new Request(`https://app.test/api/judge/status?problemId=${payload.problemId}`, {
+      headers: { authorization: "Bearer valid" },
+    }))).status).toBe(200);
+    expect(mocks.compose).toHaveBeenCalledWith("owner", payload.problemId);
+    expect(mocks.status).toHaveBeenCalledWith(payload.problemId, "owner");
   });
   it("requires auth and valid problem IDs for status", async () => {
     expect((await GET(new Request("https://app.test/api/judge/status"))).status).toBe(401);

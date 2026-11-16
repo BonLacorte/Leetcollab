@@ -38,6 +38,11 @@ Save a personal grade with **again**, **hard**, **good**, or **easy** to receive
 
 ## Design boundaries
 
+Hosted tester-only execution can restrict Run, Submit and judge status to one
+tester and exercise during a fixed window. See the
+[restricted evaluation configuration](docs/onlinecompiler-integration.md#restricted-hosted-evaluation)
+for admission requirements and closure behavior.
+
 - Supabase stores durable user/profile, problem, progress, and submission data.
 - Socket.IO owns live-only room presence, code, chat, and whiteboard state. This is intentional for the first MVP; state is lost after a server restart or after a room ends.
 - Authenticated code execution uses an external sandbox and remains disabled until provider credentials and supported resource limits are confirmed. See [backend setup](docs/backend-setup.md) for Google OAuth, API contracts, migrations and operator requirements.

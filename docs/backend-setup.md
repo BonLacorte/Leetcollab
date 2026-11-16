@@ -102,6 +102,8 @@ Quota is shared by the application account and reserved atomically before any pr
 
 See [provider selection and approval](onlinecompiler-integration.md#selection-and-approval) for the server-only selector, compatibility defaults and OnlineCompiler credential setup, and [Render adapter preparation](render-offline-adapter.md) for the mock-only Render contract.
 
+For bounded tester-only hosted admission, use the [restricted evaluation configuration](onlinecompiler-integration.md#restricted-hosted-evaluation).
+
 For OnlineCompiler eligibility, accepted provider limitations, learner disclosure and coordinated activation requirements, see the [accepted normal-user policy](onlinecompiler-integration.md#accepted-normal-user-policy) and [rollout and rollback](onlinecompiler-integration.md#rollout-and-rollback).
 
 Live execution is disabled by default, even with credentials. JDoodle REST documents no caller-configurable numeric compilation/runtime/memory/output ceilings. Broker deadlines, output caps and source restrictions are not sandbox enforcement. The operator must obtain concrete provider confirmation of finite compilation, runtime, memory, output and process limits, per-run filesystem isolation, no network access and the selected Java version/entry-point behavior before setting `JDOODLE_LIMITS_CONFIRMED=true`. If those guarantees cannot be obtained for the free plan, keep it false and report the capability blocker. Do not execute submissions locally as a workaround.
