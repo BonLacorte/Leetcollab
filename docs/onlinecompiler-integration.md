@@ -131,3 +131,17 @@ production eligibility. Production calls still pass through both approval checks
 in `OnlineCompilerProvider.execute`; no route exposes the lower-level function.
 A successful fixture evaluation does not establish safe arbitrary-user execution
 or resolve the production Run/Submit readiness requirement.
+
+The follow-up [authenticated room evaluation record](onlinecompiler-room-evaluation.json)
+records a blocked attempt to establish the approved disposable runtime. The Docker
+CLI could not reach a daemon because `/var/run/docker.sock` was absent; no preview
+ports were reserved and neither additional provider execution was attempted.
+The authenticated room and persistence requirements remain open. Resume only with
+an available owned disposable runtime, preview-owner port reservations and fresh
+free-only allowance evidence. Do not rerun the three spent adapter fixtures.
+
+For that isolated runtime, start Next with `--hostname 127.0.0.1`, set realtime
+`HOST=127.0.0.1`, and publish every disposable database/API port on `127.0.0.1`.
+Realtime's default host remains `0.0.0.0` for existing deployments. Provider CORS
+settings do not restrict listener exposure. No fixture-only production bypass or
+local composition has been enabled by this change.

@@ -28,6 +28,7 @@ import {
 } from "@leetcollab/contracts";
 
 const port = Number(process.env.PORT ?? 3001);
+const host = process.env.HOST ?? "0.0.0.0";
 const origin = process.env.CORS_ORIGIN ?? "http://localhost:3000";
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -546,4 +547,4 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(port, () => console.log(`Realtime server listening on http://localhost:${port}`));
+server.listen(port, host, () => console.log(`Realtime server listening on http://${host}:${port}`));
