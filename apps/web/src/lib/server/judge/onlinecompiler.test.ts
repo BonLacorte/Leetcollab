@@ -6,7 +6,7 @@ import { buildJavaProgram } from "./safety";
 // Responses and credentials are synthetic; these tests never run Java or contact a provider.
 const configured = {
   apiKey: "synthetic-server-rest-key",
-  limitsConfirmed: true,
+  policyAccepted: true,
   executionApproved: true,
 };
 const solution = `class Solution {
@@ -97,7 +97,7 @@ describe("OnlineCompilerProvider", () => {
   it.each([
     {},
     { apiKey: "" },
-    { limitsConfirmed: false },
+    { policyAccepted: false },
     { executionApproved: false },
   ])("does not issue a request unless credentials and both approvals are present: %j", async options => {
     const request = vi.fn();
@@ -113,7 +113,7 @@ describe("OnlineCompilerProvider", () => {
 
   it.each([undefined, "false", "1", "TRUE", "true"])("requires exact environment approvals: %s", async value => {
     vi.stubEnv("ONLINECOMPILER_API_KEY", configured.apiKey);
-    vi.stubEnv("ONLINECOMPILER_LIMITS_CONFIRMED", value);
+    vi.stubEnv("ONLINECOMPILER_POLICY_ACCEPTED", value);
     vi.stubEnv("ONLINECOMPILER_EXECUTION_APPROVED", value);
     const request = vi.fn(async () => respond());
     vi.stubGlobal("fetch", request);

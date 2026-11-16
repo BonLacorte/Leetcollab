@@ -110,6 +110,11 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
   }
 
   return <div className="practice-controls">
+    {quota?.provider === "onlinecompiler" && <p className="execution-notice">
+      Run and Submit send your Java code and the exercise harness to OnlineCompiler.io. Execution code, input and output are retained for 365 days. Do not include secrets or sensitive information.{" "}
+      <a href="https://onlinecompiler.io/privacy" target="_blank" rel="noreferrer">Privacy policy</a>{" · "}
+      <a href="https://onlinecompiler.io/terms" target="_blank" rel="noreferrer">Terms of service</a>.
+    </p>}
     <Button size="sm" variant="secondary" disabled={busy || !quota?.available} onClick={run} type="button">{busy ? "Working…" : "Run"}</Button>
     <Button size="sm" disabled={busy || !quota?.available} onClick={run} type="button">Submit</Button>
     <Button size="sm" variant="secondary" disabled={busy} onClick={() => { void refreshStatus(); void refreshCompletion(); }} type="button">Refresh status</Button>

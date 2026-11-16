@@ -90,7 +90,7 @@ References: [Supabase Google setup](https://supabase.com/docs/guides/auth/social
 
 ## Judge integration
 
-Both judge endpoints require `Authorization: Bearer <Supabase access token>`. The server verifies the token through Supabase Auth. `POST /api/judge/submissions` accepts `{ problemId, language: "java", sourceCode, idempotencyKey }`; use one UUID per click and reuse it for retries. Success returns `{ ok: true, submission, quota }`. Failures return `{ ok: false, error, quota?, fallback? }`. `GET /api/judge/status?problemId=<uuid>` returns availability, quota, reset time and eligible fallback.
+Both judge endpoints require `Authorization: Bearer <Supabase access token>`. The server verifies the token through Supabase Auth. `POST /api/judge/submissions` accepts `{ problemId, language: "java", sourceCode, idempotencyKey }`; use one UUID per click and reuse it for retries. Success returns `{ ok: true, submission, quota }`. Failures return `{ ok: false, error, quota?, fallback? }`. `GET /api/judge/status?problemId=<uuid>` returns availability, selected provider, quota, reset time and eligible fallback.
 
 After authentication, submission ingestion accepts at most 256 KiB of raw UTF-8 JSON, counted before full parsing regardless of `Content-Length`. An oversized body, malformed UTF-8/JSON, or malformed or oversized declared length returns HTTP 400 with `INVALID_REQUEST` before judge admission. This transport bound is separate from source and assembled-program limits.
 
@@ -101,6 +101,8 @@ Quota is shared by the application account and reserved atomically before any pr
 ## Provider capability gate
 
 See [provider selection and approval](onlinecompiler-integration.md#selection-and-approval) for the server-only selector, compatibility defaults and OnlineCompiler credential setup, and [Render adapter preparation](render-offline-adapter.md) for the mock-only Render contract.
+
+OnlineCompiler uses the separately accepted [normal-user policy](onlinecompiler-integration.md#accepted-normal-user-policy): documented fresh gVisor isolation, no outbound network and shared finite per-run limits, with the stated stage-accounting, thread/inode, cleanup and independent-audit gaps explicitly accepted. Select `JUDGE_PROVIDER=onlinecompiler` and supply a server-only REST key, `ONLINECOMPILER_POLICY_ACCEPTED=true` and separately authorized `ONLINECOMPILER_EXECUTION_APPROVED=true` only in a coordinated release. All defaults remain disabled; the legacy `ONLINECOMPILER_LIMITS_CONFIRMED` cannot enable execution. The UI discloses transmission of learner Java code and the harness plus 365-day provider retention before Run/Submit. This implementation neither activates a runtime nor authorizes additional provider calls. See the integration guide for live-release and rollback requirements.
 
 Live execution is disabled by default, even with credentials. JDoodle REST documents no caller-configurable numeric compilation/runtime/memory/output ceilings. Broker deadlines, output caps and source restrictions are not sandbox enforcement. The operator must obtain concrete provider confirmation of finite compilation, runtime, memory, output and process limits, per-run filesystem isolation, no network access and the selected Java version/entry-point behavior before setting `JDOODLE_LIMITS_CONFIRMED=true`. If those guarantees cannot be obtained for the free plan, keep it false and report the capability blocker. Do not execute submissions locally as a workaround.
 

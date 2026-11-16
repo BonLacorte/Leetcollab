@@ -233,7 +233,7 @@ it.each(["busy", "exhausted", "unconfigured"] as const)("keeps private Render ad
 
 describe("OnlineCompiler uses the existing verified comparison and persistence path", () => {
   const success = { output: "42\n", error: "", status: "success", exit_code: 0, signal: null, truncated: false };
-  const options = { apiKey: "synthetic-rest-key", limitsConfirmed: true, executionApproved: true };
+  const options = { apiKey: "synthetic-rest-key", policyAccepted: true, executionApproved: true };
 
   it.each([
     [success, "accepted", 1],

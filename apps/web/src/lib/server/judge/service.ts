@@ -130,6 +130,7 @@ export class JudgeService {
       status: 200,
       body: {
         available,
+        provider: this.provider.id ?? null,
         ...quota,
         fallback: exhausted ? config.fallback : null,
         unavailableReason: exhausted
