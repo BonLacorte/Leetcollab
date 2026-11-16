@@ -17,7 +17,7 @@ const sources = [
 const root = process.env.OC_ROOM_ROOT!;
 const ownerId = process.env.OC_OWNER_ID!;
 if (!root || !ownerId || process.env.NODE_ENV === "production"
-  || process.env.NEXT_PUBLIC_SUPABASE_URL !== "http://127.0.0.1:55441"
+  || process.env.NEXT_PUBLIC_SUPABASE_URL !== "http://127.0.0.1:58550"
   || process.env.NEXT_PUBLIC_SOCKET_URL !== "http://127.0.0.1:3321") throw new Error("Isolated fixture runtime required");
 
 function attemptNumber() {

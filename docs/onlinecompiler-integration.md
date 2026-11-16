@@ -123,39 +123,42 @@ run database regression scripts against shared or hosted data.
 
 ## Authorized private evaluation
 
-The [evaluation record](onlinecompiler-evaluation.json) distinguishes direct live
-adapter outcomes from mocked checks, authenticated room coverage and database
-persistence. The shared `executeOnlineCompilerProgram` request/result boundary
-allows an isolated trusted caller to evaluate fixed fixtures without asserting
-production eligibility. Production calls still pass through both approval checks
-in `OnlineCompilerProvider.execute`; no route exposes the lower-level function.
-A successful fixture evaluation does not establish safe arbitrary-user execution
-or resolve the production Run/Submit readiness requirement.
+The [direct adapter record](onlinecompiler-evaluation.json) contains three live
+synthetic outcomes: accepted, wrong answer and compile error. Those are distinct
+from its mocked boundary checks and did not test authenticated rooms.
 
-The follow-up [authenticated room evaluation record](onlinecompiler-room-evaluation.json)
-records a blocked attempt to establish the approved disposable runtime. The Docker
-CLI could not reach a daemon because `/var/run/docker.sock` was absent; no preview
-ports were reserved and neither additional provider execution was attempted.
-The authenticated room and persistence requirements remain open. Resume only with
-an available owned disposable runtime, preview-owner port reservations and fresh
-free-only allowance evidence. Do not rerun the three spent adapter fixtures.
+The follow-up [room evaluation record](onlinecompiler-room-evaluation.json)
+contains two additional real provider executions driven by browser buttons in an
+owned disposable Supabase/Auth/database, web and realtime runtime. Wrong-answer
+Run persisted a completed nonaccepted submission with 0/1 checks passed and left
+the UI unsolved. Passing Submit persisted a completed accepted submission with
+1/1 checks passed. Both used `runner=onlinecompiler` and `verification=leetcollab`.
+The verified solved state survived browser reload and returning from home to the
+same room. Authenticated owner readback returned both submissions; the synthetic
+observer could read neither private owner row. No response interception or direct
+verdict insertion was used.
 
-For that isolated runtime, start Next with `--hostname 127.0.0.1`, set realtime
-`HOST=127.0.0.1`, and publish every disposable database/API port on `127.0.0.1`.
-Realtime's default host remains `0.0.0.0` for existing deployments. Provider CORS
-settings do not restrict listener exposure. No fixture-only production bypass or
-local composition has been enabled by this change.
+Nonexecuting usage metadata reconciled exactly five total provider runs and
+99,995 remaining from the 100,000 allowance. All five approved execution slots
+are spent. Do not rerun these fixtures. The record retains the earlier blocked
+checkpoints, concrete resource inventory and scoped cleanup plan.
 
-The latest follow-up reached the existing Windows Docker engine using its supplied
-CLI path after port coordination was completed. Actual publication of database
-port `127.0.0.1:55442` failed with an address-in-use error, despite a successful WSL
-availability probe. Startup stopped at that collision. Only the distinctly named
-network and never-started database container in the room evaluation record were
-created; no Auth service, app listener, synthetic account or provider execution
-was started. Do not switch ports or modify shared engine configuration to proceed.
+The fixture-only composition lives in `tools/onlinecompiler-room`, outside normal
+production builds. Its prepare command creates a separate disposable web copy.
+It restricts identity, room URL, problem/config, exact draft and assembled bytes,
+prior persisted outcome and durable attempt files. It delegates to the same
+`executeOnlineCompilerProgram` transport used by production, with production
+JudgeService, repository and reservation/completion RPCs. Production calls retain
+both approval checks in `OnlineCompilerProvider.execute`.
 
-The fixture-only composition now lives in `tools/onlinecompiler-room`, outside
-normal production builds. Its prepare command creates a separate disposable web
-copy and guards identity, room URL, problem/config, exact draft/assembled bytes,
-prior persisted outcome and two durable attempt files. It remains unverified as an
-authenticated end-to-end runtime until the concrete port collision is resolved.
+The local endpoints were web `127.0.0.1:3320`, realtime `127.0.0.1:3321`, and
+Supabase gateway `127.0.0.1:58550`. Docker assigned the replacement loopback gateway
+port after the proposed ports collided. The database had no host-published port;
+SQL used `docker.exe exec` in the owned container. Web used an explicit loopback
+hostname and realtime used `HOST=127.0.0.1`. CORS alone does not restrict exposure.
+
+This establishes bounded trusted-fixture UI and persistence behavior. It does not
+establish safe arbitrary-user execution or resolve production eligibility. Normal
+Run/Submit remains gated until the stricter safety contract is established. No
+production approval flag, hosted configuration, deployment or public provider
+selection was changed.

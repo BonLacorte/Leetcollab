@@ -1,41 +1,167 @@
 {
-  "scope": "Authorized local-only authenticated Run then Submit evaluation",
-  "status": "blocked by actual Windows Docker port bind collision before database startup",
+  "scope": "Authorized local-only authenticated Run then Submit evaluation with fixed synthetic fixtures",
+  "status": "completed: real browser Run/Submit, live provider and persisted private completion verified",
   "historicalProviderAttempts": 3,
-  "additionalProviderAttempts": 0,
+  "additionalProviderAttempts": 2,
+  "historicalTotal": 5,
   "additionalAuthorizedCeiling": 2,
-  "remainingSequence": [
-    "wrong-answer Run",
-    "passing Submit"
-  ],
-  "prerequisites": {
-    "browser": "ensure-agent-chrome succeeded again; no app browser actions attempted",
-    "docker": "Windows Docker CLI reached engine 29.6.2 through the supplied absolute path",
-    "portReservation": "Firstmate assigned 3320/3321/55441/55442; WSL loopback probes passed, but actual Docker publish of 127.0.0.1:55442 failed with address-in-use",
-    "freeOnlyAllowance": "Not rechecked; no provider attempt was made during infrastructure setup"
+  "remainingAuthorizedAttempts": 0,
+  "runtime": {
+    "web": "http://127.0.0.1:3320",
+    "realtime": "http://127.0.0.1:3321",
+    "supabaseGateway": "http://127.0.0.1:58550",
+    "databaseHostPublishing": "none; migrations and SQL readback used docker.exe exec",
+    "dockerEngine": "29.6.2, supplied Windows CLI",
+    "browser": "chrome-devtools-axi session onlinecompiler-01m7h2 using http://127.0.0.1:9222; ensure-agent-chrome succeeded"
   },
-  "authenticatedRoom": "not tested",
-  "databasePersistence": "not tested",
-  "fixtureComposition": "implemented in tools/onlinecompiler-room; disposable web copy prepared, not started or behaviorally verified",
+  "baseline": {
+    "acceptedSubmissions": 0,
+    "priorSubmissions": 0,
+    "fixtureProblemId": "11111111-1111-4111-8111-111111111142",
+    "roomId": "ocdemo01"
+  },
+  "attempts": [
+    {
+      "fixture": "wrong-answer Run",
+      "state": "persisted wrong_answer",
+      "usageBefore": {
+        "submissions": 3,
+        "monthly_limit": 100000,
+        "remaining": 99997
+      },
+      "startedAt": "2026-11-16T05:22:43.427Z",
+      "kind": "completed",
+      "durationMs": 2315
+    },
+    {
+      "fixture": "passing Submit",
+      "state": "persisted accepted",
+      "usageBefore": {
+        "submissions": 4,
+        "monthly_limit": 100000,
+        "remaining": 99996
+      },
+      "startedAt": "2026-11-16T05:23:33.789Z",
+      "kind": "completed",
+      "durationMs": 2308
+    }
+  ],
+  "authenticatedRoom": {
+    "signIn": "Seeded synthetic owner signed in through normal email/password UI",
+    "run": "Clicked Run once with exact return-41 fixture; UI showed wrong_answer and Not solved",
+    "submit": "Edited shared editor to exact return-42 fixture, clicked Submit once; accepted result saved",
+    "reload": "Browser reload showed Solved - LeetCollab verified",
+    "rejoin": "Navigated home then clicked Return to current room; verified solved state remained",
+    "responseInterception": false,
+    "fabricatedVerdicts": false
+  },
+  "databasePersistence": {
+    "ownerRows": [
+      {
+        "id": "603db6b6-17c1-4f32-815a-f65495106078",
+        "runner": "onlinecompiler",
+        "verification": "leetcollab",
+        "judge_state": "completed",
+        "verdict": "wrong_answer",
+        "tests_passed": 0,
+        "tests_total": 1
+      },
+      {
+        "id": "1214dc84-3681-4b58-b299-1a7fcc01ebae",
+        "runner": "onlinecompiler",
+        "verification": "leetcollab",
+        "judge_state": "completed",
+        "verdict": "accepted",
+        "tests_passed": 1,
+        "tests_total": 1
+      }
+    ],
+    "observerCanReadOwnerRows": 0
+  },
+  "usageAfter": {
+    "submissions": 5,
+    "monthly_limit": 100000,
+    "remaining": 99995
+  },
+  "billingEvidence": {
+    "pricing": "https://onlinecompiler.io/pricing",
+    "documentedFreeMonthlyLimit": 100000,
+    "documentedOverages": "Standard plans stop at their limit without automatic overage charges",
+    "observed": "Usage metadata matched 3 historical runs before Run, 4 before Submit, and 5 after; allowance remained 100000. No upgrades or purchases."
+  },
+  "fixtureComposition": "Existing isolated tools/onlinecompiler-room composition; normal production build and confirmation flags unchanged",
+  "deterministicChecks": "Earlier mock adapter checks are separate in onlinecompiler-evaluation.json; this round used live provider responses through production JudgeService and SupabaseJudgeRepository/RPCs",
   "resourcesCreated": {
     "network": "leetcollab-oc-01m7h2",
-    "container": "leetcollab-oc-01m7h2-db",
-    "containerState": "created, not running",
     "label": "owner=leetcollab-onlinecompiler-01m7h2",
-    "publishedPortRequested": "127.0.0.1:55442 -> 5432",
-    "appProcesses": "none",
-    "syntheticAccounts": "none"
-  },
-  "cleanup": "After evidence/review approval, remove only the never-started task container with docker.exe rm -v leetcollab-oc-01m7h2-db, then docker.exe network rm leetcollab-oc-01m7h2; leave shared resources untouched. The earlier dedicated blank browser tab may be closed separately.",
-  "productionReadiness": "Unresolved; production confirmation flags unchanged, no public activation or provider switch",
-  "previousCheckpoint": {
-    "status": "blocked before runtime startup and provider execution",
-    "prerequisites": {
-      "browser": "ensure-agent-chrome succeeded; dedicated onlinecompiler-01m7h2 session opened about:blank using http://127.0.0.1:9222",
-      "docker": "Docker CLI present, but daemon connection failed: /var/run/docker.sock does not exist",
-      "portReservation": "No preview-owner reservation supplied; no application listeners started",
-      "freeOnlyAllowance": "Not rechecked in this round; required before any additional execution"
+    "runningContainers": [
+      "leetcollab-oc-01m7h2-db-internal",
+      "leetcollab-oc-01m7h2-auth",
+      "leetcollab-oc-01m7h2-rest",
+      "leetcollab-oc-01m7h2-gateway-dynamic"
+    ],
+    "neverStartedContainers": [
+      "leetcollab-oc-01m7h2-db",
+      "leetcollab-oc-01m7h2-gateway"
+    ],
+    "processes": {
+      "web": 656364,
+      "realtime": 656363
     },
-    "resourcesCreated": "Dedicated blank browser tab only; no application processes, containers, databases or synthetic accounts created"
+    "syntheticAccounts": [
+      "fixture-owner@example.invalid",
+      "fixture-observer@example.invalid"
+    ],
+    "localArtifacts": ".onlinecompiler-room contains setup logs, durable attempt ledgers, readback and verified-room.png; no provider key stored"
+  },
+  "cleanup": "Resources left owned and intact for review. After approval, verify process command lines still point inside this worktree before stopping only the recorded web/realtime process trees. Stop/remove only the four named running task containers and the two never-started task containers, removing only their anonymous volumes with rm -v; then remove the named task network once empty. Close only task browser tabs. Never stop shared Chrome, Docker, preview services or other containers. Preserve durable attempt ledgers; all five execution slots are spent.",
+  "productionReadiness": "Unresolved for arbitrary user submissions: stricter containment/cleanup guarantees not established. Normal production Run/Submit remains gated. This trusted-fixture demo does not authorize deployment or a public provider switch.",
+  "operationalCorrections": [
+    "Preserved failed db container; replaced host-published DB with new internal-only database on existing task network",
+    "Preserved failed gateway container; used Docker-assigned loopback gateway 58550",
+    "Corrected disposable Auth search path and aligned already-applied Auth migration metadata with its auth schema; seeded users assigned authenticated role",
+    "Corrected disposable fixture seed language and JSON output fields; no submission verdicts inserted",
+    "Gateway suppresses duplicate upstream CORS headers; browser first compilation/navigation timeout resolved before live actions"
+  ],
+  "previousCheckpoint": {
+    "scope": "Authorized local-only authenticated Run then Submit evaluation",
+    "status": "blocked by actual Windows Docker port bind collision before database startup",
+    "historicalProviderAttempts": 3,
+    "additionalProviderAttempts": 0,
+    "additionalAuthorizedCeiling": 2,
+    "remainingSequence": [
+      "wrong-answer Run",
+      "passing Submit"
+    ],
+    "prerequisites": {
+      "browser": "ensure-agent-chrome succeeded again; no app browser actions attempted",
+      "docker": "Windows Docker CLI reached engine 29.6.2 through the supplied absolute path",
+      "portReservation": "Firstmate assigned 3320/3321/55441/55442; WSL loopback probes passed, but actual Docker publish of 127.0.0.1:55442 failed with address-in-use",
+      "freeOnlyAllowance": "Not rechecked; no provider attempt was made during infrastructure setup"
+    },
+    "authenticatedRoom": "not tested",
+    "databasePersistence": "not tested",
+    "fixtureComposition": "implemented in tools/onlinecompiler-room; disposable web copy prepared, not started or behaviorally verified",
+    "resourcesCreated": {
+      "network": "leetcollab-oc-01m7h2",
+      "container": "leetcollab-oc-01m7h2-db",
+      "containerState": "created, not running",
+      "label": "owner=leetcollab-onlinecompiler-01m7h2",
+      "publishedPortRequested": "127.0.0.1:55442 -> 5432",
+      "appProcesses": "none",
+      "syntheticAccounts": "none"
+    },
+    "cleanup": "After evidence/review approval, remove only the never-started task container with docker.exe rm -v leetcollab-oc-01m7h2-db, then docker.exe network rm leetcollab-oc-01m7h2; leave shared resources untouched. The earlier dedicated blank browser tab may be closed separately.",
+    "productionReadiness": "Unresolved; production confirmation flags unchanged, no public activation or provider switch",
+    "previousCheckpoint": {
+      "status": "blocked before runtime startup and provider execution",
+      "prerequisites": {
+        "browser": "ensure-agent-chrome succeeded; dedicated onlinecompiler-01m7h2 session opened about:blank using http://127.0.0.1:9222",
+        "docker": "Docker CLI present, but daemon connection failed: /var/run/docker.sock does not exist",
+        "portReservation": "No preview-owner reservation supplied; no application listeners started",
+        "freeOnlyAllowance": "Not rechecked in this round; required before any additional execution"
+      },
+      "resourcesCreated": "Dedicated blank browser tab only; no application processes, containers, databases or synthetic accounts created"
+    }
   }
 }

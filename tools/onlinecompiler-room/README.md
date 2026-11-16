@@ -14,7 +14,7 @@ real OnlineCompiler transport. No arbitrary draft is eligible.
 
 Start Next dev with `--webpack --hostname 127.0.0.1 --port 3320` in the prepared
 copy; realtime uses `HOST=127.0.0.1 PORT=3321`. Both must use only the task-owned
-Supabase URL `http://127.0.0.1:55441`. Never enable production confirmation flags.
+Supabase URL `http://127.0.0.1:58550`. Never enable production confirmation flags.
 Only the two approved browser actions may spend the remaining provider allowance.
 Before startup verify the assigned ports are still free and publish disposable
 Auth/API/database ports only on loopback. Do not use shared/hosted databases.
