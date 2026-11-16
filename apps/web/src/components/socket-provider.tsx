@@ -10,22 +10,23 @@ const SocketContext = createContext<AppSocket | null>(null);
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { session } = useAuth();
+  const token = session?.access_token;
   const [socket, setSocket] = useState<AppSocket | null>(null);
 
   useEffect(() => {
-    if (!session) {
+    if (!token) {
       setSocket(null);
       return;
     }
     const nextSocket = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:3001", {
-      auth: { token: session.access_token },
+      auth: { token },
       transports: ["websocket"],
     });
     setSocket(nextSocket);
     return () => {
       nextSocket.disconnect();
     };
-  }, [session]);
+  }, [token]);
 
   return <SocketContext.Provider value={socket}>{children}</SocketContext.Provider>;
 }

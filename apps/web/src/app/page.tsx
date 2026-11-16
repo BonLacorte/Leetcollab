@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Code2, DoorOpen, LogIn, LogOut, Users } from "lucide-react";
-import type { Problem } from "@leetcollab/contracts";
+import type { Acknowledgement, Problem, RoomState } from "@leetcollab/contracts";
 import { nextLocalDay } from "../lib/review-day";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../components/auth-provider";
@@ -39,6 +39,7 @@ type ProblemRow = {
 };
 
 const problemSelect = "id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints";
+const roomRequestTimeoutMs = 10_000;
 
 function normalizeProblem(row: ProblemRow): Problem {
   return {
@@ -74,6 +75,45 @@ function SessionHomePage() {
   const [reviewError, setReviewError] = useState("");
   const [roomId, setRoomId] = useState("");
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
+  const [connection, setConnection] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [connectionAttempt, setConnectionAttempt] = useState(0);
+  const [roomPending, setRoomPending] = useState(false);
+  const [roomUnconfirmed, setRoomUnconfirmed] = useState(false);
+  const cancelRoomRequest = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const connected = () => {
+      clearTimeout(timer);
+      setConnection("connected");
+    };
+    const disconnected = () => {
+      clearTimeout(timer);
+      setConnection("disconnected");
+    };
+    socket?.on("connect", connected);
+    socket?.on("disconnect", disconnected);
+    socket?.on("connect_error", disconnected);
+    if (socket?.connected) connected();
+    else if (!socket || socket.active) {
+      setConnection("connecting");
+      timer = setTimeout(disconnected, roomRequestTimeoutMs);
+    } else disconnected();
+    return () => {
+      clearTimeout(timer);
+      socket?.off("connect", connected);
+      socket?.off("disconnect", disconnected);
+      socket?.off("connect_error", disconnected);
+    };
+  }, [socket, connectionAttempt]);
+
+  useEffect(() => {
+    setRoomPending(false);
+    return () => {
+      cancelRoomRequest.current?.();
+      cancelRoomRequest.current = null;
+    };
+  }, [socket]);
 
   useEffect(() => {
     const authError = new URL(window.location.href).searchParams.get("authError");
@@ -107,17 +147,25 @@ function SessionHomePage() {
       return;
     }
 
+    let generation = 0;
+    const invalidate = () => { generation++; };
     const loadCurrentRoom = () => {
-      socket.emit("room:current", (response) => {
-        if (response.ok) setCurrentRoomId(response.data?.roomId ?? null);
+      const requestGeneration = ++generation;
+      socket.timeout(roomRequestTimeoutMs).emit("room:current", (error, response) => {
+        if (!error && requestGeneration === generation && response.ok) {
+          setCurrentRoomId(response.data?.roomId ?? null);
+        }
       });
     };
 
     socket.on("connect", loadCurrentRoom);
+    socket.on("disconnect", invalidate);
     if (socket.connected) loadCurrentRoom();
 
     return () => {
+      invalidate();
       socket.off("connect", loadCurrentRoom);
+      socket.off("disconnect", invalidate);
     };
   }, [session, socket]);
 
@@ -133,31 +181,59 @@ function SessionHomePage() {
     }
   }
 
-  function createRoom(problemId: string) {
-    if (!socket) return setStatus("Connecting to the collaboration server… please try again.");
-    socket.emit("room:create", { problemId }, (response) => {
+  function requestRoom(action: "create" | "join", id: string) {
+    if (cancelRoomRequest.current || roomUnconfirmed) return;
+    if (!socket?.connected) {
+      setStatus("");
+      setConnection("disconnected");
+      return;
+    }
+    setStatus("");
+    setRoomUnconfirmed(false);
+    setRoomPending(true);
+    let current = true;
+    const cancel = () => { current = false; };
+    cancelRoomRequest.current = cancel;
+    const complete = (error: Error | null, response?: Acknowledgement<RoomState>) => {
+      if (!current) return;
+      current = false;
+      if (error || !response) {
+        cancelRoomRequest.current = null;
+        setRoomPending(false);
+        setRoomUnconfirmed(true);
+        return setStatus(`Room ${action === "create" ? "creation" : "join"} was not confirmed. It may have succeeded. Reload to check for an active room before trying again.`);
+      }
       if (!response.ok) {
+        cancelRoomRequest.current = null;
+        setRoomPending(false);
         if (response.code === "ALREADY_IN_ROOM" && response.currentRoomId) {
           setCurrentRoomId(response.currentRoomId);
         }
         return setStatus(response.error);
       }
       router.push(`/room/${response.data.roomId}`);
-    });
+    };
+    // Never buffer a room mutation while disconnected or retry it automatically.
+    if (action === "create") {
+      socket.volatile.timeout(roomRequestTimeoutMs).emit("room:create", { problemId: id }, complete);
+    } else {
+      socket.volatile.timeout(roomRequestTimeoutMs).emit("room:join", { roomId: id }, complete);
+    }
+  }
+
+  function createRoom(problemId: string) {
+    requestRoom("create", problemId);
   }
 
   function joinRoom(event: FormEvent) {
     event.preventDefault();
-    if (!socket) return setStatus("Connecting to the collaboration server… please try again.");
-    socket.emit("room:join", { roomId }, (response) => {
-      if (!response.ok) {
-        if (response.code === "ALREADY_IN_ROOM" && response.currentRoomId) {
-          setCurrentRoomId(response.currentRoomId);
-        }
-        return setStatus(response.error);
-      }
-      router.push(`/room/${response.data.roomId}`);
-    });
+    requestRoom("join", roomId);
+  }
+
+  function reconnect() {
+    if (socket && !socket.active) socket.connect();
+    if (!roomUnconfirmed) setStatus("");
+    setConnectionAttempt(attempt => attempt + 1);
   }
 
   if (loading) {
@@ -276,6 +352,23 @@ function SessionHomePage() {
         </Button>
       </header>
 
+      {connection !== "connected" && (
+        <Alert className="room-connection-alert" variant={connection === "disconnected" ? "destructive" : "default"}>
+          <AlertDescription>
+            {connection === "connecting"
+              ? "Connecting to the collaboration server…"
+              : "Not connected to the collaboration server. Reconnect, then create or join a room. If the connection still fails, reload the page."}
+          </AlertDescription>
+          {connection === "disconnected" && <Button onClick={reconnect} variant="outline">Reconnect</Button>}
+        </Alert>
+      )}
+      {roomPending && <p role="status">Waiting for room confirmation…</p>}
+      {status && (
+        <Alert className="room-connection-alert" variant="destructive">
+          <AlertDescription>{status}</AlertDescription>
+          {roomUnconfirmed && <Button onClick={() => window.location.reload()} variant="outline">Reload to check current room</Button>}
+        </Alert>
+      )}
       <Card className="due-reviews-card">
         <CardHeader>
           <CardTitle>Due today</CardTitle>
@@ -286,7 +379,7 @@ function SessionHomePage() {
             <Alert variant="destructive"><AlertDescription>{reviewError}</AlertDescription></Alert>
           ) : dueIds.length ? (
             problems.filter(problem => dueIds.includes(problem.id)).map(problem => (
-              <Button key={problem.id} onClick={() => createRoom(problem.id)} variant="outline">{problem.title}</Button>
+              <Button disabled={roomPending || roomUnconfirmed} key={problem.id} onClick={() => createRoom(problem.id)} variant="outline">{problem.title}</Button>
             ))
           ) : <p>No reviews due.</p>}
           <p className="muted">Demo history (example only, not your progress): Parcel Pair · Good · suggested review in 3 days.</p>
@@ -327,7 +420,7 @@ function SessionHomePage() {
                   required
                   value={roomId}
                 />
-                <Button type="submit">Join room</Button>
+                <Button disabled={roomPending || roomUnconfirmed} type="submit">Join room</Button>
               </form>
             </CardContent>
           </Card>
@@ -340,6 +433,7 @@ function SessionHomePage() {
               {problems.map((problem) => (
                 <Button
                   className="problem-card"
+                  disabled={roomPending || roomUnconfirmed}
                   key={problem.id}
                   onClick={() => createRoom(problem.id)}
                   variant="outline"
@@ -366,11 +460,6 @@ function SessionHomePage() {
         </>
       )}
 
-      {status && (
-        <Alert className="dashboard-alert" variant="destructive">
-          <AlertDescription>{status}</AlertDescription>
-        </Alert>
-      )}
     </main>
   );
 }
