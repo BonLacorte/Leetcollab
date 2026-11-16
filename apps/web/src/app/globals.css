@@ -181,6 +181,20 @@ h3 {
   gap: 0.5rem;
 }
 
+.practice-controls .execution-notice {
+  padding: 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 4px);
+  background: hsl(var(--background));
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.execution-notice a {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 .due-reviews-card {
   margin-bottom: 1.25rem;
 }

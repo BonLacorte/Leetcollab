@@ -72,6 +72,40 @@ async function renderControls() {
   await act(async () => { renderer = create(<PracticeControls problemId="11111111-1111-4111-8111-111111111111" code="class Solution {}" />); });
 }
 
+it.each(["Run", "Submit"])("discloses OnlineCompiler retention before %s transmits code", async label => {
+  const fetch = vi.fn().mockResolvedValue(response({ ...quota, provider: "onlinecompiler" }));
+  vi.stubGlobal("fetch", fetch);
+  await renderControls();
+  const notice = renderer.root.findByProps({ className: "execution-notice" });
+  expect(output()).toContain("Execution code, input and output are retained for 365 days.");
+  expect(output()).toContain("Do not include secrets or sensitive information.");
+  expect(notice.findAllByType("a").map(link => link.props.href)).toEqual([
+    "https://onlinecompiler.io/privacy", "https://onlinecompiler.io/terms",
+  ]);
+  const controls = renderer.root.findByProps({ className: "practice-controls" });
+  expect(controls.children[0]).toBe(notice);
+  expect(button(label).props.disabled).toBe(false);
+  expect(fetch.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+  await act(async () => { await button(label).props.onClick(); });
+  expect(fetch.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+});
+
+it.each([undefined, "jdoodle", "render", null])("does not misattribute retention to provider %s", async provider => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ ...quota, provider })));
+  await renderControls();
+  expect(renderer.root.findAllByProps({ className: "execution-notice" })).toHaveLength(0);
+});
+
+it("keeps the OnlineCompiler disclosure visible while execution is disabled", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({
+    ...quota, provider: "onlinecompiler", available: false, unavailableReason: "provider_unconfigured",
+  })));
+  await renderControls();
+  expect(renderer.root.findAllByProps({ className: "execution-notice" })).toHaveLength(1);
+  expect(button("Run").props.disabled).toBe(true);
+  expect(output()).toContain("External sandbox is not configured.");
+});
+
 // Oracle: completion requires a persisted, completed LeetCollab verdict with all nonzero tests passing.
 it.each([
   ["verified pass", passing, true],

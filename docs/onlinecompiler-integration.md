@@ -18,7 +18,7 @@ OnlineCompiler requires all of the following server-only values:
 - `JUDGE_PROVIDER=onlinecompiler`
 - `ONLINECOMPILER_API_KEY`: a REST API key, never a widget/WebSocket key
 - `ONLINECOMPILER_EXECUTION_APPROVED=true`: explicit authority for the intended runtime
-- `ONLINECOMPILER_LIMITS_CONFIRMED=true`: reviewed evidence for the applicable safety contract
+- `ONLINECOMPILER_POLICY_ACCEPTED=true`: adoption of the provider-specific policy below
 
 For local development, put the REST key in `ONLINECOMPILER_API_KEY` in
 `apps/web/.env.local`, using `apps/web/.env.example` as the template. For a hosted
@@ -89,33 +89,61 @@ attempts retain their charge and cannot be replayed into another execution.
 A dedicated account/key without conflicting callers and reconciled provider
 usage remain evaluation prerequisites.
 
-## Live evaluation prerequisites
+## Accepted normal-user policy
 
-Published default limits are not proof of a stricter safety contract. In particular,
-OnlineCompiler documents a 30-second combined timeout, 512 MB default memory,
-16 simultaneous processes, and larger writable mounts than the retained strict
-compile/runtime/write budgets. Java's requested time limit has a startup allowance;
-a memory limit below the sandbox cap is checked after execution. Separate compile
-and runtime tree limits, aggregate CPU/thread/inode enforcement and independent
-cleanup requirements must be resolved before claiming compatibility or setting
-`ONLINECOMPILER_LIMITS_CONFIRMED=true`. Application deadlines do not terminate
-remote code. See [limits](https://onlinecompiler.io/docs/limits) and
-[security claims](https://onlinecompiler.io/security).
+The owner accepted a policy specific to authenticated Java exercise practice on
+OnlineCompiler Free. `ONLINECOMPILER_POLICY_ACCEPTED` replaces the overbroad
+limits-confirmation attestation. The legacy `ONLINECOMPILER_LIMITS_CONFIRMED`
+setting is ignored, even when true. Policy acceptance and runtime execution
+authorization remain separate; neither a key nor either flag alone enables runs.
+This policy does not relax the requirements for JDoodle, Render or local execution.
 
-Provider execution history includes source/input/output and can be retained for
-365 days. Use only explicitly approved synthetic fixtures for evaluation and never
-private drafts or personal data. Judged submissions have separate plan retention.
-See the [privacy policy](https://onlinecompiler.io/privacy).
+The policy relies on the provider's documented fresh gVisor sandbox for each run,
+no outbound network, unprivileged execution and read-only image. The documented
+shared per-run envelope is 512 MB, 2 CPU cores, up to 30 seconds, 16 simultaneous
+processes, and 256 MB workspace plus 128 MB temporary storage within the memory
+limit. These are provider claims, not independently audited guarantees. See
+[security](https://onlinecompiler.io/security) and
+[limits](https://onlinecompiler.io/docs/limits), checked 2026-11-16.
+
+For this provider, the owner explicitly accepts the absence of evidence for
+separate compilation (5 CPU/wall seconds, 768 MiB) and runtime (2 CPU/wall seconds,
+512 MiB) budgets, aggregate descendant CPU and combined process/thread accounting,
+32 MiB/1024-inode all-write limits, and independently timed destruction after
+broker loss or provider failure. Provider-managed fresh-run cleanup is relied on;
+no quantified destruction-completion bound or independent audit is claimed.
+Java's requested time limit has a startup allowance and a lower memory limit is a
+post-run check. The evaluated transport therefore still sends neither
+`time_limit` nor `memory_limit`. Application deadlines do not terminate remote code.
+
+Application authentication, server-only keys and fixed endpoint, Java/source
+restrictions, deadlines, source/response/output caps, atomic at-most-20/day quota,
+concurrency reservations, no fallback/redirect/retry, complete structured results,
+server fixture verification and private persisted completion remain required.
+Source filtering remains a usability check, not a sandbox boundary.
+
+Before Run or Submit can transmit through the UI, status identifies the selected
+provider and the controls show the OnlineCompiler notice: the learner's Java code
+and exercise harness are sent to OnlineCompiler.io; execution code, input and
+output are retained for 365 days; do not include secrets or sensitive information.
+The notice links the [privacy policy](https://onlinecompiler.io/privacy) and
+[terms](https://onlinecompiler.io/terms). Provider execution history is distinct
+from LeetCollab's private submissions and sandbox filesystem cleanup. The app
+cannot promise immediate provider deletion or unverified AI-training restrictions.
+Learner-code transfer under this notice is accepted by the policy; private fixture
+evaluation alone did not authorize it.
+
+## Live evaluation and release boundary
 
 A production evaluation needs current Free allowance, no paid/overage authority,
-compatible safety facts and a coordinated isolated authenticated runtime. A separately
-authorized private evaluation can use fixed trusted synthetic fixtures under the
-documented provider limits without confirming production safety compatibility. Record
-at most three sequential trusted attempts: passing solution, wrong answer and
-compile error. Do not retry ambiguous attempts; stop at the first unexpected
-outcome and count it as spent. Real provider verdicts and private persisted
-completion must be verified before recommending a public switch. Mock responses
-are never a claim of working Java execution.
+the accepted provider policy and a coordinated isolated authenticated runtime. The
+historical private evaluation authorized three direct trusted synthetic attempts
+(passing solution, wrong answer and compile error), then two authenticated room
+attempts, without authorizing ordinary learner access. That allowance is fully
+spent. A future evaluation needs its own explicit allowance. Do not retry ambiguous
+attempts; stop at the first unexpected outcome and count it as spent. Real provider
+verdicts and private persisted completion must be verified before recommending a
+public switch. Mock responses are never a claim of working Java execution.
 
 ## Deterministic checks
 
@@ -153,8 +181,8 @@ production builds. Its prepare command creates a separate disposable web copy.
 It restricts identity, room URL, problem/config, exact draft and assembled bytes,
 prior persisted outcome and durable attempt files. It delegates to the same
 `executeOnlineCompilerProgram` transport used by production, with production
-JudgeService, repository and reservation/completion RPCs. Production calls retain
-both approval checks in `OnlineCompilerProvider.execute`.
+JudgeService, repository and reservation/completion RPCs. Production calls require
+both policy acceptance and execution approval in `OnlineCompilerProvider.execute`.
 
 The local endpoints were web `127.0.0.1:3320`, realtime `127.0.0.1:3321`, and
 Supabase gateway `127.0.0.1:58550`. Docker assigned the replacement loopback gateway
@@ -162,8 +190,27 @@ port after the proposed ports collided. The database had no host-published port;
 SQL used `docker.exe exec` in the owned container. Web used an explicit loopback
 hostname and realtime used `HOST=127.0.0.1`. CORS alone does not restrict exposure.
 
-This establishes bounded trusted-fixture UI and persistence behavior. It does not
-establish safe arbitrary-user execution or resolve production eligibility. Normal
-Run/Submit remains gated until the stricter safety contract is established. No
-production approval flag, hosted configuration, deployment or public provider
-selection was changed.
+This establishes bounded trusted-fixture UI and persistence behavior. It is not
+fresh live proof of normal production composition with edited learner code. The
+accepted policy now permits that composition when all configuration gates are
+satisfied, and deterministic tests cover edited synthetic source through the
+production service/transport with fake credentials. No extra provider executions
+are authorized; all five historical attempts are spent. No runtime approval flag,
+hosted configuration, deployment or public provider selection was changed.
+
+## Rollout and rollback
+
+Tracked examples keep `JUDGE_PROVIDER=disabled` and both OnlineCompiler flags false.
+Policy adoption ships eligibility and disclosure code, not an enabled localhost or
+hosted runtime. A separately coordinated release must identify the owned
+authenticated runtime, verify its free dedicated-account configuration and migrations,
+and obtain an exact additional free-call allowance before a normal-composition
+live check with edited synthetic learner source. Retained fixture evidence and
+mocked tests cannot substitute for that release check. No paid requests,
+deployment, public activation or merge is authorized by this implementation.
+
+To stop new admission, unset `ONLINECOMPILER_EXECUTION_APPROVED` or select
+`JUDGE_PROVIDER=disabled`, then refresh status and verify unavailable with no new
+reservations or outbound calls. Keep drafts, submissions and consumed quota.
+Already-sent jobs cannot be cancelled by this switch and provider execution history
+cannot be recalled. There is no automatic fallback, database reset or schema rollback.

@@ -2,7 +2,7 @@ import { ProviderFailure, type ExecutionProvider, type ExecutionResult } from ".
 
 export type OnlineCompilerOptions = {
   apiKey?: string;
-  limitsConfirmed?: boolean;
+  policyAccepted?: boolean;
   executionApproved?: boolean;
   timeoutMs?: number;
   fetch?: typeof fetch;
@@ -137,7 +137,7 @@ export class OnlineCompilerProvider implements ExecutionProvider {
   constructor(options: OnlineCompilerOptions = {}) {
     this.apiKey = options.apiKey?.trim() ?? "";
     this.configured = Boolean(this.apiKey && !/[\r\n]/.test(this.apiKey)
-      && options.limitsConfirmed === true && options.executionApproved === true);
+      && options.policyAccepted === true && options.executionApproved === true);
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.fetch = options.fetch ?? globalThis.fetch;
   }
@@ -145,7 +145,7 @@ export class OnlineCompilerProvider implements ExecutionProvider {
   static fromEnvironment(): OnlineCompilerProvider {
     return new OnlineCompilerProvider({
       apiKey: process.env.ONLINECOMPILER_API_KEY,
-      limitsConfirmed: process.env.ONLINECOMPILER_LIMITS_CONFIRMED === "true",
+      policyAccepted: process.env.ONLINECOMPILER_POLICY_ACCEPTED === "true",
       executionApproved: process.env.ONLINECOMPILER_EXECUTION_APPROVED === "true",
       timeoutMs: process.env.JUDGE_REQUEST_TIMEOUT_MS ? Number(process.env.JUDGE_REQUEST_TIMEOUT_MS) : undefined,
     });
@@ -153,7 +153,7 @@ export class OnlineCompilerProvider implements ExecutionProvider {
 
   async execute(source: string): Promise<ExecutionResult> {
     if (!this.configured) {
-      throw new ProviderFailure("unavailable", "OnlineCompiler server configuration, confirmed limits and execution approval are required.");
+      throw new ProviderFailure("unavailable", "OnlineCompiler server configuration, accepted provider policy and execution approval are required.");
     }
     return executeOnlineCompilerProgram(source, this.apiKey, this.timeoutMs, this.fetch);
   }

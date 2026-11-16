@@ -68,8 +68,9 @@ Scoped two-user E2E checklist:
   [Validation](docs/backend-setup.md#validation).
 
 Fix and retest material failures before production release. Record approved MVP
-boundaries explicitly. This is scoped collaboration E2E; real Run/Submit and Java
-execution remain DEFERRED and are required before claiming full product E2E.
+boundaries explicitly. This is scoped collaboration E2E. For the later fixture-only Run/Submit evidence
+and remaining live-release requirements, see the
+[OnlineCompiler integration guide](docs/onlinecompiler-integration.md#authorized-private-evaluation).
 
 ## Retained validation evidence and limits
 
@@ -96,7 +97,8 @@ and submission continuity, and hosted HTTPS cookies were not independently
 measured. Verify the target environment using
 [Google sign-in](docs/backend-setup.md#google-sign-in).
 
-Remote Java execution and live accepted-submission persistence remain unverified.
+For later remote Java execution and accepted-submission persistence evidence,
+see the [OnlineCompiler evaluation](docs/onlinecompiler-integration.md#authorized-private-evaluation).
 Keep `JDOODLE_LIMITS_CONFIRMED=false` until the
 [provider capability gate](docs/backend-setup.md#provider-capability-gate) is met.
 This guide records setup and verification requirements; it is not evidence that
