@@ -41,6 +41,6 @@ Save a personal grade with **again**, **hard**, **good**, or **easy** to receive
 - Supabase stores durable user/profile, problem, progress, and submission data.
 - Socket.IO owns live-only room presence, code, chat, and whiteboard state. This is intentional for the first MVP; state is lost after a server restart or after a room ends.
 - Authenticated code execution uses an external sandbox and remains disabled until provider credentials and supported resource limits are confirmed. See [backend setup](docs/backend-setup.md) for Google OAuth, API contracts, migrations and operator requirements.
-- Production deployment is deferred until the local MVP is validated: Vercel hosts `apps/web`, Render hosts `apps/realtime`, and Supabase hosts data/auth.
+- Staging uses Vercel for `apps/web` (frontend and web API), Render for `apps/realtime`, and Supabase for data/auth. Production release follows scoped hosted validation; see [staging setup](docs/backend-setup.md#staging-setup).
 
-See [the continuation guide](docs/continuation.md) for the saved branch handoff and remaining validation.
+See [the continuation guide](docs/continuation.md) for the default-branch handoff, historical evidence and remaining hosted validation.
