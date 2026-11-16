@@ -12,3 +12,4 @@ PHASE_0_GITHUB_BASELINE.md
 PHASE_1_ROOM_LIFECYCLE.md
 PHASE_*.md
 *.tsbuildinfo
+.onlinecompiler-room/
