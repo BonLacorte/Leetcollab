@@ -102,7 +102,7 @@ Quota is shared by the application account and reserved atomically before any pr
 
 See [provider selection and approval](onlinecompiler-integration.md#selection-and-approval) for the server-only selector, compatibility defaults and OnlineCompiler credential setup, and [Render adapter preparation](render-offline-adapter.md) for the mock-only Render contract.
 
-For bounded tester-only hosted admission, use the [restricted evaluation configuration](onlinecompiler-integration.md#restricted-hosted-evaluation). Both status and submission enforce the same server-owned tester/problem/window and shared two-slot cap; normal authenticated-user activation is a separate decision.
+For bounded tester-only hosted admission, use the [restricted evaluation configuration](onlinecompiler-integration.md#restricted-hosted-evaluation).
 
 For OnlineCompiler eligibility, accepted provider limitations, learner disclosure and coordinated activation requirements, see the [accepted normal-user policy](onlinecompiler-integration.md#accepted-normal-user-policy) and [rollout and rollback](onlinecompiler-integration.md#rollout-and-rollback).
 
