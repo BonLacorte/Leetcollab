@@ -66,6 +66,8 @@ export type JudgeCompletion = {
 
 export interface JudgeRepository {
   getConfig(problemId: string): Promise<JudgeConfig | null>;
+  // Read-only baseline inspection. Unlike getQuota, this never creates/lowers a row.
+  readQuota(period: QuotaPeriod): Promise<JudgeQuota | null>;
   getQuota(period: QuotaPeriod, limit: number, renderPolicyId?: string): Promise<AdmissionQuota>;
   reserve(input: {
     userId: string;

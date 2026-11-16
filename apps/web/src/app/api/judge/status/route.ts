@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await getJudgeService().status(parsed.data);
+    const result = await getJudgeService(userId, parsed.data).status(parsed.data, userId);
     return json(result.body, result.status);
   } catch {
     return json({ error: { code: "JUDGE_UNAVAILABLE", message: "Judge status is temporarily unavailable." } }, 503);

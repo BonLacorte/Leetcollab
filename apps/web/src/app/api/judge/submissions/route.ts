@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await getJudgeService().submit(userId, parsed.data);
+    const result = await getJudgeService(userId, parsed.data.problemId).submit(userId, parsed.data);
     return json(result.body, result.status);
   } catch {
     return json({ ok: false, error: { code: "JUDGE_UNAVAILABLE", message: "The judge is temporarily unavailable." } }, 503);

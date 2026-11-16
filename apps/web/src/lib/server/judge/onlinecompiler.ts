@@ -6,6 +6,7 @@ export type OnlineCompilerOptions = {
   executionApproved?: boolean;
   timeoutMs?: number;
   fetch?: typeof fetch;
+  beforeRequest?: () => void;
 };
 
 const ENDPOINT = "https://api.onlinecompiler.io/api/run-code-sync/";
@@ -133,8 +134,10 @@ export class OnlineCompilerProvider implements ExecutionProvider {
   private readonly timeoutMs: number;
   private readonly fetch: typeof fetch;
   private readonly apiKey: string;
+  private readonly beforeRequest?: () => void;
 
   constructor(options: OnlineCompilerOptions = {}) {
+    this.beforeRequest = options.beforeRequest;
     this.apiKey = options.apiKey?.trim() ?? "";
     this.configured = Boolean(this.apiKey && !/[\r\n]/.test(this.apiKey)
       && options.policyAccepted === true && options.executionApproved === true);
@@ -142,8 +145,9 @@ export class OnlineCompilerProvider implements ExecutionProvider {
     this.fetch = options.fetch ?? globalThis.fetch;
   }
 
-  static fromEnvironment(): OnlineCompilerProvider {
+  static fromEnvironment(beforeRequest?: () => void): OnlineCompilerProvider {
     return new OnlineCompilerProvider({
+      beforeRequest,
       apiKey: process.env.ONLINECOMPILER_API_KEY,
       policyAccepted: process.env.ONLINECOMPILER_POLICY_ACCEPTED === "true",
       executionApproved: process.env.ONLINECOMPILER_EXECUTION_APPROVED === "true",
@@ -155,7 +159,7 @@ export class OnlineCompilerProvider implements ExecutionProvider {
     if (!this.configured) {
       throw new ProviderFailure("unavailable", "OnlineCompiler server configuration, accepted provider policy and execution approval are required.");
     }
-    return executeOnlineCompilerProgram(source, this.apiKey, this.timeoutMs, this.fetch);
+    return executeOnlineCompilerProgram(source, this.apiKey, this.timeoutMs, this.fetch, this.beforeRequest);
   }
 }
 
@@ -164,6 +168,7 @@ export async function executeOnlineCompilerProgram(
   apiKey: string,
   timeoutMs: number,
   request: typeof fetch = globalThis.fetch,
+  beforeRequest?: () => void,
 ): Promise<ExecutionResult> {
   apiKey = apiKey.trim();
   if (!apiKey || /[\r\n]/.test(apiKey)) unavailable();
@@ -180,6 +185,7 @@ export async function executeOnlineCompilerProgram(
     }, timeoutMs);
   });
   const work = async (): Promise<ExecutionResult> => {
+    beforeRequest?.();
     const response = await request(ENDPOINT, {
       method: "POST",
       headers: { authorization: apiKey, "content-type": "application/json", accept: "application/json" },

@@ -6,6 +6,7 @@ import type {
   JudgeSubmissionResponse,
   JudgeVerdict,
 } from "@leetcollab/contracts";
+import { assertEvaluationAdmission, type JudgeEvaluation } from "./evaluation";
 import { buildJavaProgram, validateJavaSource } from "./safety";
 import {
   ProviderFailure,
@@ -23,6 +24,7 @@ export type JudgeServiceOptions = {
   activeLimit?: number;
   reservationSeconds?: number;
   now?: () => Date;
+  evaluation?: JudgeEvaluation;
   // Offline injection only. Production composition never supplies this.
   renderPolicyId?: string;
 };
@@ -101,12 +103,14 @@ export class JudgeService {
   private readonly reservationSeconds: number;
   private readonly now: () => Date;
   private readonly renderPolicyId?: string;
+  private readonly evaluation?: JudgeEvaluation;
 
   constructor(
     private readonly repository: JudgeRepository,
     private readonly provider: ExecutionProvider,
     options: JudgeServiceOptions = {},
   ) {
+    this.evaluation = options.evaluation;
     this.quotaLimit = Math.min(20, Math.max(1, options.quotaLimit ?? 20));
     this.activeLimit = Math.max(1, options.activeLimit ?? 4);
     this.reservationSeconds = Math.min(120, Math.max(35, options.reservationSeconds ?? 45));
@@ -115,14 +119,36 @@ export class JudgeService {
     this.now = options.now ?? (() => new Date());
   }
 
-  async status(problemId: string): Promise<{ status: number; body: JudgeStatusResponse | { error: { code: JudgeErrorCode; message: string } } }> {
+  private assertAdmission(userId: string | undefined, problemId: string): void {
+    assertEvaluationAdmission(this.evaluation, userId, problemId, this.now());
+  }
+
+  private async checkEvaluationQuota(userId: string | undefined, problemId: string): Promise<void> {
+    this.assertAdmission(userId, problemId);
+    if (!this.evaluation) return;
+    const quota = await this.repository.readQuota(this.evaluation.period);
+    // A stale baseline can only shrink the remaining allowance. A baseline above
+    // actual usage could create extra slots and must be refused before mutation.
+    if ((!quota && this.evaluation.baselineUsed !== 0)
+      || (quota && (quota.used < this.evaluation.baselineUsed
+        || (quota.used === this.evaluation.baselineUsed && quota.active !== 0)
+        || quota.limit < this.evaluation.quotaLimit || quota.resetAt !== this.evaluation.period.end))) {
+      throw new ProviderFailure("unavailable", "Judge evaluation budget is inconsistent.");
+    }
+    this.assertAdmission(userId, problemId);
+  }
+
+  async status(problemId: string, userId?: string): Promise<{ status: number; body: JudgeStatusResponse | { error: { code: JudgeErrorCode; message: string } } }> {
+    await this.checkEvaluationQuota(userId, problemId);
     const config = await this.repository.getConfig(problemId);
     if (!config) {
       return { status: 404, body: { error: { code: "PROBLEM_NOT_FOUND", message: "Problem not found." } } };
     }
 
-    const period = quotaPeriod(this.now());
+    this.assertAdmission(userId, problemId);
+    const period = this.evaluation?.period ?? quotaPeriod(this.now());
     const { admission, ...quota } = await this.repository.getQuota(period, this.quotaLimit, this.renderPolicyId);
+    this.assertAdmission(userId, problemId);
     const exhausted = quota.remaining === 0 || admission === "exhausted";
     const available = this.provider.configured && (!this.provider.provenance || Boolean(this.renderPolicyId))
       && (!admission || admission === "available") && !exhausted;
@@ -141,6 +167,7 @@ export class JudgeService {
   }
 
   async submit(userId: string, request: JudgeSubmissionRequest): Promise<ServiceResponse> {
+    await this.checkEvaluationQuota(userId, request.problemId);
     const config = await this.repository.getConfig(request.problemId);
     if (!config) return errorResponse("PROBLEM_NOT_FOUND", "Problem not found.");
 
@@ -152,7 +179,8 @@ export class JudgeService {
       return errorResponse("INVALID_REQUEST", "The solution and judge harness are too large to execute safely.");
     }
 
-    const period = quotaPeriod(this.now());
+    this.assertAdmission(userId, request.problemId);
+    const period = this.evaluation?.period ?? quotaPeriod(this.now());
     if (!this.provider.configured || (this.provider.provenance && !this.renderPolicyId)) {
       const { admission: _admission, ...quota } = await this.repository.getQuota(period, this.quotaLimit, this.renderPolicyId);
       return errorResponse(
@@ -208,6 +236,7 @@ export class JudgeService {
 
     try {
       if (this.provider.provenance && !reservation.attempt) throw new Error("Durable Render attempt required.");
+      this.assertAdmission(userId, request.problemId);
       const execution = await this.provider.execute(program, reservation.attempt);
       const completionBase = {
         userId,

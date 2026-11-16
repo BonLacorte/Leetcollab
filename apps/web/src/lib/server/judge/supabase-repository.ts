@@ -72,6 +72,15 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     };
   }
 
+  async readQuota(period: QuotaPeriod): Promise<JudgeQuota | null> {
+    const { data, error } = await this.client.from("judge_quota_periods")
+      .select("used, quota_limit, active, period_end")
+      .eq("period_start", period.start).maybeSingle();
+    if (error) throw error;
+    return data ? quota({ used: data.used, limit: data.quota_limit,
+      active: data.active, resetAt: data.period_end }) : null;
+  }
+
   async getQuota(period: QuotaPeriod, limit: number, renderPolicyId?: string): Promise<AdmissionQuota> {
     if (renderPolicyId) {
       const { data, error } = await this.client.rpc("get_render_quota_status", { p_policy_id: renderPolicyId });
