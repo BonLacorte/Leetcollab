@@ -102,8 +102,10 @@ Provider execution history includes source/input/output and can be retained for
 private drafts or personal data. Judged submissions have separate plan retention.
 See the [privacy policy](https://onlinecompiler.io/privacy).
 
-A bounded live round needs current Free allowance, no paid/overage authority,
-compatible safety facts and a coordinated isolated authenticated runtime. Record
+A production evaluation needs current Free allowance, no paid/overage authority,
+compatible safety facts and a coordinated isolated authenticated runtime. A separately
+authorized private evaluation can use fixed trusted synthetic fixtures under the
+documented provider limits without confirming production safety compatibility. Record
 at most three sequential trusted attempts: passing solution, wrong answer and
 compile error. Do not retry ambiguous attempts; stop at the first unexpected
 outcome and count it as spent. Real provider verdicts and private persisted
@@ -118,3 +120,14 @@ migrations and checks runner permissions, persisted outcomes, quota retention an
 cross-provider races using `onlinecompiler_reservations.sql` and
 `onlinecompiler_concurrency.py`. These never run Java or call the provider. Do not
 run database regression scripts against shared or hosted data.
+
+## Authorized private evaluation
+
+The [evaluation record](onlinecompiler-evaluation.json) distinguishes direct live
+adapter outcomes from mocked checks, authenticated room coverage and database
+persistence. The shared `executeOnlineCompilerProgram` request/result boundary
+allows an isolated trusted caller to evaluate fixed fixtures without asserting
+production eligibility. Production calls still pass through both approval checks
+in `OnlineCompilerProvider.execute`; no route exposes the lower-level function.
+A successful fixture evaluation does not establish safe arbitrary-user execution
+or resolve the production Run/Submit readiness requirement.

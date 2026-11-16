@@ -1,0 +1,65 @@
+{
+  "scope": "Authorized fixed synthetic fixtures only; no public activation",
+  "priorAttempts": 0,
+  "usageBefore": {
+    "submissions": 0,
+    "monthly_limit": 100000,
+    "remaining": 100000
+  },
+  "attempts": [
+    {
+      "fixture": "passing",
+      "expected": "accepted",
+      "startedAt": "2026-11-16T03:53:24.103Z",
+      "state": "matched expected outcome",
+      "actual": "accepted",
+      "adapterKind": "completed",
+      "durationMs": 2358
+    },
+    {
+      "fixture": "wrong-answer",
+      "expected": "wrong_answer",
+      "startedAt": "2026-11-16T03:53:26.464Z",
+      "state": "matched expected outcome",
+      "actual": "wrong_answer",
+      "adapterKind": "completed",
+      "durationMs": 1726
+    },
+    {
+      "fixture": "compile-error",
+      "expected": "compile_error",
+      "startedAt": "2026-11-16T03:53:28.194Z",
+      "state": "matched expected outcome",
+      "actual": "compile_error",
+      "adapterKind": "execution_error",
+      "durationMs": 1695
+    }
+  ],
+  "deterministic": {
+    "mockTransport": "passed",
+    "missingApprovalRefusal": "passed with zero requests",
+    "invalidKeyRefusal": "passed with zero additional requests"
+  },
+  "authenticatedRoom": "not tested",
+  "databasePersistence": "not tested: no isolated database configured",
+  "productionReadiness": "unresolved: stricter safety contract not established",
+  "usageAfter": {
+    "submissions": 3,
+    "monthly_limit": 100000,
+    "remaining": 99997
+  },
+  "usageReconciled": true,
+  "fixtureContract": {
+    "expectedOutput": [
+      "42"
+    ],
+    "harness": "class Main { public static void main(String[] args) { System.out.println(Solution.answer()); } }",
+    "solutions": {
+      "passing": "class Solution { static int answer() { return 42; } }",
+      "wrongAnswer": "class Solution { static int answer() { return 41; } }",
+      "compileError": "class Solution { static int answer() { return ; } }"
+    },
+    "oracle": "The fixed harness prints the integer returned by Solution.answer; 42 matches, 41 differs, and a value-less return from an int method is a Java compiler error.",
+    "comparison": "Existing JudgeService compareOutput; no provider acceptance field used"
+  }
+}

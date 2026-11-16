@@ -138,8 +138,7 @@ export class OnlineCompilerProvider implements ExecutionProvider {
     this.apiKey = options.apiKey?.trim() ?? "";
     this.configured = Boolean(this.apiKey && !/[\r\n]/.test(this.apiKey)
       && options.limitsConfirmed === true && options.executionApproved === true);
-    this.timeoutMs = Math.min(30_000, Math.max(1_000,
-      Number.isFinite(options.timeoutMs) ? options.timeoutMs! : 15_000));
+    this.timeoutMs = options.timeoutMs ?? 15_000;
     this.fetch = options.fetch ?? globalThis.fetch;
   }
 
@@ -156,51 +155,64 @@ export class OnlineCompilerProvider implements ExecutionProvider {
     if (!this.configured) {
       throw new ProviderFailure("unavailable", "OnlineCompiler server configuration, confirmed limits and execution approval are required.");
     }
-    const program = programForSourceMode(source);
-    const started = performance.now();
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const expired = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new Error());
-      }, this.timeoutMs);
-    });
-    const work = async (): Promise<ExecutionResult> => {
-      const response = await this.fetch(ENDPOINT, {
-        method: "POST",
-        headers: { authorization: this.apiKey, "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ compiler: "openjdk-25", code: program }),
-        cache: "no-store",
-        redirect: "error",
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted || response.status !== 200) {
-        void response.body?.cancel().catch(() => {});
-        if (controller.signal.aborted) unavailable();
-        throw new RefusedRequest(response.status);
-      }
-      const body = await readResponse(response, controller.signal);
-      return resultFromBody(body, Math.max(0, Math.round(performance.now() - started)));
-    };
-    try {
-      return await Promise.race([work(), expired]);
-    } catch (error) {
-      if (error instanceof ResponseTooLarge) {
-        return {
-          kind: "execution_error", verdict: "output_limit",
-          diagnostics: "The external sandbox response exceeded LeetCollab's 64 KB response limit.",
-          durationMs: Math.max(0, Math.round(performance.now() - started)), cpuTime: null, memory: null,
-        };
-      }
-      if (error instanceof RefusedRequest) {
-        // 429 also means capacity/rate refusal. Do not exhaust shared quota on that evidence.
-        throw new ProviderFailure("unavailable", `OnlineCompiler refused the request (HTTP ${error.status}).`);
-      }
-      return unavailable();
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
+    return executeOnlineCompilerProgram(source, this.apiKey, this.timeoutMs, this.fetch);
+  }
+}
+
+export async function executeOnlineCompilerProgram(
+  source: string,
+  apiKey: string,
+  timeoutMs: number,
+  request: typeof fetch = globalThis.fetch,
+): Promise<ExecutionResult> {
+  apiKey = apiKey.trim();
+  if (!apiKey || /[\r\n]/.test(apiKey)) unavailable();
+  timeoutMs = Math.min(30_000, Math.max(1_000,
+    Number.isFinite(timeoutMs) ? timeoutMs : 15_000));
+  const program = programForSourceMode(source);
+  const started = performance.now();
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
       controller.abort();
+      reject(new Error());
+    }, timeoutMs);
+  });
+  const work = async (): Promise<ExecutionResult> => {
+    const response = await request(ENDPOINT, {
+      method: "POST",
+      headers: { authorization: apiKey, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ compiler: "openjdk-25", code: program }),
+      cache: "no-store",
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (controller.signal.aborted || response.status !== 200) {
+      void response.body?.cancel().catch(() => {});
+      if (controller.signal.aborted) unavailable();
+      throw new RefusedRequest(response.status);
     }
+    const body = await readResponse(response, controller.signal);
+    return resultFromBody(body, Math.max(0, Math.round(performance.now() - started)));
+  };
+  try {
+    return await Promise.race([work(), expired]);
+  } catch (error) {
+    if (error instanceof ResponseTooLarge) {
+      return {
+        kind: "execution_error", verdict: "output_limit",
+        diagnostics: "The external sandbox response exceeded LeetCollab's 64 KB response limit.",
+        durationMs: Math.max(0, Math.round(performance.now() - started)), cpuTime: null, memory: null,
+      };
+    }
+    if (error instanceof RefusedRequest) {
+      // 429 also means capacity/rate refusal. Do not exhaust shared quota on that evidence.
+      throw new ProviderFailure("unavailable", `OnlineCompiler refused the request (HTTP ${error.status}).`);
+    }
+    return unavailable();
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    controller.abort();
   }
 }
