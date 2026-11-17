@@ -4,7 +4,13 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { judgeStatusResponseSchema, judgeSubmissionResponseSchema, type JudgeStatusResponse } from "@leetcollab/contracts";
 import { useAuth } from "./auth-provider";
 import { supabase } from "../lib/supabase";
+import { CheckCircle2, Circle, Play, RotateCw, ShieldCheck } from "lucide-react";
 import { Button } from "./ui/button";
+
+const reviewGrades = [
+  { value: "again", days: 1 }, { value: "hard", days: 3 },
+  { value: "good", days: 7 }, { value: "easy", days: 14 },
+] as const;
 
 export function PracticeControls({ problemId, code }: { problemId: string; code: string }) {
   const { session } = useAuth();
@@ -22,6 +28,7 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
     return () => { mounted.current = false; };
   }, []);
   const [quota, setQuota] = useState<JudgeStatusResponse | null>(null);
+  const [provider, setProvider] = useState<JudgeStatusResponse["provider"]>();
   const [message, setMessage] = useState("");
   const [statusError, setStatusError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,6 +41,7 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
       const value = judgeStatusResponseSchema.parse(await response.json());
       if (mounted.current && generation === statusGeneration.current) {
         setQuota(value);
+        setProvider(value.provider);
         setStatusError("");
       }
     } catch {
@@ -109,23 +117,53 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
     finally { if (mounted.current) setBusy(false); }
   }
 
+  const formatTime = (value: string) => new Intl.DateTimeFormat(undefined, {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  }).format(new Date(value));
+
   return <div className="practice-controls">
-    {quota?.provider === "onlinecompiler" && <p className="execution-notice">
-      Run and Submit send your Java code and the exercise harness to OnlineCompiler.io. Execution code, input and output are retained for 365 days. Do not include secrets or sensitive information.{" "}
-      <a href="https://onlinecompiler.io/privacy" target="_blank" rel="noreferrer">Privacy policy</a>{" · "}
-      <a href="https://onlinecompiler.io/terms" target="_blank" rel="noreferrer">Terms of service</a>.
+    {provider === "onlinecompiler" && <p className="execution-notice">
+      <ShieldCheck aria-hidden="true" />
+      <span><strong>External execution · OnlineCompiler.io</strong>{" "}
+        Run and Submit send your Java code and the exercise harness to OnlineCompiler.io. Execution code, input and output are retained for 365 days. Do not include secrets or sensitive information.{" "}
+        <a href="https://onlinecompiler.io/privacy" target="_blank" rel="noreferrer">Privacy policy</a>{" · "}
+        <a href="https://onlinecompiler.io/terms" target="_blank" rel="noreferrer">Terms of service</a>.
+      </span>
     </p>}
-    <Button size="sm" variant="secondary" disabled={busy || !quota?.available} onClick={run} type="button">{busy ? "Working…" : "Run"}</Button>
-    <Button size="sm" disabled={busy || !quota?.available} onClick={run} type="button">Submit</Button>
-    <Button size="sm" variant="secondary" disabled={busy} onClick={() => { void refreshStatus(); void refreshCompletion(); }} type="button">Refresh status</Button>
-    <p>Run and Submit both judge all test cases and save a submission. Only a LeetCollab-verified pass marks this problem solved.</p>
-    <p role="status">{completion === "solved" ? "Solved - LeetCollab verified" : completion === "unavailable" ? "Completion status unavailable. Refresh status to try again." : completion === "loading" ? "Loading completion status…" : "Not solved"}</p>
-    {quota && <p>{quota.remaining} of {quota.limit} shared executions remaining. Reset: {new Date(quota.resetAt).toLocaleString()}. {quota.unavailableReason === "provider_unconfigured" ? "External sandbox is not configured." : ""}</p>}
-    {quota?.unavailableReason === "quota_exhausted" && (quota.fallback ? <p><a href={quota.fallback.url} target="_blank" rel="noreferrer">Practice on {quota.fallback.name}</a>. External results are not LeetCollab-verified.</p> : <p>This original exercise must wait for quota reset.</p>)}
-    <div>Personal review grade: {(["again", "hard", "good", "easy"] as const).map(value => <Button size="sm" variant="secondary" key={value} disabled={busy} onClick={() => grade(value)} type="button">{value}</Button>)}</div>
-    <p>Personal grades schedule your next review: again in 1 day, hard in 3, good in 7, easy in 14. They do not mark a problem solved.</p>
-    {reviewAt && <p>Suggested review: {new Date(reviewAt).toLocaleString()}. Repeat practice is voluntary.</p>}
-    {message && <p role="status">{message}</p>}
-    {statusError && <p role="status">{statusError}</p>}
+    <section className="practice-execution" aria-label="Execution">
+      <div className="practice-action-row">
+        <div className="practice-actions">
+          <Button size="sm" variant="secondary" disabled={busy || !quota?.available} onClick={run} type="button"><Play aria-hidden="true" />{busy ? "Working…" : "Run"}</Button>
+          <Button size="sm" disabled={busy || !quota?.available} onClick={run} type="button">Submit</Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => { void refreshStatus(); void refreshCompletion(); }} type="button"><RotateCw aria-hidden="true" />Refresh status</Button>
+        </div>
+        <p className={`practice-completion${completion === "solved" ? " is-solved" : ""}`} role="status">
+          {completion === "solved" ? <CheckCircle2 aria-hidden="true" /> : <Circle aria-hidden="true" />}
+          {completion === "solved" ? "Solved - LeetCollab verified" : completion === "unavailable" ? "Completion status unavailable. Refresh status to try again." : completion === "loading" ? "Loading completion status…" : "Not solved"}
+        </p>
+      </div>
+      <p className="practice-help">Run and Submit both judge all test cases and save a submission. Only a LeetCollab-verified pass marks this problem solved.</p>
+      <div className={`practice-quota${quota?.unavailableReason === "quota_exhausted" ? " is-exhausted" : statusError ? " is-error" : ""}`} role="status">
+        {quota ? <>
+          <p><strong>{quota.remaining} of {quota.limit}</strong> shared executions remaining</p>
+          <p className="practice-reset">Resets <time dateTime={quota.resetAt}>{formatTime(quota.resetAt)}</time></p>
+          {quota.unavailableReason === "provider_unconfigured" && <p className="practice-quota-detail">External sandbox is not configured.</p>}
+          {quota.unavailableReason === "quota_exhausted" && (quota.fallback ? <p className="practice-quota-detail"><a href={quota.fallback.url} target="_blank" rel="noreferrer">Practice on {quota.fallback.name}</a>. External results are not LeetCollab-verified.</p> : <p className="practice-quota-detail">This original exercise must wait for quota reset.</p>)}
+        </> : <p>{statusError || (busy ? "Updating execution status…" : "Loading shared execution quota…")}</p>}
+      </div>
+    </section>
+    <section className="practice-review" aria-label="Personal review">
+      <div className="practice-review-copy">
+        <h3>Personal review</h3>
+        <p className="practice-help">Grade to schedule your next review. Grades do not mark a problem solved.</p>
+      </div>
+      <div className="practice-grades" role="group" aria-label="Personal review grade">
+        {reviewGrades.map(({ value, days }) => <Button className="practice-grade" size="sm" variant="outline" key={value} disabled={busy} onClick={() => grade(value)} type="button" aria-label={`${value}, review in ${days} ${days === 1 ? "day" : "days"}`}>
+          {value}<span>{days}{days === 1 ? " day" : " days"}</span>
+        </Button>)}
+      </div>
+      {reviewAt && <p className="practice-review-next">Suggested review: <time dateTime={reviewAt}>{formatTime(reviewAt)}</time>. Repeat practice is voluntary.</p>}
+    </section>
+    {message && <p className="practice-feedback" role="status">{message}</p>}
   </div>;
 }

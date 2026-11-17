@@ -202,3 +202,31 @@ it("fails closed when stored completion cannot be read and recovers on refresh",
   await act(async () => { button("Refresh status").props.onClick(); });
   expect(output()).toContain("Solved - LeetCollab verified");
 });
+
+
+it("keeps retention visible and all actions disabled during a pending execution", async () => {
+  const fetch = vi.fn().mockResolvedValue(response({ ...quota, provider: "onlinecompiler" }));
+  vi.stubGlobal("fetch", fetch);
+  await renderControls();
+  fetch.mockImplementation(() => new Promise(() => {}));
+  await act(async () => { void button("Run").props.onClick(); });
+  expect(button("Working…").props.disabled).toBe(true);
+  expect(button("Submit").props.disabled).toBe(true);
+  expect(button("Refresh status").props.disabled).toBe(true);
+  for (const grade of ["again", "hard", "good", "easy"]) expect(button(grade).props.disabled).toBe(true);
+  expect(output()).toContain("Execution code, input and output are retained for 365 days.");
+  expect(output()).toContain("Do not include secrets or sensitive information.");
+});
+
+it("labels reset time with a timezone and exposes grade intervals accessibly", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(quota)));
+  await renderControls();
+  const time = renderer.root.findByType("time");
+  expect(time.props.dateTime).toBe(quota.resetAt);
+  const parts = new Intl.DateTimeFormat(undefined, {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  }).formatToParts(new Date(quota.resetAt));
+  expect(time.children.join("")).toContain(parts.find(part => part.type === "timeZoneName")!.value);
+  expect(button("again").props["aria-label"]).toBe("again, review in 1 day");
+  expect(button("easy").props["aria-label"]).toBe("easy, review in 14 days");
+});
