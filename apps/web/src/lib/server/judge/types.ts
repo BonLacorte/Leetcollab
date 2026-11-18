@@ -4,6 +4,7 @@ import type {
   JudgeSubmission,
   JudgeVerdict,
 } from "@leetcollab/contracts";
+import type { CompilerDiagnostic } from "./diagnostics";
 
 // Internal admission status is stripped before any public response.
 export type AdmissionQuota = JudgeQuota & {
@@ -98,6 +99,7 @@ export type ExecutionResult =
       kind: "execution_error";
       verdict: Exclude<JudgeVerdict, "accepted" | "wrong_answer">;
       diagnostics: string;
+      compilerDiagnostics?: CompilerDiagnostic[];
       durationMs: number;
       cpuTime: string | null;
       memory: string | null;

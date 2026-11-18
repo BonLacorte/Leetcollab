@@ -273,3 +273,18 @@ describe("OnlineCompiler uses the existing verified comparison and persistence p
     expect(exhaust).not.toHaveBeenCalled();
   });
 });
+
+it.each(["compile_error", "runtime_error"] as const)("withholds legacy raw %s diagnostics on idempotent reads", async verdict => {
+  const repository = new MemoryRepository(config());
+  const provider = new OutputProvider();
+  const service = new JudgeService(repository, provider, { now: () => now });
+  const input = request();
+  await service.submit("user-a", input);
+  const saved = [...repository.submissions.values()][0];
+  saved.verdict = verdict;
+  saved.diagnostics = "Main.java:1: error: cannot find symbol\nPRIVATE_HARNESS_SOURCE PRIVATE_INPUT PRIVATE_EXPECTED";
+  const replay = await service.submit("user-a", input);
+  expect(JSON.stringify(replay.body)).not.toMatch(/PRIVATE|Main.java|cannot find symbol/);
+  expect(replay.body).toMatchObject({ ok: true, submission: { verdict } });
+  expect(provider.calls).toBe(1);
+});

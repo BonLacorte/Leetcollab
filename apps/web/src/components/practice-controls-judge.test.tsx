@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, expect, it, vi } from "vitest";
 import { JudgeService } from "../lib/server/judge/service";
@@ -7,6 +7,7 @@ import type { JudgeRepository, StoredSubmission } from "../lib/server/judge/type
 import { PracticeControls } from "./practice-controls";
 import { POST } from "../app/api/judge/submissions/route";
 import { GET } from "../app/api/judge/status/route";
+import { PracticeResult, type PracticeExecution } from "./room/practice-result";
 
 const mocks = vi.hoisted(() => ({ service: vi.fn(), rows: vi.fn() }));
 vi.mock("./auth-provider", () => ({ useAuth: () => ({ session: { access_token: "synthetic-token", user: { id: "owner" } } }) }));
@@ -58,7 +59,7 @@ const harness = `class Main {
   }
 }`;
 
-function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true) {
+function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true, providerError?: string) {
   let stored: StoredSubmission | null = null;
   const quota = { used: 0, limit: 20, remaining: 20, active: 0, resetAt: new Date(Date.now() + 3_600_000).toISOString() };
   const repository: JudgeRepository = {
@@ -82,8 +83,8 @@ function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true)
     exhaust: vi.fn(async () => ({ ...quota })),
   };
   // Only the external transport and persistence boundaries are synthetic. No Java executes.
-  const send = vi.fn(async (_url: string | URL | Request, _options?: RequestInit) => new Response(JSON.stringify({ output: providerOutput, error: "",
-    status: "success", exit_code: 0, signal: null, truncated: false })));
+  const send = vi.fn(async (_url: string | URL | Request, _options?: RequestInit) => new Response(JSON.stringify({ output: providerOutput, error: providerError ?? "",
+    status: providerError ? "error" : "success", exit_code: providerError ? 1 : 0, signal: null, truncated: false })));
   const service = new JudgeService(repository, new OnlineCompilerProvider({ apiKey: "synthetic-key",
     policyAccepted: true, executionApproved: configured, fetch: send }));
   mocks.service.mockReturnValue(service);
@@ -101,7 +102,11 @@ function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true)
 }
 
 async function click(label: string, source: string) {
-  await act(async () => { renderer = create(<PracticeControls problemId={problemId} code={source} />); });
+  function Harness() {
+    const [execution, setExecution] = useState<PracticeExecution | null>(null);
+    return <><PracticeControls problemId={problemId} code={source} onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
+  }
+  await act(async () => { renderer = create(<Harness />); });
   const button = renderer!.root.findAllByType("button").find(node => node.children.includes(label))!;
   expect(button.props.disabled).toBe(false);
   await act(async () => { await button.props.onClick(); });
@@ -120,7 +125,7 @@ it.each(["Run", "Submit"])("%s accepts the imported Bracket Beacon solution thro
   expect(JSON.parse(send.mock.calls[0][1]!.body as string)).toEqual({
     compiler: "openjdk-25", code: `${imported}\n\n${harness.replace("class Main", "public class Main")}\n`,
   });
-  expect(output()).toContain("LeetCollab verdict: accepted");
+  expect(renderer!.root.findByType("h2").children).toEqual(["Accepted"]);
   expect(output()).toContain("Solved - LeetCollab verified");
   expect(output()).not.toContain("isBalanced");
 });
@@ -144,6 +149,8 @@ it.each(["Run", "Submit"])("%s still rejects forbidden imports before quota rese
   expect(repository.complete).not.toHaveBeenCalled();
   expect(send).not.toHaveBeenCalled();
   expect(output()).toContain("Not solved");
+  expect(renderer!.root.findByType("h2").children).toEqual(["Submission Rejected"]);
+  expect(output()).toContain("File and network APIs are not supported.");
 });
 
 it.each(["Run", "Submit"])("%s keeps server fixture comparison authoritative for imported source", async label => {
@@ -152,7 +159,7 @@ it.each(["Run", "Submit"])("%s keeps server fixture comparison authoritative for
   expect(responses[0].status).toBe(200);
   expect(await responses[0].json()).toMatchObject({ ok: true, submission: { verdict: "wrong_answer", testsPassed: 2, testsTotal: 4 } });
   expect(output()).toContain("Not solved");
-  expect(output()).toContain("LeetCollab verdict: wrong_answer");
+  expect(renderer!.root.findByType("h2").children).toEqual(["Wrong Answer"]);
 });
 
 it("retains the provider approval gate for imported source sent directly to the endpoint", async () => {
@@ -163,4 +170,22 @@ it("retains the provider approval gate for imported source sent directly to the 
   expect(result.status).toBe(503);
   expect(repository.reserve).not.toHaveBeenCalled();
   expect(send).not.toHaveBeenCalled();
+});
+
+it.each(["Run", "Submit"])("%s displays safe missing-import compiler feedback from the real route/service/adapter path", async label => {
+  const missingImport = imported.replace("import java.util.Stack;\n", "");
+  const { responses, repository } = setup("", true, "Main.java:3: error: cannot find symbol\n"
+    + "Stack<Character> stack = new Stack<>();\n symbol: class Stack\n"
+    + "Main.java:90: error: incompatible types: PRIVATE_FIXTURE_LITERAL\nsecret harness echo\n");
+  await click(label, missingImport);
+  expect(responses[0].status).toBe(200);
+  expect(await responses[0].json()).toMatchObject({ ok: true, submission: {
+    verdict: "compile_error", diagnostics: "Line 3: Cannot find symbol. Check spelling and imports.",
+  } });
+  expect(renderer!.root.findByType("h2").children).toEqual(["Compile Error"]);
+  expect(output()).toContain("Line 3: Cannot find symbol.");
+  expect(output()).not.toMatch(/PRIVATE_FIXTURE|secret harness|Stack<Character>/);
+  expect(repository.complete).toHaveBeenCalledWith(expect.objectContaining({
+    diagnostics: "Line 3: Cannot find symbol. Check spelling and imports.",
+  }));
 });

@@ -1,4 +1,5 @@
 import { ProviderFailure, type ExecutionProvider, type ExecutionResult } from "./types";
+import { compilerDiagnostics } from "./diagnostics";
 
 export type OnlineCompilerOptions = {
   apiKey?: string;
@@ -121,6 +122,7 @@ function resultFromBody(body: string, durationMs: number): ExecutionResult {
       diagnostics: compiler
         ? `Java compilation failed at line ${Number(compiler[1])}. Correct the source and try again.`
         : `The Java program exited unsuccessfully (exit code ${exit}).`,
+      ...(compiler ? { compilerDiagnostics: compilerDiagnostics(payload.error) } : {}),
       ...common,
     };
   }

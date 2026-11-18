@@ -1,10 +1,11 @@
-import { useState, type PointerEvent, type RefObject, type WheelEvent } from "react";
+import { useEffect, useState, type PointerEvent, type RefObject, type WheelEvent } from "react";
 import type { Problem, WhiteboardTool } from "@leetcollab/contracts";
 import { Eraser, Maximize2, Move, PenLine, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { PracticeResult, type PracticeExecution } from "./practice-result";
 
 type WorkspaceTab = "testcases" | "result" | "whiteboard";
 type WhiteboardMode = WhiteboardTool | "pan";
@@ -12,6 +13,7 @@ type WhiteboardCursor = { visible: boolean; x: number; y: number; diameter: numb
 
 type WorkspacePanelProps = {
   problem: Problem | null;
+  execution: PracticeExecution | null;
   canvasRef: RefObject<HTMLCanvasElement | null>;
   canDrawWhiteboard: boolean;
   drawing: boolean;
@@ -37,6 +39,7 @@ type WorkspacePanelProps = {
 
 export function WorkspacePanel({
   problem,
+  execution,
   canvasRef,
   canDrawWhiteboard,
   drawing,
@@ -60,6 +63,9 @@ export function WorkspacePanel({
   onResetView,
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<WorkspaceTab>("whiteboard");
+  useEffect(() => {
+    if (execution) setTab("result");
+  }, [execution]);
 
   return (
     <Card className="workspace-card workspace-panel">
@@ -85,12 +91,11 @@ export function WorkspacePanel({
           )}
         </TabsContent>
 
-        <TabsContent className="empty-panel" value="result">
-          <strong>Run or submit your solution</strong>
-          <p className="muted">Verdicts appear above the editor after Run or Submit. Execution requires the external sandbox to be configured.</p>
+        <TabsContent className="result-panel" value="result">
+          <PracticeResult execution={execution} />
         </TabsContent>
 
-        <TabsContent className="whiteboard-shell" value="whiteboard">
+        <TabsContent className="whiteboard-shell" value="whiteboard" forceMount hidden={tab !== "whiteboard"}>
           <div className="whiteboard-toolbar">
             <div className="whiteboard-tool-group" aria-label="Whiteboard drawing tools">
               <Button

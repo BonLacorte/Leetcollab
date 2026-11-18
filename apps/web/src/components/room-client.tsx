@@ -4,11 +4,9 @@ import { FormEvent, PointerEvent, WheelEvent, useEffect, useRef, useState } from
 import { useRouter } from "next/navigation";
 import type {
   Problem,
-  ProblemProgress,
   RoomPermissions,
   RoomState,
   RoomTimer,
-  SolvedWithMember,
   WhiteboardPoint,
   WhiteboardStroke,
   WhiteboardStrokeInput,
@@ -22,6 +20,8 @@ import { EditorPanel } from "./room/editor-panel";
 import { type DifficultyFilter, ProblemPanel } from "./room/problem-panel";
 import { RoomHeader } from "./room/room-header";
 import { WorkspacePanel } from "./room/workspace-panel";
+import type { PracticeExecution } from "./room/practice-result";
+import { usePracticeDraft } from "./room/use-practice-draft";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Card } from "./ui/card";
 import { Skeleton } from "./ui/skeleton";
@@ -78,19 +78,7 @@ type ProblemRow = {
   constraints: string[];
 };
 
-type ProgressRow = {
-  user_id: string;
-  problem_id: string;
-  draft_code: string | null;
-  draft_language: string | null;
-  last_saved_at: string | null;
-  solved_at: string | null;
-  solved_with: SolvedWithMember[] | null;
-  solved_code: string | null;
-};
-
 const problemSelect = "id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints";
-const progressSelect = "user_id, problem_id, draft_code, draft_language, last_saved_at, solved_at, solved_with, solved_code";
 
 function normalizeProblem(row: ProblemRow): Problem {
   return {
@@ -120,24 +108,14 @@ function formatTimer(timer: RoomTimer, now: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-function normalizeProgress(row: ProgressRow): ProblemProgress {
-  return {
-    userId: row.user_id,
-    problemId: row.problem_id,
-    draftCode: row.draft_code ?? "",
-    draftLanguage: row.draft_language ?? "java",
-    lastSavedAt: row.last_saved_at,
-    solvedAt: row.solved_at,
-    solvedWith: Array.isArray(row.solved_with) ? row.solved_with : [],
-    solvedCode: row.solved_code,
-  };
-}
-
 export function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
   const { session, loading } = useAuth();
   const socket = useSocket();
   const [room, setRoom] = useState<RoomState | null>(null);
+  const [execution, setExecution] = useState<{ scope: string; value: PracticeExecution } | null>(null);
+  const executionScope = `${roomId}:${room?.problem?.id}:${session?.user.id}`;
+  useEffect(() => { setExecution(null); }, [executionScope]);
   const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("Connecting to room…");
@@ -146,9 +124,6 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [problemSearch, setProblemSearch] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState<DifficultyFilter>("All");
   const [timerNow, setTimerNow] = useState(Date.now());
-  const [progress, setProgress] = useState<ProblemProgress | null>(null);
-  const [progressStatus, setProgressStatus] = useState("");
-  const [isProgressLoading, setIsProgressLoading] = useState(false);
   const [whiteboardMode, setWhiteboardMode] = useState<WhiteboardMode>("pen");
   const [whiteboardColor, setWhiteboardColor] = useState("#4f46e5");
   const [whiteboardSize, setWhiteboardSize] = useState(3);
@@ -224,53 +199,6 @@ export function RoomClient({ roomId }: { roomId: string }) {
   // `redrawWhiteboard` intentionally reads the current canvas and active preview stroke.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.whiteboard, whiteboardViewport]);
-
-  useEffect(() => {
-    const userId = session?.user.id;
-    const problemId = room?.problem?.id;
-    if (!userId || !problemId) {
-      setProgress(null);
-      return;
-    }
-
-    let cancelled = false;
-    setIsProgressLoading(true);
-    setProgressStatus("");
-
-    async function loadProgress() {
-      try {
-        const { data, error } = await supabase
-          .from("user_problem_progress")
-          .select(progressSelect)
-          .eq("user_id", userId)
-          .eq("problem_id", problemId)
-          .maybeSingle();
-
-        if (cancelled) return;
-        if (error) {
-          setStatus(error.message);
-          setProgress(null);
-          return;
-        }
-
-        setProgress(data ? normalizeProgress(data as ProgressRow) : null);
-      } catch (error) {
-        if (cancelled) return;
-        setStatus(error instanceof Error ? error.message : "Could not load problem progress.");
-        setProgress(null);
-      } finally {
-        if (!cancelled) {
-          setIsProgressLoading(false);
-        }
-      }
-    }
-
-    loadProgress();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [room?.problem?.id, session?.user.id]);
 
   useEffect(() => {
     if (!socket) return;
@@ -355,6 +283,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const canDrawWhiteboard = isHost || currentMember?.permissions.canDrawWhiteboard === true;
   const canChat = isHost || currentMember?.permissions.canChat === true;
   const canChangeProblem = isHost || currentMember?.permissions.canChangeProblem === true;
+  const draft = usePracticeDraft({ roomId, userId: session?.user.id, problem: room?.problem ?? null, code,
+    canEditCode, connected: socket?.connected ?? false, onCodeChange: updateCode });
   const filteredProblems = problemCatalog.filter((problem) => {
     const matchesDifficulty = difficultyFilter === "All" || problem.difficulty === difficultyFilter;
     const search = problemSearch.trim().toLowerCase();
@@ -553,52 +483,6 @@ export function RoomClient({ roomId }: { roomId: string }) {
     });
   }
 
-  async function saveDraft() {
-    const userId = session?.user.id;
-    const problemId = room?.problem?.id;
-    if (!userId || !problemId) return;
-
-    setIsProgressLoading(true);
-    setProgressStatus("");
-
-    const { data, error } = await supabase
-      .from("user_problem_progress")
-      .upsert({
-        user_id: userId,
-        problem_id: problemId,
-        draft_code: code,
-        draft_language: "java",
-        last_saved_at: new Date().toISOString(),
-      }, { onConflict: "user_id,problem_id" })
-      .select(progressSelect)
-      .single();
-
-    setIsProgressLoading(false);
-
-    if (error) {
-      setStatus(error.message);
-      return;
-    }
-
-    setProgress(normalizeProgress(data as ProgressRow));
-    setProgressStatus("Draft saved.");
-  }
-
-  function loadDraft() {
-    if (!canEditCode) {
-      setStatus("You need editor permission to load your draft into the shared editor.");
-      return;
-    }
-
-    if (!progress?.draftCode) {
-      setStatus("No saved draft found for this problem.");
-      return;
-    }
-
-    updateCode(progress.draftCode);
-    setProgressStatus("Draft loaded into the shared editor.");
-  }
-
   function selectProblem(problemId: string) {
     if (!socket || !canChangeProblem) {
       setStatus("You do not have permission to change the problem.");
@@ -746,17 +630,21 @@ export function RoomClient({ roomId }: { roomId: string }) {
           problemId={room.problem?.id ?? null}
           code={code}
           canEditCode={canEditCode}
-          progress={progress}
-          progressStatus={progressStatus}
-          isProgressLoading={isProgressLoading}
+          progress={draft.progress}
+          progressStatus={draft.status}
+          isProgressLoading={draft.loading || draft.saving}
+          isRetrievingSubmission={draft.retrieving}
+          connected={socket?.connected ?? false}
           onCodeChange={updateCode}
-          onSaveDraft={saveDraft}
-          onLoadDraft={loadDraft}
+          onResetCode={draft.resetCode}
+          onRetrieveSubmission={draft.retrieveSubmission}
+          onExecutionChange={value => setExecution({ scope: executionScope, value })}
         />
       </section>
       <section className="workspace-region">
         <WorkspacePanel
           problem={room.problem}
+          execution={execution?.scope === executionScope ? execution.value : null}
           canvasRef={canvasRef}
           canDrawWhiteboard={canDrawWhiteboard}
           drawing={drawing}

@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PracticeControls } from "./practice-controls";
+import { PracticeResult, type PracticeExecution } from "./room/practice-result";
 
 vi.mock("./auth-provider", () => ({ useAuth: () => ({ session: { access_token: "token", user: { id: "user" } } }) }));
 const mocks = vi.hoisted(() => ({ submissions: vi.fn(), rpc: vi.fn(), filters: vi.fn() }));
@@ -37,7 +38,7 @@ it.each([false, true])("ignores an older status success or failure after exhaust
   const pending: { resolve: (value: Response) => void; reject: (reason: Error) => void }[] = [];
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({ resolve, reject }))));
   const status = (remaining: number) => new Response(JSON.stringify({ available: remaining > 0, used: 20 - remaining, limit: 20, remaining, active: 0, resetAt: "2026-11-13T23:55:00.000Z", fallback: null, unavailableReason: remaining ? null : "quota_exhausted" }));
-  await act(async () => { renderer = create(<PracticeControls problemId="problem" code="class Solution {}" />); });
+  await act(async () => { renderer = create(<PracticeControls problemId="problem" code="class Solution {}" onExecutionChange={() => {}} />); });
   await act(async () => pending[0].resolve(status(1)));
   const button = (label: string) => renderer.root.findAllByType("button").find(node => node.children.includes(label))!;
   await act(async () => button("Refresh status").props.onClick());
@@ -54,7 +55,7 @@ it("clears a status failure after a successful refresh", async () => {
   vi.stubGlobal("fetch", vi.fn()
     .mockRejectedValueOnce(new Error("offline"))
     .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, used: 20, limit: 20, remaining: 0, active: 0, resetAt: "2026-11-13T23:55:00.000Z", fallback: null, unavailableReason: "quota_exhausted" }))));
-  await act(async () => { renderer = create(<PracticeControls problemId="problem" code="class Solution {}" />); });
+  await act(async () => { renderer = create(<PracticeControls problemId="problem" code="class Solution {}" onExecutionChange={() => {}} />); });
   expect(JSON.stringify(renderer.toJSON())).toContain("Judge status unavailable.");
   const refresh = renderer.root.findAllByType("button").find(node => node.children.includes("Refresh status"))!;
   await act(async () => refresh.props.onClick());
@@ -69,7 +70,11 @@ const button = (label: string) => renderer.root.findAllByType("button").find(nod
 const output = () => JSON.stringify(renderer.toJSON());
 const response = (body: unknown) => new Response(JSON.stringify(body));
 async function renderControls() {
-  await act(async () => { renderer = create(<PracticeControls problemId="11111111-1111-4111-8111-111111111111" code="class Solution {}" />); });
+  function Harness() {
+    const [execution, setExecution] = useState<PracticeExecution | null>(null);
+    return <><PracticeControls problemId="11111111-1111-4111-8111-111111111111" code="class Solution {}" onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
+  }
+  await act(async () => { renderer = create(<Harness />); });
 }
 
 it.each(["Run", "Submit"])("discloses OnlineCompiler retention before %s transmits code", async label => {
@@ -152,7 +157,7 @@ it.each(["Run", "Submit"])("%s calls the existing authenticated judge and reload
     problemId: "11111111-1111-4111-8111-111111111111", sourceCode: "class Solution {}", language: "java", idempotencyKey: expect.any(String),
   });
   expect(output()).toContain("Solved - LeetCollab verified");
-  expect(output()).toContain("LeetCollab verdict: accepted");
+  expect(renderer.root.findByType("h2").children).toEqual(["Accepted"]);
 });
 
 it("does not infer completion from an accepted response without trusted persisted evidence", async () => {

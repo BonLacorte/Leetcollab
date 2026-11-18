@@ -1540,6 +1540,32 @@ pre {
   justify-content: flex-end;
 }
 
+.editor-tool {
+  position: relative;
+}
+
+.editor-tooltip {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 20;
+  width: max-content;
+  max-width: 15rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.35rem;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: 0.75rem;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.editor-tool:hover .editor-tooltip,
+.editor-tool:focus-within .editor-tooltip {
+  visibility: visible;
+}
+
 .code-editor {
   flex: 1 1 auto;
   min-height: 13rem;
@@ -1620,6 +1646,54 @@ html[data-theme="light"] .code-editor {
 
 .empty-panel p {
   margin: 0.3rem 0 0;
+}
+
+.result-panel {
+  overflow: auto;
+}
+
+.execution-result {
+  display: grid;
+  align-content: start;
+  gap: 0.65rem;
+  padding: 0.5rem;
+}
+
+.execution-result h2,
+.execution-result p {
+  margin: 0;
+}
+
+.execution-result h2 {
+  font-size: 1.1rem;
+}
+
+.execution-result.is-error h2 {
+  color: hsl(var(--destructive));
+}
+
+.execution-result.is-accepted h2 {
+  color: hsl(var(--primary));
+}
+
+.execution-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.8rem;
+}
+
+.execution-diagnostics {
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--muted) / 0.55);
+  overflow-wrap: anywhere;
+}
+
+.whiteboard-shell[data-state="inactive"] {
+  display: none;
 }
 
 .whiteboard-shell {

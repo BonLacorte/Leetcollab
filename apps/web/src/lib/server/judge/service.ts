@@ -8,6 +8,7 @@ import type {
 } from "@leetcollab/contracts";
 import { assertEvaluationAdmission, type JudgeEvaluation } from "./evaluation";
 import { buildJavaProgram, validateJavaSource } from "./safety";
+import { publicExecutionDiagnostics } from "./diagnostics";
 import {
   ProviderFailure,
   type ExecutionProvider,
@@ -86,7 +87,15 @@ function errorResponse(
   };
 }
 
-function failedExisting(submission: StoredSubmission, quota: JudgeQuota): ServiceResponse {
+function publicSubmission(submission: StoredSubmission, source: string): StoredSubmission {
+  return { ...submission, diagnostics: submission.verdict === "accepted"
+    ? "All LeetCollab fixture checks passed."
+    : submission.verdict === "wrong_answer"
+      ? `${submission.testsPassed} of ${submission.testsTotal} LeetCollab fixture checks passed.`
+      : publicExecutionDiagnostics(submission.verdict, source, submission.diagnostics, []) };
+}
+
+function failedExisting(submission: StoredSubmission, quota: JudgeQuota, source: string): ServiceResponse {
   if (submission.judgeState === "failed") {
     return errorResponse(
       "JUDGE_UNAVAILABLE",
@@ -94,7 +103,7 @@ function failedExisting(submission: StoredSubmission, quota: JudgeQuota): Servic
       quota,
     );
   }
-  return { status: 200, body: { ok: true, submission, quota } };
+  return { status: 200, body: { ok: true, submission: publicSubmission(submission, source), quota } };
 }
 
 export class JudgeService {
@@ -231,7 +240,7 @@ export class JudgeService {
     if (reservation.result === "existing") {
       const existing = await this.repository.getSubmission(userId, reservation.submissionId);
       if (!existing) return errorResponse("JUDGE_UNAVAILABLE", "The saved submission could not be loaded.", reservation.quota);
-      return failedExisting(existing, reservation.quota);
+      return failedExisting(existing, reservation.quota, request.sourceCode);
     }
 
     try {
@@ -254,7 +263,7 @@ export class JudgeService {
           judgeState: "completed",
           verdict: execution.verdict,
           testsPassed: 0,
-          diagnostics: execution.diagnostics,
+          diagnostics: publicExecutionDiagnostics(execution.verdict, request.sourceCode, execution.diagnostics, execution.compilerDiagnostics),
         };
       } else {
         const comparison = compareOutput(execution.output, config.expectedOutput);
@@ -270,7 +279,7 @@ export class JudgeService {
       }
 
       const completed = await this.repository.complete(completion);
-      return { status: 200, body: { ok: true, submission: completed.submission, quota: completed.quota } };
+      return { status: 200, body: { ok: true, submission: publicSubmission(completed.submission, request.sourceCode), quota: completed.quota } };
     } catch (error) {
       const failure = error instanceof ProviderFailure
         ? error

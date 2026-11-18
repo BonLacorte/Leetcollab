@@ -6,19 +6,26 @@ import { useAuth } from "./auth-provider";
 import { supabase } from "../lib/supabase";
 import { CheckCircle2, Circle, Play, RotateCw, ShieldCheck } from "lucide-react";
 import { Button } from "./ui/button";
+import type { PracticeExecution } from "./room/practice-result";
 
 const reviewGrades = [
   { value: "again", days: 1 }, { value: "hard", days: 3 },
   { value: "good", days: 7 }, { value: "easy", days: 14 },
 ] as const;
 
-export function PracticeControls({ problemId, code }: { problemId: string; code: string }) {
+type PracticeControlsProps = {
+  problemId: string;
+  code: string;
+  onExecutionChange: (execution: PracticeExecution) => void;
+};
+
+export function PracticeControls({ problemId, code, onExecutionChange }: PracticeControlsProps) {
   const { session } = useAuth();
   if (!session) return null;
-  return <SessionPracticeControls key={`${problemId}:${session.access_token}`} problemId={problemId} code={code} token={session.access_token} userId={session.user.id} />;
+  return <SessionPracticeControls key={`${problemId}:${session.access_token}`} problemId={problemId} code={code} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
 }
 
-function SessionPracticeControls({ problemId, code, token, userId }: { problemId: string; code: string; token: string; userId: string }) {
+function SessionPracticeControls({ problemId, code, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
   const mounted = useRef(false);
   const statusGeneration = useRef(0);
   const reviewGeneration = useRef(0);
@@ -84,11 +91,12 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
     return () => clearTimeout(timer);
   }, [quota, busy, refreshStatus]);
 
-  async function run() {
+  async function run(action: "Run" | "Submit") {
     if (busy || !quota?.available) return;
     statusGeneration.current += 1;
     setQuota(null);
     setBusy(true);
+    onExecutionChange({ action, state: "running" });
     try {
       const response = await fetch("/api/judge/submissions", {
         method: "POST",
@@ -97,10 +105,10 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
       });
       const result = judgeSubmissionResponseSchema.parse(await response.json());
       if (!mounted.current) return;
-      setMessage(result.ok ? `LeetCollab verdict: ${result.submission.verdict}` : result.error.message);
+      onExecutionChange({ action, state: "finished", response: result });
       setQuota(null);
       await Promise.all([refreshStatus(), refreshCompletion()]);
-    } catch { if (mounted.current) { setQuota(null); setMessage("Judge unavailable. Refresh status before trying again."); } }
+    } catch { if (mounted.current) { setQuota(null); onExecutionChange({ action, state: "unavailable" }); } }
     finally { if (mounted.current) setBusy(false); }
   }
 
@@ -133,8 +141,8 @@ function SessionPracticeControls({ problemId, code, token, userId }: { problemId
     <section className="practice-execution" aria-label="Execution">
       <div className="practice-action-row">
         <div className="practice-actions">
-          <Button size="sm" variant="secondary" disabled={busy || !quota?.available} onClick={run} type="button"><Play aria-hidden="true" />{busy ? "Working…" : "Run"}</Button>
-          <Button size="sm" disabled={busy || !quota?.available} onClick={run} type="button">Submit</Button>
+          <Button size="sm" variant="secondary" disabled={busy || !quota?.available} onClick={() => run("Run")} type="button"><Play aria-hidden="true" />{busy ? "Working…" : "Run"}</Button>
+          <Button size="sm" disabled={busy || !quota?.available} onClick={() => run("Submit")} type="button">Submit</Button>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => { void refreshStatus(); void refreshCompletion(); }} type="button"><RotateCw aria-hidden="true" />Refresh status</Button>
         </div>
         <p className={`practice-completion${completion === "solved" ? " is-solved" : ""}`} role="status">

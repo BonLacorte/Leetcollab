@@ -160,7 +160,12 @@ missing exit information, and truncated output cannot produce acceptance.
 The provider's structured status, exit code and signal distinguish execution errors
 and limits. An anchored Java compiler location identifies a compile failure;
 other unsuccessful exits remain runtime errors. Persisted error diagnostics are
-generated locally to avoid retaining source echoes or raw provider errors. A 429
+generated locally to avoid retaining source echoes or raw provider errors. Recognized
+Java error categories and locations are retained only for lines inside the submitted
+solution, mapped back to editor lines after source trimming. Unknown messages use a
+generic compilation explanation. Result displays these safe diagnostics; raw harness
+source, paths, symbols and runtime values are never displayed. Older idempotent
+results are filtered again before returning diagnostics to the client. A 429
 can mean account allowance, rate, or capacity, so it remains unavailable and never
 blindly exhausts all shared application quota. Provider wall time is not labeled
 as CPU time. See the [run-code reference](https://onlinecompiler.io/docs/run-code).
