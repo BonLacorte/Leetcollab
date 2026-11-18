@@ -235,3 +235,25 @@ it("labels reset time with a timezone and exposes grade intervals accessibly", a
   expect(button("again").props["aria-label"]).toBe("again, review in 1 day");
   expect(button("easy").props["aria-label"]).toBe("easy, review in 14 days");
 });
+
+it("keeps the exact request source and editor revision when code changes during execution", async () => {
+  let finish!: (value: Response) => void;
+  const fetch = vi.fn(async (_url, options) => options?.method
+    ? new Promise<Response>(resolve => { finish = resolve; }) : response(quota));
+  vi.stubGlobal("fetch", fetch);
+  const changed = vi.fn<(execution: PracticeExecution) => void>();
+  const sourceCode = "\r\nclass Solution {\r\n  // exact submitted bytes\r\n}";
+  const problemId = "11111111-1111-4111-8111-111111111111";
+  await act(async () => { renderer = create(<PracticeControls problemId={problemId} code={sourceCode} codeVersion={5} onExecutionChange={changed} />); });
+  await act(async () => { void button("Run").props.onClick(); });
+  await act(async () => renderer.update(<PracticeControls problemId={problemId} code="newer code" codeVersion={6} onExecutionChange={changed} />));
+  await act(async () => finish(response({ ok: true, quota, submission: {
+    id: "22222222-2222-4222-8222-222222222222", problemId, language: "java", verification: "leetcollab", verdict: "compile_error",
+    testsPassed: 0, testsTotal: 4, durationMs: 10, diagnostics: "Compile failure", createdAt: "2026-11-13T12:00:00.000Z",
+  } })));
+  expect(changed.mock.calls.map(([value]) => ({ state: value.state, sourceCode: value.sourceCode, codeVersion: value.codeVersion }))).toEqual([
+    { state: "running", sourceCode, codeVersion: 5 }, { state: "finished", sourceCode, codeVersion: 5 },
+  ]);
+  const posted = fetch.mock.calls.find(([, options]) => options?.method === "POST")!;
+  expect(JSON.parse(posted[1]!.body as string).sourceCode).toBe(sourceCode);
+});

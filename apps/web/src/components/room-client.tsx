@@ -117,6 +117,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const executionScope = `${roomId}:${room?.problem?.id}:${session?.user.id}`;
   useEffect(() => { setExecution(null); }, [executionScope]);
   const [code, setCode] = useState("");
+  const codeRef = useRef("");
+  const [codeVersion, setCodeVersion] = useState(0);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("Connecting to room…");
   const [drawing, setDrawing] = useState(false);
@@ -204,10 +206,10 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (!socket) return;
     const handleState = (state: RoomState) => {
       setRoom(state);
-      setCode(state.code);
+      replaceEditorCode(state.code);
       setStatus("");
     };
-    const handleCode = (nextCode: string) => setCode(nextCode);
+    const handleCode = (nextCode: string) => replaceEditorCode(nextCode);
     const handleMessage = (nextMessage: RoomState["messages"][number]) => setRoom((current) => current ? { ...current, messages: [...current.messages, nextMessage] } : current);
     const handleStrokeAdded = (stroke: WhiteboardStroke) => {
       setRoom((current) => {
@@ -303,9 +305,15 @@ export function RoomClient({ roomId }: { roomId: string }) {
     socket.emit("room:leave", { roomId }, () => router.push("/"));
   }
 
+  function replaceEditorCode(nextCode: string, invalidate = false) {
+    if (invalidate || nextCode !== codeRef.current) setCodeVersion(version => version + 1);
+    codeRef.current = nextCode;
+    setCode(nextCode);
+  }
+
   function updateCode(nextCode: string) {
     if (!canEditCode) return;
-    setCode(nextCode);
+    replaceEditorCode(nextCode, true);
     socket?.emit("code:update", { roomId, code: nextCode });
   }
 
@@ -629,6 +637,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
         <EditorPanel
           problemId={room.problem?.id ?? null}
           code={code}
+          codeVersion={codeVersion}
+          execution={execution?.scope === executionScope ? execution.value : null}
           canEditCode={canEditCode}
           progress={draft.progress}
           progressStatus={draft.status}
@@ -636,8 +646,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
           isRetrievingSubmission={draft.retrieving}
           connected={socket?.connected ?? false}
           onCodeChange={updateCode}
-          onResetCode={draft.resetCode}
-          onRetrieveSubmission={draft.retrieveSubmission}
+          onResetCode={() => { setCodeVersion(version => version + 1); draft.resetCode(); }}
+          onRetrieveSubmission={() => { setCodeVersion(version => version + 1); void draft.retrieveSubmission(); }}
           onExecutionChange={value => setExecution({ scope: executionScope, value })}
         />
       </section>

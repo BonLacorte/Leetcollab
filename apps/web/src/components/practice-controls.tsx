@@ -16,16 +16,17 @@ const reviewGrades = [
 type PracticeControlsProps = {
   problemId: string;
   code: string;
+  codeVersion?: number;
   onExecutionChange: (execution: PracticeExecution) => void;
 };
 
-export function PracticeControls({ problemId, code, onExecutionChange }: PracticeControlsProps) {
+export function PracticeControls({ problemId, code, codeVersion = 0, onExecutionChange }: PracticeControlsProps) {
   const { session } = useAuth();
   if (!session) return null;
-  return <SessionPracticeControls key={`${problemId}:${session.access_token}`} problemId={problemId} code={code} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
+  return <SessionPracticeControls key={`${problemId}:${session.access_token}`} problemId={problemId} code={code} codeVersion={codeVersion} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
 }
 
-function SessionPracticeControls({ problemId, code, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
+function SessionPracticeControls({ problemId, code, codeVersion = 0, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
   const mounted = useRef(false);
   const statusGeneration = useRef(0);
   const reviewGeneration = useRef(0);
@@ -96,19 +97,21 @@ function SessionPracticeControls({ problemId, code, token, userId, onExecutionCh
     statusGeneration.current += 1;
     setQuota(null);
     setBusy(true);
-    onExecutionChange({ action, state: "running" });
+    const snapshot = { action, sourceCode: code, codeVersion };
+    onExecutionChange({ ...snapshot, state: "running" });
     try {
       const response = await fetch("/api/judge/submissions", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId, sourceCode: code, language: "java", idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ problemId, sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
       });
       const result = judgeSubmissionResponseSchema.parse(await response.json());
+      if (result.ok && result.submission.problemId !== problemId) throw new Error("Submission belongs to another exercise.");
       if (!mounted.current) return;
-      onExecutionChange({ action, state: "finished", response: result });
+      onExecutionChange({ ...snapshot, state: "finished", response: result });
       setQuota(null);
       await Promise.all([refreshStatus(), refreshCompletion()]);
-    } catch { if (mounted.current) { setQuota(null); onExecutionChange({ action, state: "unavailable" }); } }
+    } catch { if (mounted.current) { setQuota(null); onExecutionChange({ ...snapshot, state: "unavailable" }); } }
     finally { if (mounted.current) setBusy(false); }
   }
 

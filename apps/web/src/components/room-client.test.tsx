@@ -41,7 +41,7 @@ vi.mock("../lib/supabase", () => ({ supabase: { from: () => {
     then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve) };
   return query;
 } } }));
-vi.mock("@uiw/react-codemirror", () => ({ default: ({ value }: { value: string }) => <textarea readOnly value={value} /> }));
+vi.mock("@uiw/react-codemirror", async importOriginal => ({ ...await importOriginal<typeof import("@uiw/react-codemirror")>(), default: ({ value }: { value: string }) => <textarea readOnly value={value} /> }));
 
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;

@@ -6,7 +6,7 @@ import { EditorPanel } from "./editor-panel";
 
 vi.mock("../theme-provider", () => ({ useTheme: () => ({ theme: "light" }) }));
 vi.mock("../practice-controls", () => ({ PracticeControls: () => <div>Judge controls</div> }));
-vi.mock("@uiw/react-codemirror", () => ({ default: ({ value }: { value: string }) => <textarea readOnly value={value} /> }));
+vi.mock("@uiw/react-codemirror", async importOriginal => ({ ...await importOriginal<typeof import("@uiw/react-codemirror")>(), default: ({ value }: { value: string }) => <textarea readOnly value={value} /> }));
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root;
 afterEach(async () => { await act(async () => root?.unmount()); document.body.replaceChildren(); });
@@ -18,7 +18,7 @@ it("uses accessible icon-only reset and retrieval actions without presenting man
   document.body.append(container);
   await act(async () => {
     root = createRoot(container);
-    root.render(<EditorPanel problemId="problem" code="class Solution {}" canEditCode progress={{
+    root.render(<EditorPanel problemId="problem" code="class Solution {}" codeVersion={0} execution={null} canEditCode progress={{
       userId: "user", problemId: "problem", draftCode: "saved code", draftLanguage: "java",
       lastSavedAt: "2026-11-13T12:00:00.000Z", solvedAt: "2026-11-13T12:00:00.000Z",
       solvedCode: "unverified code", solvedWith: [{ userId: "user", username: "old member" }],

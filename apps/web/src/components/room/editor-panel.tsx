@@ -1,11 +1,12 @@
 "use client";
 
-import CodeMirror from "@uiw/react-codemirror";
+import CodeMirror, { type EditorView } from "@uiw/react-codemirror";
+import { lintGutter, setDiagnostics } from "@codemirror/lint";
 import { java } from "@codemirror/lang-java";
 import { PracticeControls } from "../practice-controls";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { History, RotateCcw } from "lucide-react";
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ProblemProgress } from "@leetcollab/contracts";
 import { useTheme } from "../theme-provider";
 import { Badge } from "../ui/badge";
@@ -13,10 +14,13 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Textarea } from "../ui/textarea";
 import type { PracticeExecution } from "./practice-result";
+import { clearCompilerDiagnosticsOnEdit, editorDiagnostics } from "./editor-diagnostics";
 
 type EditorPanelProps = {
   problemId: string | null;
   code: string;
+  codeVersion: number;
+  execution: PracticeExecution | null;
   canEditCode: boolean;
   progress: ProblemProgress | null;
   progressStatus: string;
@@ -29,7 +33,7 @@ type EditorPanelProps = {
   onExecutionChange: (execution: PracticeExecution) => void;
 };
 
-const extensions = [java()];
+const extensions = [java(), lintGutter(), clearCompilerDiagnosticsOnEdit];
 
 function formatDateTime(value: string | null): string {
   if (!value) return "Never";
@@ -42,6 +46,8 @@ function formatDateTime(value: string | null): string {
 export function EditorPanel({
   problemId,
   code,
+  codeVersion,
+  execution,
   canEditCode,
   progress,
   progressStatus,
@@ -55,6 +61,10 @@ export function EditorPanel({
 }: EditorPanelProps) {
   const { theme } = useTheme();
   const tooltipId = useId();
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
+  useEffect(() => {
+    if (editorView) editorView.dispatch(setDiagnostics(editorView.state, editorDiagnostics(editorView.state, execution, problemId, code, codeVersion)));
+  }, [editorView, execution, problemId, code, codeVersion]);
   const actionsDisabled = !problemId || !canEditCode || !connected || isProgressLoading || isRetrievingSubmission;
 
   return (
@@ -76,7 +86,7 @@ export function EditorPanel({
           </span>
         </div>
       </div>
-      {problemId && <PracticeControls problemId={problemId} code={code} onExecutionChange={onExecutionChange} />}
+      {problemId && <PracticeControls problemId={problemId} code={code} codeVersion={codeVersion} onExecutionChange={onExecutionChange} />}
       <div className="code-editor">
         <CodeMirror
           basicSetup={{ lineNumbers: true, foldGutter: true }}
@@ -87,6 +97,7 @@ export function EditorPanel({
           onChange={(value) => {
             if (canEditCode) onCodeChange(value);
           }}
+          onCreateEditor={setEditorView}
           readOnly={!canEditCode}
           theme={theme === "dark" ? oneDark : "light"}
           value={code}

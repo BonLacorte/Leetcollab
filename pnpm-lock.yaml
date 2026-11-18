@@ -66,6 +66,9 @@ importers:
       '@codemirror/lang-javascript':
         specifier: 6.2.5
         version: 6.2.5
+      '@codemirror/lint':
+        specifier: 6.9.7
+        version: 6.9.7
       '@codemirror/theme-one-dark':
         specifier: 6.1.3
         version: 6.1.3
