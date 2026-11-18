@@ -128,6 +128,45 @@ function request(key = randomUUID()): JudgeSubmissionRequest {
 }
 
 describe("JudgeService", () => {
+  it("retains prior local usage and refuses the 51st execution", async () => {
+    const repository = new MemoryRepository(config());
+    repository.limit = 50;
+    repository.used = 49;
+    const provider = Object.assign(new OutputProvider(), { id: "onlinecompiler" as const });
+    const service = new JudgeService(repository, provider, { localTesting: true, quotaLimit: 100, now: () => now });
+    expect((await service.status(problemId)).body).toMatchObject({ limit: 50, used: 49, remaining: 1 });
+    const key = randomUUID();
+    expect((await service.submit("user-a", request(key))).body).toMatchObject({ ok: true, quota: { used: 50, remaining: 0 } });
+    await service.submit("user-a", request(key));
+    expect((await service.submit("user-a", request())).body).toMatchObject({
+      ok: false, error: { code: "QUOTA_EXHAUSTED" }, quota: { used: 50, remaining: 0 },
+    });
+    expect(provider.calls).toBe(1);
+  });
+
+  it.each([[undefined, true], ["jdoodle", true], ["onlinecompiler", false]] as const)("keeps the 20 ceiling for provider %s with localTesting=%s", async (id, localTesting) => {
+    const repository = new MemoryRepository(config());
+    repository.limit = 50;
+    const provider = Object.assign(new OutputProvider(), { id });
+    const service = new JudgeService(repository, provider, { localTesting, quotaLimit: 50, now: () => now });
+    expect((await service.status(problemId)).body).toMatchObject({ limit: 20 });
+  });
+
+  it("retains the evaluation ceiling even with an injected local opt-in", async () => {
+    const repository = new MemoryRepository(config());
+    repository.limit = 50;
+    const provider = Object.assign(new OutputProvider(), { id: "onlinecompiler" as const });
+    const service = new JudgeService(repository, provider, {
+      localTesting: true, quotaLimit: 50, now: () => now,
+      evaluation: {
+        userId: "user-a", problemId, baselineUsed: 0, quotaLimit: 20,
+        startsAt: now.getTime() - 1, expiresAt: now.getTime() + 1000,
+        period: { start: "2026-11-09T23:55:00.000Z", end: "2026-11-10T23:55:00.000Z" },
+      },
+    });
+    expect((await service.status(problemId, "user-a")).body).toMatchObject({ limit: 20 });
+  });
+
   it("returns a LeetCollab-verified verdict from owned output comparison", async () => {
     const repository = new MemoryRepository(config());
     const result = await new JudgeService(repository, new OutputProvider(), { now: () => now }).submit("user-a", request());

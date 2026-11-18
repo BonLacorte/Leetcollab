@@ -22,6 +22,8 @@ type ServiceResponse = { status: number; body: JudgeSubmissionResponse };
 
 export type JudgeServiceOptions = {
   quotaLimit?: number;
+  // Server composition permits this only in development with a loopback database.
+  localTesting?: boolean;
   activeLimit?: number;
   reservationSeconds?: number;
   now?: () => Date;
@@ -120,7 +122,8 @@ export class JudgeService {
     options: JudgeServiceOptions = {},
   ) {
     this.evaluation = options.evaluation;
-    this.quotaLimit = Math.min(20, Math.max(1, options.quotaLimit ?? 20));
+    const maximum = options.localTesting && provider.id === "onlinecompiler" && !options.evaluation ? 50 : 20;
+    this.quotaLimit = Math.min(maximum, Math.max(1, options.quotaLimit ?? 20));
     this.activeLimit = Math.max(1, options.activeLimit ?? 4);
     this.reservationSeconds = Math.min(120, Math.max(35, options.reservationSeconds ?? 45));
     if (options.renderPolicyId && !provider.provenance) throw new Error("Render policy requires Render provenance.");
