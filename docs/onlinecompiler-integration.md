@@ -138,6 +138,12 @@ The adapter sends one JSON POST to the fixed HTTPS endpoint
 Redirects are refused. There are no retries.
 
 The existing validation reserves the package-private `Solution` and `Main` names.
+Solutions may use ordinary imports of top-level types from `java.util` and
+`java.math`, including package wildcards. Static imports, subpackage/nested-type
+imports and imports from other packages remain unsupported. All existing
+forbidden-API checks still inspect the original source, including imported names.
+Imports are preserved when assembling the program and storing the submission;
+they do not change provider admission, isolation or fixture verification.
 After the server adds its trusted harness, the adapter makes that one `Main`
 class public. This supplies the documented public entry class when `Solution`
 is the first class in the single source file; it does not modify stored drafts
