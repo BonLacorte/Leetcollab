@@ -1528,11 +1528,38 @@ pre {
 
 .editor-panel {
   gap: 0.7rem;
-  overflow-y: auto;
 }
 
-.editor-panel > :not(.code-editor) {
+.editor-panel > .panel-heading,
+.editor-content > :not(.code-editor) {
   flex-shrink: 0;
+}
+
+.editor-panel .editor-heading {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.editor-heading-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.editor-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-height: 0;
+  overflow: auto;
+}
+
+.editor-content[hidden] {
+  display: none;
 }
 
 .editor-actions {
@@ -2303,6 +2330,52 @@ html[data-theme="dark"] .execution-result.is-accepted h2 {
   .ui-tabs-trigger {
     padding-inline: 0.65rem;
   }
+}
+
+.editor-panel[data-view="folded"] {
+  height: auto;
+  min-height: 0;
+  gap: 0;
+  overflow: visible;
+}
+
+@media (min-width: 1041px) {
+  .room-workspace:has(.editor-panel[data-view="folded"]) {
+    grid-template-rows: auto minmax(15rem, 1fr);
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1040px) {
+  .room-workspace:has(.editor-panel[data-view="folded"]) {
+    grid-template-rows: auto auto minmax(22rem, auto);
+  }
+}
+
+.room-page:has(.editor-panel[data-view="maximized"]) {
+  height: 100svh;
+  overflow: hidden;
+}
+
+.room-workspace:has(.editor-panel[data-view="maximized"]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.room-workspace:has(.editor-panel[data-view="maximized"]) > .editor-region {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.room-workspace:has(.editor-panel[data-view="maximized"]) > :not(.editor-region) {
+  display: none;
+}
+
+.room-workspace:has(.editor-panel[data-view="maximized"]) .editor-panel {
+  height: 100%;
+  min-height: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

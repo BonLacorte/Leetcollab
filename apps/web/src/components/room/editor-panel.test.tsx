@@ -32,8 +32,8 @@ it("uses accessible icon-only reset and retrieval actions without presenting man
   expect(container.textContent).not.toContain("Save draft");
   expect(container.textContent).not.toContain("Load draft");
   const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>(".editor-actions button"));
-  expect(buttons.map(b => b.textContent)).toEqual(["", ""]);
-  expect(buttons.map(b => b.getAttribute("aria-label"))).toEqual(["Reset to default code definition", "Retrieve last submitted code"]);
+  expect(buttons.map(b => b.textContent)).toEqual(["", "", "", ""]);
+  expect(buttons.map(b => b.getAttribute("aria-label"))).toEqual(["Reset to default code definition", "Retrieve last submitted code", "Maximize Code card", "Fold Code card"]);
   for (const button of buttons) expect(container.querySelector(`[id="${button.getAttribute("aria-describedby")}"]`)?.getAttribute("role")).toBe("tooltip");
   await act(async () => { buttons[0].click(); buttons[1].click(); });
   expect(reset).toHaveBeenCalledOnce();

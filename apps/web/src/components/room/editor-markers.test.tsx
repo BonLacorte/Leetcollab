@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React, { act, type ComponentProps } from "react";
+import React, { act, useState, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EditorView } from "@uiw/react-codemirror";
@@ -56,4 +56,52 @@ it("does not mark edited code when an older pending result finishes", async () =
   const view = EditorView.findFromDOM(container.querySelector(".cm-editor")!)!;
   expect(diagnosticCount(view.state)).toBe(0);
   expect(container.querySelector(".cm-lintRange-error")).toBeNull();
+});
+
+it("preserves the real editor, selection and diagnostics through fold, maximize and restore", async () => {
+  const container = document.createElement("div"); document.body.append(container);
+  await act(async () => { root = createRoot(container); root.render(<EditorPanel {...props} />); });
+  const view = EditorView.findFromDOM(container.querySelector(".cm-editor")!)!;
+  await act(async () => view.dispatch({ selection: { anchor: 20 } }));
+  const doc = view.state.doc;
+  const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+  await act(async () => button("Fold Code card").click());
+  expect(container.querySelector<HTMLDivElement>(".editor-content")!.hidden).toBe(true);
+  expect(button("Unfold Code card").getAttribute("aria-expanded")).toBe("false");
+  expect(EditorView.findFromDOM(container.querySelector(".cm-editor")!)).toBe(view);
+  await act(async () => button("Unfold Code card").click());
+  await act(async () => button("Maximize Code card").click());
+  expect(container.querySelector(".editor-panel")?.getAttribute("data-view")).toBe("maximized");
+  expect(button("Minimize Code card").getAttribute("aria-pressed")).toBe("true");
+  await act(async () => button("Minimize Code card").click());
+  expect(container.querySelector(".editor-panel")?.getAttribute("data-view")).toBe("normal");
+  await act(async () => button("Fold Code card").click());
+  await act(async () => button("Maximize Code card").click());
+  expect(container.querySelector<HTMLDivElement>(".editor-content")!.hidden).toBe(false);
+  await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+  expect(container.querySelector(".editor-panel")?.getAttribute("data-view")).toBe("normal");
+  await act(async () => root.render(<EditorPanel {...props} progressStatus="Draft autosaved." />));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(view.state.doc).toBe(doc);
+  expect(view.state.selection.main.anchor).toBe(20);
+  expect(diagnosticCount(view.state)).toBe(1);
+});
+
+it("keeps typed code and undo history while changing the Code card view", async () => {
+  function Harness() {
+    const [value, setValue] = useState(code);
+    const [version, setVersion] = useState(5);
+    return <EditorPanel {...props} code={value} codeVersion={version} onCodeChange={next => { setValue(next); setVersion(current => current + 1); }} />;
+  }
+  const container = document.createElement("div"); document.body.append(container);
+  await act(async () => { root = createRoot(container); root.render(<Harness />); });
+  const view = EditorView.findFromDOM(container.querySelector(".cm-editor")!)!;
+  await act(async () => view.dispatch({ changes: { from: 0, insert: "// typed code\n" } }));
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Maximize Code card"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Fold Code card"]')!.click());
+  expect(container.querySelector(".editor-panel")?.getAttribute("data-view")).toBe("folded");
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Unfold Code card"]')!.click());
+  expect(view.state.doc.toString()).toBe("// typed code\n" + code);
+  await act(async () => { view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "z", code: "KeyZ", ctrlKey: true, bubbles: true, cancelable: true })); });
+  expect(view.state.doc.toString()).toBe(code);
 });
