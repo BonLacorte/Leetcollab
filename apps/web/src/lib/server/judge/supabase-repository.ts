@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JudgeQuota, JudgeVerdict } from "@leetcollab/contracts";
 import { withRemaining } from "./service";
+import { readPublicCasePlan } from "./public-cases";
 import type {
   JudgeCompletion,
   JudgeConfig,
@@ -53,7 +54,7 @@ export class SupabaseJudgeRepository implements JudgeRepository {
   async getConfig(problemId: string): Promise<JudgeConfig | null> {
     const { data, error } = await this.client
       .from("problem_judge_configs")
-      .select("problem_id, fixture_version, harness_source, expected_output, source_judge_name, source_judge_url, problems!inner(is_enabled)")
+      .select("problem_id, fixture_version, harness_source, expected_output, public_case_plan, source_judge_name, source_judge_url, problems!inner(is_enabled)")
       .eq("problems.is_enabled", true)
       .eq("problem_id", problemId)
       .maybeSingle();
@@ -66,6 +67,7 @@ export class SupabaseJudgeRepository implements JudgeRepository {
       fixtureVersion: data.fixture_version,
       harnessSource: data.harness_source,
       expectedOutput: data.expected_output,
+      publicCasePlan: readPublicCasePlan(data.public_case_plan, data.fixture_version, data.harness_source, data.expected_output),
       fallback: data.source_judge_name && data.source_judge_url
         ? { name: data.source_judge_name, url: data.source_judge_url, verification: "external_self_reported" }
         : null,

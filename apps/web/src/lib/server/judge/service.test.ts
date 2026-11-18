@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { JudgeQuota, JudgeSubmissionRequest, JudgeVerdict } from "@leetcollab/contracts";
 import { JudgeService } from "./service";
 import { OnlineCompilerProvider } from "./onlinecompiler";
+import { judgeSubmissionResponseSchema } from "@leetcollab/contracts";
 import type {
   ExecutionProvider,
   JudgeCompletion,
@@ -126,6 +127,78 @@ function config(fallback: JudgeConfig["fallback"] = null): JudgeConfig {
 function request(key = randomUUID()): JudgeSubmissionRequest {
   return { problemId, language: "java", sourceCode, idempotencyKey: key };
 }
+
+describe("structured public results", () => {
+  const framed = (values: string[]) => values.map((value, index) =>
+    `__LEETCOLLAB_CASE_V1__${index}:${Buffer.from(value).toString("base64")}\n`).join("");
+  const publicConfig = (): JudgeConfig => ({ ...config(), expectedOutput: ["42", "HIDDEN_EXPECTED"],
+    harnessSource: 'class Main { public static void main(String[] args) { System.out.println(Solution.answer()); System.out.println("HIDDEN_EXPECTED"); } }',
+    publicCasePlan: { format: "framed-v1", cases: [
+      { id: "sample:1", fixtureIndex: 0, title: "Public example", input: "value = 7", expected: "42" },
+    ] } });
+
+  it.each([
+    ["42", "HIDDEN_EXPECTED", "accepted", 2],
+    ["41", "HIDDEN_EXPECTED", "wrong_answer", 1],
+    ["42", "HIDDEN_WRONG", "wrong_answer", 1],
+  ] as const)("projects actual public output %s with private output withheld", async (actual, hidden, verdict, testsPassed) => {
+    const repository = new MemoryRepository(publicConfig());
+    const send = vi.fn(async (_url: string | URL | Request, _options?: RequestInit) => new Response(JSON.stringify({
+      output: framed([actual, hidden]), error: "", status: "success", exit_code: 0, signal: null, truncated: false,
+    })));
+    const provider = new OnlineCompilerProvider({ apiKey: "synthetic", executionApproved: true, policyAccepted: true, fetch: send });
+    const result = await new JudgeService(repository, provider, { now: () => now }).submit("user-a", request());
+    expect(result.status).toBe(200);
+    expect(judgeSubmissionResponseSchema.parse(result.body)).toMatchObject({ ok: true, submission: {
+      verdict, testsPassed, testsTotal: 2,
+      publicCases: [{ id: "sample:1", title: "Public example", input: "value = 7", expected: "42", output: actual, passed: actual === "42" }],
+    } });
+    const serialized = JSON.stringify(result.body);
+    expect(serialized).not.toContain("HIDDEN");
+    expect(serialized).not.toContain("fixtureIndex");
+    expect(serialized).not.toContain("__LEETCOLLAB");
+    expect(JSON.parse(send.mock.calls[0][1]!.body as string).code).toContain("__leetcollabRecord(Solution.answer())");
+  });
+
+  it("refuses raw stdout on a framed fixture and retains the charge without fabricating a pass", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OutputProvider("42\nHIDDEN_EXPECTED\n");
+    const result = await new JudgeService(repository, provider, { now: () => now }).submit("user-a", request());
+    expect(result.status).toBe(503);
+    expect(result.body).toMatchObject({ ok: false, error: { code: "JUDGE_UNAVAILABLE" }, quota: { used: 1 } });
+    expect(JSON.stringify(result.body)).not.toContain("HIDDEN_EXPECTED");
+    expect([...repository.submissions.values()][0]).toMatchObject({ judgeState: "failed", testsPassed: 0 });
+  });
+
+  it("does not invent observed results for a replay without retained per-case evidence", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
+    const service = new JudgeService(repository, provider, { now: () => now });
+    const key = randomUUID();
+    await service.submit("user-a", request(key));
+    const result = await service.submit("user-a", request(key));
+    expect(result.body).toMatchObject({ ok: true, submission: { verdict: "accepted" } });
+    expect(result.body.ok && result.body.submission.publicCases).toBeUndefined();
+    expect(provider.calls).toBe(1);
+  });
+
+  it("returns source-mapped structured compiler errors and an authentic total without private echoes", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OnlineCompilerProvider({ apiKey: "synthetic", executionApproved: true, policyAccepted: true,
+      fetch: async () => new Response(JSON.stringify({ output: "", status: "error", exit_code: 1, signal: null, truncated: false,
+        error: "Main.java:2: error: ';' expected\nPRIVATE_ECHO\nMain.java:2: error: ';' expected\nPRIVATE_ECHO\nMain.java:99: error: cannot find symbol\nHIDDEN_INPUT\n3 errors\n",
+      })) });
+    const result = await new JudgeService(repository, provider, { now: () => now }).submit("user-a", {
+      ...request(), sourceCode: "\n\nclass Solution {\n  public static int answer() { return 42; }\n}",
+    });
+    expect(judgeSubmissionResponseSchema.parse(result.body)).toMatchObject({ ok: true, submission: {
+      verdict: "compile_error", compilerErrorCount: 3, compilerDiagnosticsComplete: false,
+      compilerDiagnostics: [{ line: 4, message: "Expected a semicolon (;)." }, { line: 4, message: "Expected a semicolon (;)." }],
+      publicCases: [{ output: null, passed: null }],
+    } });
+    expect(JSON.stringify(result.body)).not.toMatch(/PRIVATE|HIDDEN|Main\.java/);
+  });
+});
 
 describe("JudgeService", () => {
   it("retains prior local usage and refuses the 51st execution", async () => {

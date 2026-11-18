@@ -129,6 +129,24 @@ export const judgeFallbackSchema = z.object({
 
 export type JudgeFallback = z.infer<typeof judgeFallbackSchema>;
 
+export const judgeCompilerDiagnosticSchema = z.object({
+  line: z.number().int().positive(),
+  column: z.number().int().positive().nullable().optional(),
+  message: z.string().max(512),
+});
+
+export const judgePublicCaseSchema = z.object({
+  id: z.string().max(128),
+  title: z.string().max(256),
+  input: z.string().max(4096),
+  output: z.string().max(4096).nullable(),
+  expected: z.string().max(4096),
+  passed: z.boolean().nullable(),
+});
+
+export type JudgeCompilerDiagnostic = z.infer<typeof judgeCompilerDiagnosticSchema>;
+export type JudgePublicCase = z.infer<typeof judgePublicCaseSchema>;
+
 export const judgeSubmissionSchema = z.object({
   id: z.string().uuid(),
   problemId: z.string().uuid(),
@@ -139,6 +157,10 @@ export const judgeSubmissionSchema = z.object({
   testsTotal: z.number().int().min(0),
   durationMs: z.number().nonnegative().nullable(),
   diagnostics: z.string().nullable(),
+  compilerDiagnostics: z.array(judgeCompilerDiagnosticSchema).max(8).optional(),
+  compilerErrorCount: z.number().int().positive().nullable().optional(),
+  compilerDiagnosticsComplete: z.boolean().optional(),
+  publicCases: z.array(judgePublicCaseSchema).max(16).optional(),
   createdAt: z.string().datetime(),
 });
 

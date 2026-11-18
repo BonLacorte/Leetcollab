@@ -1,6 +1,8 @@
-import type { JudgeVerdict } from "@leetcollab/contracts";
+import type { JudgeCompilerDiagnostic, JudgeSubmission, JudgeVerdict } from "@leetcollab/contracts";
 
-export type CompilerDiagnostic = { line: number; message: string };
+export type CompilerDiagnostic = JudgeCompilerDiagnostic;
+export type CompilerReport = Required<Pick<JudgeSubmission,
+  "compilerDiagnostics" | "compilerErrorCount" | "compilerDiagnosticsComplete">>;
 
 // Compiler output can echo private harness source, literals, paths and runtime
 // values. Only these locally written messages may cross the public boundary.
@@ -29,17 +31,58 @@ const categories: Array<[RegExp, string]> = [
 const unknownCompilerMessage = "Java compilation failed. Detailed compiler diagnostics are unavailable.";
 const allowedMessages = new Set([...categories.map(([, message]) => message), unknownCompilerMessage]);
 
-export function compilerDiagnostics(output: string): CompilerDiagnostic[] {
+export function compilerReport(output: string): CompilerReport {
   const diagnostics: CompilerDiagnostic[] = [];
+  let headers = 0;
   for (const line of output.slice(0, 8192).split(/\r\n?|\n/)) {
     const header = /^(?:[^\r\n]*[/\\])?(?:Main|code|Solution)\.java:([1-9]\d*)(?::\d+)?:\s*error:\s*(.*)$/.exec(line);
     if (!header) continue;
+    headers += 1;
     const message = categories.find(([pattern]) => pattern.test(header[2].trim()))?.[1] ?? unknownCompilerMessage;
     const number = Number(header[1]);
-    if (Number.isSafeInteger(number)) diagnostics.push({ line: number, message });
-    if (diagnostics.length === 8) break;
+    if (Number.isSafeInteger(number) && diagnostics.length < 8) diagnostics.push({ line: number, message });
   }
-  return diagnostics;
+  // Only an explicit terminal javac summary is a reported total. A count of
+  // matched headers is never substituted for the compiler's actual total.
+  const summary = /(?:^|\n)([1-9]\d*) errors?\s*$/.exec(output.replace(/\r\n?/g, "\n"));
+  const count = summary ? Number(summary[1]) : null;
+  const reported = count !== null && Number.isSafeInteger(count) && count >= headers ? count : null;
+  return {
+    compilerDiagnostics: diagnostics,
+    compilerErrorCount: reported,
+    compilerDiagnosticsComplete: output.length <= 8192 && reported !== null && reported === diagnostics.length && headers === diagnostics.length,
+  };
+}
+
+export function compilerDiagnostics(output: string): CompilerDiagnostic[] {
+  return compilerReport(output).compilerDiagnostics;
+}
+
+export function publicCompilerReport(
+  source: string, output: string | null, issues?: CompilerDiagnostic[],
+  errorCount: number | null = null, complete = false,
+): CompilerReport {
+  const sourceLines = source.split(/\r\n?|\n/).length;
+  // Stored diagnostics contain only our mapped messages, never raw compiler text.
+  const stored = (output ?? "").slice(0, 8192).split(/\r\n?|\n/).flatMap(line => {
+    const match = /^Line ([1-9]\d*): (.+)$/.exec(line);
+    return match && Number(match[1]) <= sourceLines && allowedMessages.has(match[2])
+      ? [{ line: Number(match[1]), message: match[2] }] : [];
+  });
+  const compiledLines = source.trim().split(/\r\n?|\n/).length;
+  const leadingLines = source.slice(0, source.length - source.trimStart().length).split(/\r\n?|\n/).length - 1;
+  const candidates = issues ?? compilerDiagnostics(output ?? "");
+  const mapped = candidates
+    .filter(issue => Number.isSafeInteger(issue.line) && issue.line > 0 && issue.line <= compiledLines && allowedMessages.has(issue.message))
+    // Columns are omitted: trimming the first source line can change its offset.
+    .map(issue => ({ line: issue.line + leadingLines, message: issue.message }));
+  const safe = stored.length ? stored : mapped;
+  return {
+    compilerDiagnostics: safe.slice(0, 8),
+    compilerErrorCount: errorCount,
+    compilerDiagnosticsComplete: complete && safe.length <= 8 && safe.length === candidates.length && errorCount === safe.length
+      && safe.every(issue => issue.message !== unknownCompilerMessage),
+  };
 }
 
 export function publicExecutionDiagnostics(
@@ -49,19 +92,8 @@ export function publicExecutionDiagnostics(
   issues?: CompilerDiagnostic[],
 ): string {
   if (verdict === "compile_error") {
-    const sourceLines = source.split(/\r\n?|\n/).length;
-    // Idempotent reads may contain our already mapped, persisted messages.
-    const stored = (output ?? "").slice(0, 8192).split(/\r\n?|\n/).flatMap(line => {
-      const match = /^Line ([1-9]\d*): (.+)$/.exec(line);
-      return match && Number(match[1]) <= sourceLines && allowedMessages.has(match[2])
-        ? [{ line: Number(match[1]), message: match[2] }] : [];
-    });
-    const compiledLines = source.trim().split(/\r\n?|\n/).length;
-    const leadingLines = source.slice(0, source.length - source.trimStart().length).split(/\r\n?|\n/).length - 1;
-    const safe = stored.length ? stored : (issues ?? compilerDiagnostics(output ?? ""))
-      .filter(issue => Number.isSafeInteger(issue.line) && issue.line > 0 && issue.line <= compiledLines && allowedMessages.has(issue.message))
-      .map(issue => ({ ...issue, line: issue.line + leadingLines }));
-    return [...new Set(safe.slice(0, 8).map(issue => `Line ${issue.line}: ${issue.message}`))].join("\n") || unknownCompilerMessage;
+    return publicCompilerReport(source, output, issues).compilerDiagnostics
+      .map(issue => `Line ${issue.line}: ${issue.message}`).join("\n") || unknownCompilerMessage;
   }
   switch (verdict) {
     case "runtime_error": return "The Java program stopped with a runtime error.";

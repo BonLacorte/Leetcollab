@@ -5,10 +5,12 @@ import type {
   JudgeSubmissionRequest,
   JudgeSubmissionResponse,
   JudgeVerdict,
+  JudgePublicCase,
 } from "@leetcollab/contracts";
 import { assertEvaluationAdmission, type JudgeEvaluation } from "./evaluation";
 import { buildJavaProgram, validateJavaSource } from "./safety";
-import { publicExecutionDiagnostics } from "./diagnostics";
+import { publicCompilerReport, publicExecutionDiagnostics, type CompilerReport } from "./diagnostics";
+import { casePassed, framedHarness, publicCaseResults, readCaseOutputs } from "./public-cases";
 import {
   ProviderFailure,
   type ExecutionProvider,
@@ -89,12 +91,23 @@ function errorResponse(
   };
 }
 
-function publicSubmission(submission: StoredSubmission, source: string): StoredSubmission {
-  return { ...submission, diagnostics: submission.verdict === "accepted"
+function publicSubmission(
+  submission: StoredSubmission, source: string, compiler?: CompilerReport, cases?: JudgePublicCase[],
+): StoredSubmission {
+  // Structured results are constructed here, never trusted from stored/raw data.
+  const { compilerDiagnostics: _issues, compilerErrorCount: _count,
+    compilerDiagnosticsComplete: _complete, publicCases: _cases, ...stored } = submission;
+  return { ...stored, diagnostics: submission.verdict === "accepted"
     ? "All LeetCollab fixture checks passed."
     : submission.verdict === "wrong_answer"
       ? `${submission.testsPassed} of ${submission.testsTotal} LeetCollab fixture checks passed.`
-      : publicExecutionDiagnostics(submission.verdict, source, submission.diagnostics, []) };
+      : publicExecutionDiagnostics(submission.verdict, source, submission.diagnostics, []),
+    ...(submission.verdict === "compile_error" ? compiler ?? {
+      // A replay has no retained raw report or verified source snapshot.
+      compilerDiagnostics: [], compilerErrorCount: null, compilerDiagnosticsComplete: false,
+    } : {}),
+    ...(cases ? { publicCases: cases } : {}),
+  };
 }
 
 function failedExisting(submission: StoredSubmission, quota: JudgeQuota, source: string): ServiceResponse {
@@ -186,7 +199,8 @@ export class JudgeService {
     const unsafeReason = validateJavaSource(request.sourceCode);
     if (unsafeReason) return errorResponse("UNSAFE_SOURCE", unsafeReason);
 
-    const program = buildJavaProgram(request.sourceCode, config.harnessSource);
+    const program = buildJavaProgram(request.sourceCode,
+      config.publicCasePlan ? framedHarness(config.harnessSource) : config.harnessSource);
     if (Buffer.byteLength(program, "utf8") > 65_536) {
       return errorResponse("INVALID_REQUEST", "The solution and judge harness are too large to execute safely.");
     }
@@ -260,7 +274,13 @@ export class JudgeService {
       };
 
       let completion: JudgeCompletion;
+      let compiler: CompilerReport | undefined;
+      let observed: string[] | undefined;
       if (execution.kind === "execution_error") {
+        if (execution.verdict === "compile_error") compiler = publicCompilerReport(
+          request.sourceCode, execution.diagnostics, execution.compilerDiagnostics,
+          execution.compilerErrorCount, execution.compilerDiagnosticsComplete,
+        );
         completion = {
           ...completionBase,
           judgeState: "completed",
@@ -269,7 +289,16 @@ export class JudgeService {
           diagnostics: publicExecutionDiagnostics(execution.verdict, request.sourceCode, execution.diagnostics, execution.compilerDiagnostics),
         };
       } else {
-        const comparison = compareOutput(execution.output, config.expectedOutput);
+        let comparison: { verdict: JudgeVerdict; passed: number };
+        if (config.publicCasePlan) {
+          const outputs = readCaseOutputs(execution.output, config.expectedOutput.length);
+          if (!outputs) throw new ProviderFailure("unavailable", "The sandbox did not return complete structured fixture results.");
+          observed = outputs;
+          const passed = outputs.reduce((count, output, index) => count + Number(casePassed(output, config.expectedOutput[index])), 0);
+          comparison = { passed, verdict: passed === config.expectedOutput.length ? "accepted" : "wrong_answer" };
+        } else {
+          comparison = compareOutput(execution.output, config.expectedOutput);
+        }
         completion = {
           ...completionBase,
           judgeState: "completed",
@@ -282,7 +311,9 @@ export class JudgeService {
       }
 
       const completed = await this.repository.complete(completion);
-      return { status: 200, body: { ok: true, submission: publicSubmission(completed.submission, request.sourceCode), quota: completed.quota } };
+      return { status: 200, body: { ok: true,
+        submission: publicSubmission(completed.submission, request.sourceCode, compiler, publicCaseResults(config, observed)),
+        quota: completed.quota } };
     } catch (error) {
       const failure = error instanceof ProviderFailure
         ? error

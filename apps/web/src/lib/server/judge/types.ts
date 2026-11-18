@@ -3,6 +3,7 @@ import type {
   JudgeQuota,
   JudgeSubmission,
   JudgeVerdict,
+  JudgePublicCase,
 } from "@leetcollab/contracts";
 import type { CompilerDiagnostic } from "./diagnostics";
 
@@ -22,6 +23,10 @@ export type JudgeConfig = {
   harnessSource: string;
   expectedOutput: string[];
   fallback: JudgeFallback;
+  publicCasePlan?: {
+    format: "framed-v1";
+    cases: Array<Omit<JudgePublicCase, "output" | "passed"> & { fixtureIndex: number }>;
+  };
 };
 
 export type StoredSubmission = JudgeSubmission & {
@@ -100,6 +105,8 @@ export type ExecutionResult =
       verdict: Exclude<JudgeVerdict, "accepted" | "wrong_answer">;
       diagnostics: string;
       compilerDiagnostics?: CompilerDiagnostic[];
+      compilerErrorCount?: number | null;
+      compilerDiagnosticsComplete?: boolean;
       durationMs: number;
       cpuTime: string | null;
       memory: string | null;
