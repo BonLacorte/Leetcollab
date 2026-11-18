@@ -30,14 +30,14 @@ const quota = { available: true, used: 0, limit: 20, remaining: 20, active: 0,
   resetAt: new Date(Date.now() + 3_600_000).toISOString(), fallback: null, unavailableReason: null };
 const problemId = "11111111-1111-4111-8111-111111111111";
 const response = (body: unknown) => new Response(JSON.stringify(body));
-function Harness() {
+function Harness({ code }: { code: string }) {
   const [execution, setExecution] = useState<PracticeExecution | null>(null);
-  return <><PracticeControls problemId={problemId} code="class Solution {}" onExecutionChange={setExecution} />
+  return <><PracticeControls problemId={problemId} code={code} onExecutionChange={setExecution} />
     <WorkspacePanel {...workspaceProps} execution={execution} /></>;
 }
-async function render() {
+async function render(code = "class Solution {}") {
   container = document.createElement("div"); document.body.append(container);
-  await act(async () => { root = createRoot(container); root.render(<Harness />); });
+  await act(async () => { root = createRoot(container); root.render(<Harness code={code} />); });
 }
 async function click(label: string, role?: string) {
   const button = Array.from(container.querySelectorAll<HTMLButtonElement>(role ? `[role="${role}"]` : "button"))
@@ -90,4 +90,32 @@ it.each([
   await click("Submit");
   expect(resultPanel().textContent).toContain(title);
   expect(resultPanel().textContent).toContain(detail);
+});
+
+it("keeps structured compiler locations through API parsing and uses the submitted source excerpt", async () => {
+  const code = "class Solution {\n  int answer() {\n    return 12\n  }\n}";
+  vi.stubGlobal("fetch", vi.fn(async (_url, options) => response(options?.method ? { ok: true, quota, submission: {
+    id: "22222222-2222-4222-8222-222222222222", problemId, language: "java", verification: "leetcollab", verdict: "compile_error",
+    testsPassed: 0, testsTotal: 4, durationMs: 10, diagnostics: "Compile failure",
+    compilerDiagnostics: [{ line: 3, message: "Expected a semicolon (;)." }], compilerErrorCount: 1, compilerDiagnosticsComplete: true,
+    createdAt: "2026-11-18T03:00:00.000Z",
+  } } : quota)));
+  await render(code);
+  await click("Run");
+  expect(resultPanel().querySelector(".compiler-source")?.textContent).toBe("    return 12");
+  expect(resultPanel().querySelector(".compiler-error-count")?.textContent).toBe("1 compiler error");
+});
+
+it.each([true, false])("keeps actual public case details through API parsing (passed=%s)", async passed => {
+  vi.stubGlobal("fetch", vi.fn(async (_url, options) => response(options?.method ? { ok: true, quota, submission: {
+    id: "22222222-2222-4222-8222-222222222222", problemId, language: "java", verification: "leetcollab", verdict: passed ? "accepted" : "wrong_answer",
+    testsPassed: passed ? 4 : 2, testsTotal: 4, durationMs: 10, diagnostics: "Aggregate verdict",
+    publicCases: [{ id: "example-1", title: "Public example", input: "public input", output: passed ? "true" : "false", expected: "true", passed }],
+    createdAt: "2026-11-18T03:00:00.000Z",
+  } } : quota)));
+  await render();
+  await click("Submit");
+  const panel = resultPanel().querySelector('.public-case-detail[data-state="active"]')!;
+  expect(Array.from(panel.querySelectorAll("pre"), node => node.textContent)).toEqual(["public input", passed ? "true" : "false", "true"]);
+  expect(panel.textContent).toContain(passed ? "Passed" : "Failed");
 });

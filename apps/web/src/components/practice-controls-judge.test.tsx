@@ -179,12 +179,17 @@ it.each(["Run", "Submit"])("%s displays safe missing-import compiler feedback fr
     + "Main.java:90: error: incompatible types: PRIVATE_FIXTURE_LITERAL\nsecret harness echo\n");
   await click(label, missingImport);
   expect(responses[0].status).toBe(200);
-  expect(await responses[0].json()).toMatchObject({ ok: true, submission: {
+  const body = await responses[0].json();
+  expect(body).toMatchObject({ ok: true, submission: {
     verdict: "compile_error", diagnostics: "Line 3: Cannot find symbol. Check spelling and imports.",
+    compilerDiagnostics: [{ line: 3, message: "Cannot find symbol. Check spelling and imports." }],
+    compilerErrorCount: null, compilerDiagnosticsComplete: false,
   } });
+  expect(JSON.stringify(body)).not.toContain("Stack<Character>");
   expect(renderer!.root.findByType("h2").children).toEqual(["Compile Error"]);
-  expect(output()).toContain("Line 3: Cannot find symbol.");
-  expect(output()).not.toMatch(/PRIVATE_FIXTURE|secret harness|Stack<Character>/);
+  expect(output()).toContain("Cannot find symbol. Check spelling and imports.");
+  expect(output()).not.toMatch(/PRIVATE_FIXTURE|secret harness/);
+  expect(output()).toContain("Stack<Character>");
   expect(repository.complete).toHaveBeenCalledWith(expect.objectContaining({
     diagnostics: "Line 3: Cannot find symbol. Check spelling and imports.",
   }));

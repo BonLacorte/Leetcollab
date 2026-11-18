@@ -1,17 +1,8 @@
-import type { JudgeSubmission } from "@leetcollab/contracts";
+import type { JudgeCompilerDiagnostic, JudgePublicCase, JudgeSubmission } from "@leetcollab/contracts";
 
-// Optional projection shared with the server owner. Old saved responses remain
-// usable through their aggregate verdict and plain diagnostics.
-export type CodeDiagnostic = { line: number; column?: number | null; message: string };
-export type PublicCase = {
-  id: string; title: string; input: string; output: string | null; expected: string; passed: boolean | null;
-};
-export type StructuredSubmission = JudgeSubmission & {
-  compilerDiagnostics?: CodeDiagnostic[];
-  compilerErrorCount?: number | null;
-  compilerDiagnosticsComplete?: boolean;
-  publicCases?: PublicCase[];
-};
+export type CodeDiagnostic = JudgeCompilerDiagnostic;
+export type PublicCase = JudgePublicCase;
+export type StructuredSubmission = JudgeSubmission;
 
 export function sourceDiagnostics(submission: StructuredSubmission, source: string): CodeDiagnostic[] {
   const lines = source.split(/\r\n?|\n/);

@@ -98,3 +98,13 @@ it("keeps the aggregate Accepted result when public attribution is unavailable",
   expect(container.textContent).toContain("Public testcase details are not available for this submission.");
   expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
 });
+
+it("preserves an observed empty public output as data rather than unavailable", async () => {
+  await render({ verdict: "accepted", testsPassed: 4, publicCases: [
+    { id: "compact-empty", title: "Empty public example", input: "text = empty", output: "", expected: "", passed: true },
+  ] });
+  const panel = container.querySelector('.public-case-detail[data-state="active"]')!;
+  expect(panel.textContent).toContain("Passed");
+  expect(Array.from(panel.querySelectorAll("pre"), node => node.textContent)).toEqual(["text = empty", "(empty output)", "(empty output)"]);
+  expect(panel.textContent).not.toContain("Not available");
+});
