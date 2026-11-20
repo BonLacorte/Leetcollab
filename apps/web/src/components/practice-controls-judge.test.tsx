@@ -170,6 +170,8 @@ it.each([
   await click("Run", source);
   expect(responses[0].status).toBe(200);
   expect(send).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(send.mock.calls[0][1]!.body as string).code)
+    .toBe(`${source}\n\n${harness.replace("class Main", "public class Main")}\n`);
 });
 
 it.each(["Run", "Submit"])("%s still rejects forbidden imports before quota reservation or transport", async label => {

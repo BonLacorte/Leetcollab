@@ -64,7 +64,7 @@ export function WorkspacePanel({
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<WorkspaceTab>("whiteboard");
   useEffect(() => {
-    if (execution) setTab("result");
+    if (execution?.state === "running") setTab("result");
   }, [execution]);
 
   return (

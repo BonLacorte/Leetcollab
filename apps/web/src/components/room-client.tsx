@@ -645,9 +645,10 @@ export function RoomClient({ roomId }: { roomId: string }) {
           isProgressLoading={draft.loading || draft.saving}
           isRetrievingSubmission={draft.retrieving}
           connected={socket?.connected ?? false}
-          onCodeChange={updateCode}
-          onResetCode={() => { setCodeVersion(version => version + 1); draft.resetCode(); }}
-          onRetrieveSubmission={() => { setCodeVersion(version => version + 1); void draft.retrieveSubmission(); }}
+          onCodeChange={draft.editCode}
+          onResetCode={draft.resetCode}
+          onRestoreDraft={draft.restoreDraft}
+          onRetrieveSubmission={draft.retrieveSubmission}
           onExecutionChange={value => setExecution({ scope: executionScope, value })}
         />
       </section>

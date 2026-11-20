@@ -43,11 +43,10 @@ function submission(row: Record<string, unknown>): StoredSubmission {
     diagnostics: row.diagnostics === null ? null : String(row.diagnostics),
     createdAt: new Date(String(row.created_at)).toISOString(),
     judgeState: String(row.judge_state) as StoredSubmission["judgeState"],
-    action: String(row.execution_action ?? "legacy") as StoredSubmission["action"],
   };
 }
 
-const submissionColumns = "id, problem_id, verdict, tests_passed, tests_total, duration_ms, diagnostics, created_at, judge_state, execution_action";
+const submissionColumns = "id, problem_id, verdict, tests_passed, tests_total, duration_ms, diagnostics, created_at, judge_state";
 
 export class SupabaseJudgeRepository implements JudgeRepository {
   constructor(private readonly client: SupabaseClient, private readonly options: { userId?: string; sharedQuota?: boolean } = {}) {}
@@ -113,8 +112,8 @@ export class SupabaseJudgeRepository implements JudgeRepository {
         p_scope: this.options.sharedQuota ? "shared" : "user",
         p_runner: input.runner ?? "jdoodle", p_action: input.action ?? "run",
         p_room_id: input.participants?.roomId ?? null,
-        p_participant_ids: input.participants?.userIds ?? [input.userId],
-        p_captured_at: input.participants?.capturedAt ?? new Date().toISOString(),
+        p_participant_ids: input.participants === null ? null : input.participants?.userIds ?? [input.userId],
+        p_captured_at: input.participants === null ? null : input.participants?.capturedAt ?? new Date().toISOString(),
       } : {}),
       p_user_id: input.userId,
       p_problem_id: input.problemId,

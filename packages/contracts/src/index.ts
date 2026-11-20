@@ -161,7 +161,6 @@ export const judgeSubmissionSchema = z.object({
   problemId: z.string().uuid(),
   language: judgeLanguageSchema,
   verdict: judgeVerdictSchema,
-  action: z.enum(["run", "submit", "legacy"]).optional(),
   verification: z.literal("leetcollab"),
   testsPassed: z.number().int().min(0),
   testsTotal: z.number().int().min(0),

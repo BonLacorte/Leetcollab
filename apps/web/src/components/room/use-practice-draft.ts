@@ -31,7 +31,7 @@ export function usePracticeDraft(options: Options) {
   // Each scope owns its pending reads/writes. Cleanup can flush the old scope
   // without accidentally saving the next exercise's code under the old ID.
   const context = useMemo(() => ({
-    ...options, initialCode: code, revision: 0, ready: false, lastSaved: code,
+    ...options, revision: 0, ready: false, lastSaved: null as string | null, draftEdit: null as string | null,
     retrieving: false, active: false, loading: true,
   }), [scope]); // The remaining fields track current values below, without restarting the timer.
   useLayoutEffect(() => {
@@ -57,9 +57,9 @@ export function usePracticeDraft(options: Options) {
       if (active) setState(current => current.scope === scope ? { ...current, ...value } : current);
     };
     async function save(): Promise<void> {
-      if (!context.ready || !context.canEditCode || !context.connected || context.code === context.lastSaved) return;
+      if (!context.ready || !context.canEditCode || !context.connected || context.draftEdit === null || context.draftEdit === context.lastSaved) return;
       if (pendingSave) { await pendingSave; return save(); }
-      const savedCode = context.code;
+      const savedCode = context.draftEdit;
       updateCurrent({ saving: true, status: "Saving draft…" });
       const previousWrite = pendingDraftWrites.get(persistenceScope);
       pendingSave = (async () => {
@@ -91,7 +91,7 @@ export function usePracticeDraft(options: Options) {
         if (error) throw error;
         const row = data as ProgressRow | null;
         const hasDraft = Boolean(row?.last_saved_at && row.draft_language === "java" && typeof row.draft_code === "string");
-        context.lastSaved = hasDraft ? context.initialCode : context.problem?.starterCode ?? context.initialCode;
+        context.lastSaved = hasDraft ? row!.draft_code : null;
         context.ready = true;
         updateCurrent({ progress: row ? progressFromRow(row) : null, status: "Autosaves every 10 minutes when code changes." });
       } catch {
@@ -108,6 +108,24 @@ export function usePracticeDraft(options: Options) {
       context.active = false;
     };
   }, [context, scope, persistenceScope, userId, problemId]);
+
+  function editCode(nextCode: string) {
+    if (!context.active || !context.canEditCode || nextCode === context.code) return;
+    context.draftEdit = nextCode;
+    context.revision += 1;
+    context.code = nextCode;
+    context.onCodeChange(nextCode);
+  }
+
+  function restoreDraft() {
+    if (!context.active || !context.canEditCode || !context.connected || context.loading || context.retrieving
+      || context.lastSaved === null) return;
+    context.revision += 1;
+    context.draftEdit = null;
+    context.code = context.lastSaved;
+    context.onCodeChange(context.code);
+    update({ status: "Saved draft restored into the shared editor." });
+  }
 
   function resetCode() {
     if (!context.active || !context.canEditCode || !context.connected || context.loading || context.retrieving || !context.problem) return;
@@ -143,5 +161,5 @@ export function usePracticeDraft(options: Options) {
   }
 
   const current = state.scope === scope ? state : { progress: null, status: "Loading saved draft…", loading: true, saving: false, retrieving: false };
-  return { ...current, resetCode, retrieveSubmission };
+  return { ...current, editCode, restoreDraft, resetCode, retrieveSubmission };
 }

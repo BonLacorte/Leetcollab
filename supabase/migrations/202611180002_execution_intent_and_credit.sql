@@ -91,14 +91,17 @@ create function public.reserve_judge_execution(
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 declare account public.judge_quota_periods; personal public.judge_user_quota_periods;
   attempt public.submissions; result jsonb; expired_count integer;
+  replay_only boolean := p_action='submit' and p_room_id is null and p_participant_ids is null and p_captured_at is null;
 begin
   if p_scope is null or p_scope not in ('user','shared') or p_runner is null or p_runner not in ('jdoodle','onlinecompiler')
-    or p_action is null or p_action not in ('run','submit') or p_captured_at is null
-    or p_participant_ids is null or not (p_user_id=any(p_participant_ids))
-    or cardinality(p_participant_ids) not between 1 and 256
-    or array_position(p_participant_ids,null) is not null
-    or (p_room_id is null and p_participant_ids <> array[p_user_id])
-    or (p_room_id is not null and p_room_id !~ '^[a-z0-9]{8}$') then
+    or p_action is null or p_action not in ('run','submit')
+    or (not replay_only and (
+      p_captured_at is null or p_participant_ids is null or not (p_user_id=any(p_participant_ids))
+      or cardinality(p_participant_ids) not between 1 and 256
+      or array_position(p_participant_ids,null) is not null
+      or (p_room_id is null and p_participant_ids <> array[p_user_id])
+      or (p_room_id is not null and p_room_id !~ '^[a-z0-9]{8}$')
+    )) then
     raise exception 'invalid execution context' using errcode='22023';
   end if;
   if p_scope='shared' then
@@ -154,6 +157,14 @@ begin
     end if;
   end if;
   if result->>'result'='reserved' then
+    if replay_only then
+      raise exception 'new submit requires captured participants' using errcode='22023';
+    end if;
+    if p_scope='shared' then
+      insert into public.judge_user_quota_periods(user_id,period_start,period_end,quota_limit,used)
+      values(p_user_id,p_period_start,p_period_end,25,1)
+      on conflict(user_id,period_start) do update set used=judge_user_quota_periods.used+1;
+    end if;
     update public.submissions set execution_action=p_action,execution_room_id=p_room_id,
       participants_captured_at=p_captured_at where id=(result->>'submissionId')::uuid;
     insert into public.judge_submission_participants(submission_id,user_id)

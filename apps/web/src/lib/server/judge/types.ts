@@ -87,7 +87,7 @@ export interface JudgeRepository {
     idempotencyKey: string;
     sourceCode: string;
     action?: "run" | "submit";
-    participants?: SubmissionParticipants;
+    participants?: SubmissionParticipants | null;
     period: QuotaPeriod;
     quotaLimit: number;
     activeLimit: number;

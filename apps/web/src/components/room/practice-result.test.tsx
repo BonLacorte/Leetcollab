@@ -2,10 +2,15 @@
 import React, { act, useState, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import { PracticeControls } from "../practice-controls";
+import { EditorPanel } from "./editor-panel";
 import { WorkspacePanel } from "./workspace-panel";
 import type { PracticeExecution } from "./practice-result";
 
+vi.mock("../theme-provider", () => ({ useTheme: () => ({ theme: "light" }) }));
+vi.mock("@uiw/react-codemirror", async importOriginal => ({
+  ...await importOriginal<typeof import("@uiw/react-codemirror")>(),
+  default: ({ value }: { value: string }) => <textarea readOnly value={value} />,
+}));
 vi.mock("../auth-provider", () => ({ useAuth: () => ({ session: { access_token: "token", user: { id: "user" } } }) }));
 vi.mock("../../lib/supabase", () => ({ supabase: { from: () => {
   const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: null }),
@@ -32,7 +37,9 @@ const problemId = "11111111-1111-4111-8111-111111111111";
 const response = (body: unknown) => new Response(JSON.stringify(body));
 function Harness({ code }: { code: string }) {
   const [execution, setExecution] = useState<PracticeExecution | null>(null);
-  return <><PracticeControls problemId={problemId} code={code} onExecutionChange={setExecution} />
+  return <><EditorPanel problemId={problemId} code={code} codeVersion={0} execution={execution}
+    canEditCode connected progress={null} progressStatus="" isProgressLoading={false} isRetrievingSubmission={false}
+    onCodeChange={noop} onResetCode={noop} onRestoreDraft={noop} onRetrieveSubmission={noop} onExecutionChange={setExecution} />
     <WorkspacePanel {...workspaceProps} execution={execution} /></>;
 }
 async function render(code = "class Solution {}") {
@@ -56,13 +63,21 @@ it.each(["Run", "Submit"])("%s opens Result, renders compiler feedback there, an
     ? new Promise<Response>(resolve => { finish = resolve; }) : response(quota)));
   await render();
   const canvas = container.querySelector("canvas");
+  const editor = container.querySelector(".editor-panel textarea");
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Maximize Code card"]')!.click());
+  expect(container.querySelector(".editor-panel")?.getAttribute("data-view")).toBe("maximized");
   await click(label);
+  expect(container.querySelector(".editor-panel")?.getAttribute("data-view")).toBe("normal");
+  expect(container.querySelector(".editor-panel textarea")).toBe(editor);
   expect(resultPanel().textContent).toContain("Judging");
+  await click("Whiteboard", "tab");
   await act(async () => finish(response({ ok: true, quota, submission: {
     id: "22222222-2222-4222-8222-222222222222", problemId, language: "java", verification: "leetcollab",
     verdict: "compile_error", testsPassed: 0, testsTotal: 4, durationMs: 10,
     diagnostics: "Line 3: Cannot find symbol. Check spelling and imports.", createdAt: "2026-11-18T03:00:00.000Z",
   } })));
+  expect(container.querySelector('[role="tab"][aria-selected="true"]')!.textContent).toBe("Whiteboard");
+  await click("Result", "tab");
   expect(resultPanel().textContent).toContain("Compile Error");
   expect(resultPanel().textContent).toContain("Line 3: Cannot find symbol.");
   expect(container.querySelector(".practice-controls")!.textContent).not.toContain("Cannot find symbol");

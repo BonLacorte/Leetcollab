@@ -51,7 +51,7 @@ begin
   if exists(select 1 from public.verified_problem_solves where user_id=late) then
     raise exception 'Replay must not credit later joiners';
   end if;
-  result := public.reserve_judge_execution('user','onlinecompiler','submit',null,array[a],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','submit',null,null,null,
     a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
   if result->>'result'<>'existing' or (result->>'used')::int<>2
     or (select execution_room_id from public.submissions where id=accepted_submit)<>'abcdefgh'
@@ -85,7 +85,24 @@ begin
     raise exception 'Zero tests must not grant credit';
   end if;
 
-  for i in 1..25 loop
+  key := gen_random_uuid();
+  begin
+    perform public.reserve_judge_execution('shared','onlinecompiler','submit',null,null,null,
+      capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
+    raise exception 'A new Submit must not reserve without a snapshot';
+  exception when invalid_parameter_value then null; end;
+  result := public.reserve_judge_execution('shared','onlinecompiler','submit',null,array[capped],now(),
+    capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
+  if result->>'result'<>'reserved' then raise exception 'Shared Submit should reserve with a fresh snapshot'; end if;
+  perform public.complete_judge_submission(capped,(result->>'submissionId')::uuid,'failed','runtime_error',0,3,1,'synthetic',null,null);
+  result := public.reserve_judge_execution('shared','onlinecompiler','submit',null,null,null,
+    capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
+  if result->>'result'<>'existing' then raise exception 'Shared Submit should replay without a fresh snapshot'; end if;
+  quota := public.get_user_judge_quota_status(capped,starts,ends,25);
+  if (quota->>'used')::int<>1 or (quota->>'limit')::int<>25 then
+    raise exception 'A shared reservation must charge its actor once toward normal usage';
+  end if;
+  for i in 2..25 loop
     result := public.reserve_judge_execution('user','onlinecompiler','run',null,array[capped],now(),
       capped,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
     if result->>'result'<>'reserved' then raise exception 'Personal execution % should reserve',i; end if;

@@ -188,6 +188,23 @@ describe("structured public results", () => {
     expect(provider.calls).toBe(1);
   });
 
+  it("replays when the original completes while a retry is trying to capture participants", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
+    const routineCapture = async () => ({ roomId: null, userIds: ["user-a"], capturedAt: now.toISOString() });
+    const original = new JudgeService(repository, provider, { captureParticipants: routineCapture });
+    const submit = { ...request(), action: "submit" as const };
+    const retry = new JudgeService(repository, provider, {
+      captureParticipants: async () => {
+        expect((await original.submit("user-a", submit)).body).toMatchObject({ ok: true });
+        throw new Error("Snapshot unavailable");
+      },
+    });
+    expect((await retry.submit("user-a", submit)).body)
+      .toMatchObject({ ok: true, quota: { used: 1 }, submission: { verdict: "accepted" } });
+    expect(provider.calls).toBe(1);
+  });
+
   it("does not invent observed results for a replay without retained per-case evidence", async () => {
     const repository = new MemoryRepository(publicConfig());
     const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));

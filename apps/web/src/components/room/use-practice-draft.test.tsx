@@ -60,10 +60,11 @@ it("keeps a scoped draft private and saves the latest dirty code every ten minut
   expect(mocks.query).toHaveBeenCalledWith("user_problem_progress", "user_id", "user");
   expect(mocks.query).toHaveBeenCalledWith("user_problem_progress", "problem_id", problem.id);
   await advance(300_000);
-  await act(async () => change({ code: "first edit" }));
+  await act(async () => latest.editCode("first edit"));
   await advance(299_999);
-  await act(async () => change({ code: "latest edit" }));
+  await act(async () => latest.editCode("latest edit"));
   expect(mocks.save).not.toHaveBeenCalled();
+  await act(async () => change({ code: "remote code after my edit" }));
   await advance(1);
   expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ user_id: "user", problem_id: problem.id, draft_language: "java", draft_code: "latest edit" }));
   await advance();
@@ -81,7 +82,10 @@ it("does not save starter code before reading the draft or replace edits made wh
   expect(input.code).toBe("collaborator's newer code");
   expect(mocks.replace).not.toHaveBeenCalled();
   await advance();
-  expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ draft_code: "collaborator's newer code" }));
+  expect(mocks.save).not.toHaveBeenCalled();
+  await act(async () => latest.restoreDraft());
+  expect(input.code).toBe("older saved draft");
+  expect(mocks.replace).toHaveBeenCalledExactlyOnceWith("older saved draft");
 });
 
 it("keeps existing shared code and ignores drafts from a different language", async () => {
@@ -90,13 +94,15 @@ it("keeps existing shared code and ignores drafts from a different language", as
   expect(input.code).toBe("existing shared Java");
   expect(mocks.replace).not.toHaveBeenCalled();
   await advance();
-  expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ draft_language: "java", draft_code: "existing shared Java" }));
+  await act(async () => latest.restoreDraft());
+  expect(mocks.save).not.toHaveBeenCalled();
+  expect(mocks.replace).not.toHaveBeenCalled();
 });
 
 it.each([{ canEditCode: false }, { connected: false }])("respects permissions and connection state: %s", async values => {
   mocks.read.mockResolvedValue({ data: row("saved Java"), error: null });
   await render(values);
-  await act(async () => { latest.resetCode(); await latest.retrieveSubmission(); change({ code: "viewed code" }); });
+  await act(async () => { latest.resetCode(); latest.restoreDraft(); await latest.retrieveSubmission(); change({ code: "viewed code" }); });
   await advance();
   expect(mocks.replace).not.toHaveBeenCalled();
   expect(mocks.submitted).not.toHaveBeenCalled();
@@ -142,11 +148,11 @@ it("discards a retrieved submission when the shared editor changes during the re
 
 it("flushes dirty code under the old exercise and cancels its timer when switching or unmounting", async () => {
   await render();
-  await act(async () => change({ code: "exercise A edit" }));
+  await act(async () => latest.editCode("exercise A edit"));
   const second = { ...problem, id: "problem-b", starterCode: "class Solution { /* B */ }" };
   await act(async () => change({ problem: second, code: second.starterCode }));
   expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ problem_id: problem.id, draft_code: "exercise A edit" }));
-  await act(async () => change({ code: "exercise B edit" }));
+  await act(async () => latest.editCode("exercise B edit"));
   await advance();
   expect(mocks.save).toHaveBeenCalledTimes(2);
   expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({ problem_id: second.id, draft_code: "exercise B edit" }));
@@ -165,14 +171,14 @@ it("discards old exercise reads after switching, and never overwrites a saved dr
   await act(async () => finish({ data: row("old exercise draft"), error: null }));
   expect(input.code).toBe(second.starterCode);
   expect(latest.status).toContain("Could not load");
-  await act(async () => change({ code: "new unsaved code" }));
+  await act(async () => latest.editCode("new unsaved code"));
   await advance();
   expect(mocks.save).not.toHaveBeenCalled();
 });
 
 it("reports a save failure and retries dirty content at the next interval", async () => {
   await render();
-  await act(async () => change({ code: "dirty code" }));
+  await act(async () => latest.editCode("dirty code"));
   mocks.save.mockRejectedValueOnce(new Error("offline"));
   await advance();
   expect(latest.status).toContain("Could not autosave");
@@ -186,7 +192,7 @@ it("waits for a navigation save before reading that exercise again", async () =>
   let finish!: (value: unknown) => void;
   mocks.save.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   await render();
-  await act(async () => change({ code: "latest A edit" }));
+  await act(async () => latest.editCode("latest A edit"));
   const second = { ...problem, id: "problem-b" };
   await act(async () => change({ problem: second, code: second.starterCode }));
   const readsBeforeReturn = mocks.read.mock.calls.length;
@@ -204,6 +210,8 @@ it("keeps an intentionally empty saved draft private", async () => {
   expect(input.code).toBe(problem.starterCode);
   expect(latest.progress?.draftCode).toBe("");
   expect(mocks.replace).not.toHaveBeenCalled();
+  await act(async () => latest.restoreDraft());
+  expect(input.code).toBe("");
   await advance();
   expect(mocks.save).not.toHaveBeenCalled();
 });

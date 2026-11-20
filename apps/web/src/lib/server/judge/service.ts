@@ -225,10 +225,18 @@ export class JudgeService {
     }
 
     const action = request.action ?? "run";
-    const participants = action === "submit" && this.captureParticipants
-      && !await this.repository.hasSubmissionKey(userId, request.idempotencyKey)
-      ? await this.captureParticipants()
-      : { roomId: null, capturedAt: this.now().toISOString(), userIds: [userId] };
+    let participants: SubmissionParticipants | null = { roomId: null, capturedAt: this.now().toISOString(), userIds: [userId] };
+    if (action === "submit" && this.captureParticipants) {
+      const hasExisting = () => this.repository.hasSubmissionKey(userId, request.idempotencyKey);
+      participants = null;
+      if (!await hasExisting()) {
+        try {
+          participants = await this.captureParticipants();
+        } catch (error) {
+          if (!await hasExisting()) throw error;
+        }
+      }
+    }
     this.assertAdmission(userId, request.problemId);
     const reservation = await this.repository.reserve({
       userId,

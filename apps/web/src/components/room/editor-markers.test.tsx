@@ -22,7 +22,7 @@ const props: ComponentProps<typeof EditorPanel> = {
   problemId, code, codeVersion: 5, execution: { action: "Run", sourceCode: code, codeVersion: 5, state: "finished", response: {
     ok: true, submission, quota: { used: 1, limit: 50, remaining: 49, active: 0, resetAt: "2026-11-18T23:55:00.000Z" },
   } }, canEditCode: true, progress: null, progressStatus: "", isProgressLoading: false, isRetrievingSubmission: false, connected: true,
-  onCodeChange: () => {}, onResetCode: () => {}, onRetrieveSubmission: () => {}, onExecutionChange: () => {},
+  onCodeChange: () => {}, onResetCode: () => {}, onRestoreDraft: () => {}, onRetrieveSubmission: () => {}, onExecutionChange: () => {},
 };
 let root: Root;
 beforeEach(() => vi.useFakeTimers());

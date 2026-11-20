@@ -5,7 +5,7 @@ import { linter, lintGutter, setDiagnostics } from "@codemirror/lint";
 import { java } from "@codemirror/lang-java";
 import { PracticeControls } from "../practice-controls";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { ChevronDown, ChevronUp, History, Maximize2, Minimize2, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronUp, FileDown, History, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ProblemProgress } from "@leetcollab/contracts";
 import { useTheme } from "../theme-provider";
@@ -29,6 +29,7 @@ type EditorPanelProps = {
   connected: boolean;
   onCodeChange: (value: string) => void;
   onResetCode: () => void;
+  onRestoreDraft: () => void;
   onRetrieveSubmission: () => void;
   onExecutionChange: (execution: PracticeExecution) => void;
 };
@@ -56,6 +57,7 @@ export function EditorPanel({
   connected,
   onCodeChange,
   onResetCode,
+  onRestoreDraft,
   onRetrieveSubmission,
   onExecutionChange,
 }: EditorPanelProps) {
@@ -103,6 +105,12 @@ export function EditorPanel({
             <span className="editor-tooltip" id={`${tooltipId}-reset`} role="tooltip">Reset to default code definition</span>
           </span>
           <span className="editor-tool">
+            <Button aria-label="Restore saved draft to shared editor" aria-describedby={`${tooltipId}-draft`} disabled={actionsDisabled || !progress?.lastSavedAt || progress.draftLanguage !== "java"} onClick={onRestoreDraft} size="icon" variant="secondary">
+              <FileDown aria-hidden="true" />
+            </Button>
+            <span className="editor-tooltip" id={`${tooltipId}-draft`} role="tooltip">Restore saved draft to shared editor</span>
+          </span>
+          <span className="editor-tool">
             <Button aria-label="Retrieve last submitted code" aria-describedby={`${tooltipId}-retrieve`} disabled={actionsDisabled} onClick={onRetrieveSubmission} size="icon" variant="secondary">
               <History aria-hidden="true" />
             </Button>
@@ -127,7 +135,10 @@ export function EditorPanel({
       </div>
       <span className="sr-only" role="status">{maximized ? "Code card maximized. Press Escape to restore the workspace." : folded ? "Code card folded." : ""}</span>
       <div className="editor-content" id={`${tooltipId}-content`} hidden={folded}>
-        {problemId && <PracticeControls problemId={problemId} code={code} codeVersion={codeVersion} onExecutionChange={onExecutionChange} />}
+        {problemId && <PracticeControls problemId={problemId} code={code} codeVersion={codeVersion} onExecutionChange={value => {
+          if (value.state === "running") setViewMode(current => current === "maximized" ? "normal" : current);
+          onExecutionChange(value);
+        }} />}
         <div className="code-editor">
           <CodeMirror
             basicSetup={{ lineNumbers: true, foldGutter: true }}
