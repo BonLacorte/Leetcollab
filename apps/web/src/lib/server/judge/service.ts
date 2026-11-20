@@ -18,6 +18,7 @@ import {
   type JudgeRepository,
   type QuotaPeriod,
   type StoredSubmission,
+  type SubmissionParticipants,
 } from "./types";
 
 type ServiceResponse = { status: number; body: JudgeSubmissionResponse };
@@ -26,6 +27,8 @@ export type JudgeServiceOptions = {
   quotaLimit?: number;
   // Server composition permits this only in development with a loopback database.
   localTesting?: boolean;
+  captureParticipants?: () => Promise<SubmissionParticipants>;
+  notifyCompletion?: (submissionId: string) => Promise<void>;
   activeLimit?: number;
   reservationSeconds?: number;
   now?: () => Date;
@@ -128,6 +131,8 @@ export class JudgeService {
   private readonly now: () => Date;
   private readonly renderPolicyId?: string;
   private readonly evaluation?: JudgeEvaluation;
+  private readonly captureParticipants?: () => Promise<SubmissionParticipants>;
+  private readonly notifyCompletion?: (submissionId: string) => Promise<void>;
 
   constructor(
     private readonly repository: JudgeRepository,
@@ -135,8 +140,10 @@ export class JudgeService {
     options: JudgeServiceOptions = {},
   ) {
     this.evaluation = options.evaluation;
-    const maximum = options.localTesting && provider.id === "onlinecompiler" && !options.evaluation ? 50 : 20;
-    this.quotaLimit = Math.min(maximum, Math.max(1, options.quotaLimit ?? 20));
+    const maximum = options.evaluation ? 20 : options.localTesting && provider.id === "onlinecompiler" ? 50 : 25;
+    this.quotaLimit = Math.min(maximum, Math.max(1, options.quotaLimit ?? 25));
+    this.captureParticipants = options.captureParticipants;
+    this.notifyCompletion = options.notifyCompletion;
     this.activeLimit = Math.max(1, options.activeLimit ?? 4);
     this.reservationSeconds = Math.min(120, Math.max(35, options.reservationSeconds ?? 45));
     if (options.renderPolicyId && !provider.provenance) throw new Error("Render policy requires Render provenance.");
@@ -216,11 +223,18 @@ export class JudgeService {
       );
     }
 
+    const action = request.action ?? "run";
+    const participants = action === "submit" && this.captureParticipants
+      ? await this.captureParticipants()
+      : { roomId: null, capturedAt: this.now().toISOString(), userIds: [userId] };
+    this.assertAdmission(userId, request.problemId);
     const reservation = await this.repository.reserve({
       userId,
       problemId: request.problemId,
       idempotencyKey: request.idempotencyKey,
       sourceCode: request.sourceCode,
+      action,
+      participants,
       period,
       quotaLimit: this.quotaLimit,
       activeLimit: this.activeLimit,
@@ -239,7 +253,9 @@ export class JudgeService {
         status: 429,
         body: {
           ok: false,
-          error: { code: "QUOTA_EXHAUSTED", message: this.provider.provenance ? "The shared execution allowance is exhausted." : "The shared daily execution quota is exhausted." },
+          error: { code: "QUOTA_EXHAUSTED", message: this.provider.provenance || this.evaluation
+            ? "The shared execution allowance is exhausted."
+            : "Your execution allowance or the external sandbox's account allowance is exhausted." },
           quota: reservation.quota,
           fallback: config.fallback,
         },
@@ -311,6 +327,11 @@ export class JudgeService {
       }
 
       const completed = await this.repository.complete(completion);
+      if (action === "submit" && completion.verdict === "accepted") {
+        // Notification is a refresh hint after durable credit, never authority to
+        // grant a solve. A failed hint cannot turn success into a charged retry.
+        try { await this.notifyCompletion?.(completed.submission.id); } catch { /* Refresh/reconnect reads durable credit. */ }
+      }
       return { status: 200, body: { ok: true,
         submission: publicSubmission(completed.submission, request.sourceCode, compiler, publicCaseResults(config, observed)),
         quota: completed.quota } };

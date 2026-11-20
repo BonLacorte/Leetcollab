@@ -172,8 +172,9 @@ as CPU time. See the [run-code reference](https://onlinecompiler.io/docs/run-cod
 
 Successful provider output still passes through LeetCollab's existing fixture
 comparison and private completion RPC. HTTP 200 is not an accepted solution.
-Run and Submit retain their existing shared persistence semantics. Authentication,
-rooms, drafts and verified-completion rules are unchanged.
+Run and Submit save actor-owned submissions. Only an accepted Submit grants new
+verified solved credit, including its server-captured eligible room participants;
+see [execution credit](execution-credit.md). Draft persistence is independent.
 
 ## Persistence and quota
 
@@ -184,8 +185,12 @@ and rejects reusing an idempotency key with another provider. Only the trusted
 service role can call the fixed-runner reservation RPCs; internal helpers cannot
 be called by application roles.
 
-The existing conservative application cap remains at most 20 attempts/day,
-resetting at 23:55 UTC, shared across JDoodle and OnlineCompiler. This is an
+Normal access uses a personal application cap of 25 attempts/day, resetting at
+23:55 UTC, across JDoodle and OnlineCompiler. Explicit authorized local testing
+can use 50/user; restricted evaluation keeps its pinned shared cap of at most 20.
+Apply `202611180002_execution_intent_and_credit.sql` before enabling those normal
+semantics, following its [migration handoff](execution-credit.md#local-migration-and-restart-handoff).
+The global account ledger still bounds concurrent provider requests. This is an
 application limit, not OnlineCompiler's monthly reset or an upgrade to 100,000
 application attempts. Existing consumed usage is preserved. Failed or ambiguous
 attempts retain their charge and cannot be replayed into another execution.
@@ -220,7 +225,7 @@ post-run check. The evaluated transport therefore still sends neither
 `time_limit` nor `memory_limit`. Application deadlines do not terminate remote code.
 
 Application authentication, server-only keys and fixed endpoint, Java/source
-restrictions, deadlines, source/response/output caps, atomic at-most-20/day quota,
+restrictions, deadlines, source/response/output caps, atomic per-actor allowance,
 concurrency reservations, no fallback/redirect/retry, complete structured results,
 server fixture verification and private persisted completion remain required.
 Source filtering remains a usability check, not a sandbox boundary.

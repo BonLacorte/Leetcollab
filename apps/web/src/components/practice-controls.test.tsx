@@ -5,7 +5,8 @@ import { PracticeControls } from "./practice-controls";
 import { PracticeResult, type PracticeExecution } from "./room/practice-result";
 
 vi.mock("./auth-provider", () => ({ useAuth: () => ({ session: { access_token: "token", user: { id: "user" } } }) }));
-const mocks = vi.hoisted(() => ({ submissions: vi.fn(), rpc: vi.fn(), filters: vi.fn() }));
+const mocks = vi.hoisted(() => ({ submissions: vi.fn(), rpc: vi.fn(), filters: vi.fn(), socket: { on: vi.fn(), off: vi.fn() } }));
+vi.mock("./socket-provider", () => ({ useSocket: () => mocks.socket }));
 vi.mock("../lib/supabase", () => ({ supabase: {
   from: (table: string) => {
     const query = {
@@ -25,6 +26,8 @@ beforeEach(() => {
   mocks.submissions.mockReset().mockResolvedValue({ data: [], error: null });
   mocks.rpc.mockReset().mockResolvedValue({ data: [{ suggested_review_at: "2026-11-20T12:00:00.000Z" }], error: null });
   mocks.filters.mockClear();
+  mocks.socket.on.mockClear();
+  mocks.socket.off.mockClear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-13T12:00:00.000Z"));
 });
@@ -65,6 +68,7 @@ it("clears a status failure after a successful refresh", async () => {
 
 
 const quota = { available: true, used: 0, limit: 20, remaining: 20, active: 0, resetAt: "2026-11-13T23:55:00.000Z", fallback: null, unavailableReason: null };
+const credit = { submission_id: "22222222-2222-4222-8222-222222222222" };
 const passing = { verification: "leetcollab", judge_state: "completed", verdict: "accepted", tests_passed: 4, tests_total: 4 };
 const button = (label: string) => renderer.root.findAllByType("button").find(node => node.children.includes(label))!;
 const output = () => JSON.stringify(renderer.toJSON());
@@ -111,9 +115,9 @@ it("keeps the OnlineCompiler disclosure visible while execution is disabled", as
   expect(output()).toContain("External sandbox is not configured.");
 });
 
-// Oracle: completion requires a persisted, completed LeetCollab verdict with all nonzero tests passing.
+// Oracle: only protected solved-credit evidence can mark completion.
 it.each([
-  ["verified pass", passing, true],
+  ["protected solved credit", credit, true],
   ["legacy history", { ...passing, verification: "legacy_unverified" }, false],
   ["external self report", { ...passing, verification: "external_self_reported" }, false],
   ["pending", { ...passing, judge_state: "reserved" }, false],
@@ -131,8 +135,8 @@ it.each([
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(quota)));
   await renderControls();
   expect(output().includes("Solved - LeetCollab verified")).toBe(solved);
-  expect(mocks.filters).toHaveBeenCalledWith("submissions", "user_id", "user");
-  expect(mocks.filters).toHaveBeenCalledWith("submissions", "problem_id", "11111111-1111-4111-8111-111111111111");
+  expect(mocks.filters).toHaveBeenCalledWith("verified_problem_solves", "user_id", "user");
+  expect(mocks.filters).toHaveBeenCalledWith("verified_problem_solves", "problem_id", "11111111-1111-4111-8111-111111111111");
 });
 
 it.each(["Run", "Submit"])("%s calls the existing authenticated judge and reloads persisted completion", async label => {
@@ -142,7 +146,7 @@ it.each(["Run", "Submit"])("%s calls the existing authenticated judge and reload
   expect(output()).toContain("Not solved");
   fetch.mockImplementation(async (_url, options) => {
     if (!options?.method) return response(quota);
-    mocks.submissions.mockResolvedValue({ data: [passing], error: null });
+    mocks.submissions.mockResolvedValue({ data: label === "Submit" ? [credit] : [], error: null });
     return response({ ok: true, quota, submission: {
       id: "22222222-2222-4222-8222-222222222222", problemId: "11111111-1111-4111-8111-111111111111", language: "java",
       verdict: "accepted", verification: "leetcollab", testsPassed: 4, testsTotal: 4,
@@ -154,9 +158,9 @@ it.each(["Run", "Submit"])("%s calls the existing authenticated judge and reload
   expect(url).toBe("/api/judge/submissions");
   expect(options.headers.Authorization).toBe("Bearer token");
   expect(JSON.parse(options.body)).toEqual({
-    problemId: "11111111-1111-4111-8111-111111111111", sourceCode: "class Solution {}", language: "java", idempotencyKey: expect.any(String),
+    problemId: "11111111-1111-4111-8111-111111111111", action: label.toLowerCase(), sourceCode: "class Solution {}", language: "java", idempotencyKey: expect.any(String),
   });
-  expect(output()).toContain("Solved - LeetCollab verified");
+  expect(output().includes("Solved - LeetCollab verified")).toBe(label === "Submit");
   expect(renderer.root.findByType("h2").children).toEqual(["Accepted"]);
 });
 
@@ -172,6 +176,32 @@ it("does not infer completion from an accepted response without trusted persiste
   await act(async () => { await button("Submit").props.onClick(); });
   expect(output()).toContain("Not solved");
   expect(output()).not.toContain("Solved - LeetCollab verified");
+});
+
+it("reloads only protected completion on a room-credit hint without spending or refreshing personal quota", async () => {
+  const fetch = vi.fn().mockResolvedValue(response(quota));
+  vi.stubGlobal("fetch", fetch);
+  await renderControls();
+  const notify = mocks.socket.on.mock.calls.find(([event]) => event === "practice:refresh")![1] as (value: { problemId: string }) => void;
+  await act(async () => notify({ problemId: "11111111-1111-4111-8111-111111111111" }));
+  expect(output()).not.toContain("Solved - LeetCollab verified");
+  mocks.submissions.mockResolvedValue({ data: [credit], error: null });
+  await act(async () => notify({ problemId: "11111111-1111-4111-8111-111111111111" }));
+  expect(output()).toContain("Solved - LeetCollab verified");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+});
+
+it("an accepted Run preserves historical Submit credit", async () => {
+  mocks.submissions.mockResolvedValue({ data: [credit], error: null });
+  vi.stubGlobal("fetch", vi.fn(async (_url, options) => response(options?.method ? {
+    ok: true, quota, submission: { id: credit.submission_id, problemId: "11111111-1111-4111-8111-111111111111",
+      language: "java", verification: "leetcollab", verdict: "accepted", action: "run",
+      testsPassed: 4, testsTotal: 4, durationMs: 1, diagnostics: "", createdAt: "2026-11-13T12:00:00.000Z" },
+  } : quota)));
+  await renderControls();
+  await act(async () => { await button("Run").props.onClick(); });
+  expect(output()).toContain("Solved - LeetCollab verified");
 });
 
 it.each(["again", "hard", "good", "easy"])("personal grade %s schedules review without completion or execution", async grade => {
@@ -203,7 +233,7 @@ it("fails closed when stored completion cannot be read and recovers on refresh",
   await renderControls();
   expect(output()).toContain("Completion status unavailable.");
   expect(output()).not.toContain("Solved - LeetCollab verified");
-  mocks.submissions.mockResolvedValue({ data: [passing], error: null });
+  mocks.submissions.mockResolvedValue({ data: [credit], error: null });
   await act(async () => { button("Refresh status").props.onClick(); });
   expect(output()).toContain("Solved - LeetCollab verified");
 });

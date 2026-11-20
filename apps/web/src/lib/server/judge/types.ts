@@ -17,6 +17,12 @@ export type QuotaPeriod = {
   end: string;
 };
 
+export type SubmissionParticipants = {
+  roomId: string | null;
+  capturedAt: string;
+  userIds: string[];
+};
+
 export type JudgeConfig = {
   problemId: string;
   fixtureVersion: number;
@@ -80,6 +86,8 @@ export interface JudgeRepository {
     problemId: string;
     idempotencyKey: string;
     sourceCode: string;
+    action?: "run" | "submit";
+    participants?: SubmissionParticipants;
     period: QuotaPeriod;
     quotaLimit: number;
     activeLimit: number;

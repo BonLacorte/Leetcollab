@@ -84,7 +84,8 @@ it("allows only A's pinned problem, using the exact shared cap and synthetic tra
   const body = await response.json();
   expect(body).toMatchObject({ ok: true, submission: { verdict: "accepted", testsPassed: 1 } });
   expect(network).toHaveBeenCalledTimes(1);
-  expect(db.rpc).toHaveBeenCalledWith("reserve_onlinecompiler_submission", expect.objectContaining({
+  expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({
+    p_scope: "shared", p_runner: "onlinecompiler", p_action: "run",
     p_user_id: A, p_problem_id: problem, p_quota_limit: 9, p_active_limit: 1, p_reservation_seconds: 45,
     p_period_start: settings.JUDGE_EVALUATION_PERIOD_START, p_period_end: periodEnd,
   }));
@@ -168,7 +169,7 @@ it("permits a new period row only with an explicit zero baseline and limit two",
   db.rpc.mockResolvedValue({ error: null, data: { result: "reserved", submissionId: submission,
     used: 1, limit: 2, active: 1, resetAt: periodEnd } });
   expect((await submit()).status).toBe(200);
-  expect(db.rpc).toHaveBeenCalledWith("reserve_onlinecompiler_submission", expect.objectContaining({ p_quota_limit: 2 }));
+  expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({ p_quota_limit: 2 }));
 });
 it("rechecks after a delayed quota read before any quota mutation", async () => {
   db.from.mockImplementation(() => ({ select() { return this; }, eq() { return this; },
@@ -183,7 +184,7 @@ it("rechecks after a delayed quota read before any quota mutation", async () => 
 });
 it.each([settings.JUDGE_EVALUATION_EXPIRES_AT, periodEnd])("retains a queued reservation but sends nothing when admission ends at %s", async time => {
   db.rpc.mockImplementation(async name => {
-    if (name === "reserve_onlinecompiler_submission") vi.setSystemTime(new Date(time));
+    if (name === "reserve_judge_execution") vi.setSystemTime(new Date(time));
     return { data: { result: "reserved", submissionId: submission, used: 8, active: 1, limit: 9, resetAt: periodEnd }, error: null };
   });
   expect((await submit()).status).toBe(503);
@@ -210,7 +211,7 @@ it("keeps provider approval mandatory in evaluation mode", async () => {
   expect((await status()).status).toBe(200);
   expect(await (await status()).json()).toMatchObject({ available: false });
   expect((await submit()).status).toBe(503);
-  expect(db.rpc).not.toHaveBeenCalledWith("reserve_onlinecompiler_submission", expect.anything());
+  expect(db.rpc).not.toHaveBeenCalledWith("reserve_judge_execution", expect.anything());
   expect(network).not.toHaveBeenCalled();
 });
 
@@ -257,6 +258,6 @@ it("allows the maximum valid baseline 18 with the hard ceiling 20", async () => 
   db.rpc.mockResolvedValue({ error: null, data: { result: "reserved", submissionId: submission,
     used: 19, limit: 20, active: 1, resetAt: periodEnd } });
   expect((await submit()).status).toBe(200);
-  expect(db.rpc).toHaveBeenCalledWith("reserve_onlinecompiler_submission", expect.objectContaining({ p_quota_limit: 20 }));
+  expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({ p_quota_limit: 20 }));
   expect(network).toHaveBeenCalledTimes(1);
 });

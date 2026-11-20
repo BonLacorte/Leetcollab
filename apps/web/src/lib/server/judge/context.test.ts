@@ -34,12 +34,12 @@ it.each([
   ["local development", "development", "true", "http://127.0.0.1:55421", undefined, 50],
   ["localhost", "development", "true", "http://localhost:55421", undefined, 50],
   ["IPv6 loopback", "development", "true", "http://[::1]:55421", undefined, 50],
-  ["production", "production", "true", "http://127.0.0.1:55421", undefined, 20],
-  ["no opt in", "development", undefined, "http://127.0.0.1:55421", undefined, 20],
-  ["remote database", "development", "true", "https://project.supabase.co", undefined, 20],
-  ["lookalike hostname", "development", "true", "http://localhost.example.com", undefined, 20],
-  ["invalid database URL", "development", "true", "invalid", undefined, 20],
-  ["remote server URL overrides public loopback", "development", "true", "http://localhost:55421", "https://project.supabase.co", 20],
+  ["production", "production", "true", "http://127.0.0.1:55421", undefined, 25],
+  ["no opt in", "development", undefined, "http://127.0.0.1:55421", undefined, 25],
+  ["remote database", "development", "true", "https://project.supabase.co", undefined, 25],
+  ["lookalike hostname", "development", "true", "http://localhost.example.com", undefined, 25],
+  ["invalid database URL", "development", "true", "invalid", undefined, 25],
+  ["remote server URL overrides public loopback", "development", "true", "http://localhost:55421", "https://project.supabase.co", 25],
 ] as const)("uses the 50 ceiling only for opted-in %s", async (_label, nodeEnv, flag, publicUrl, serverUrl, limit) => {
   vi.stubEnv("NODE_ENV", nodeEnv);
   vi.stubEnv("JUDGE_LOCAL_TESTING", flag);
@@ -139,6 +139,7 @@ it("preserves explicit JDoodle rollback and legacy deployments without a selecto
 });
 
 const editedRequest = {
+  action: "run" as const,
   problemId: "11111111-1111-4111-8111-111111111111", language: "java" as const,
   sourceCode: "class Solution { public static int answer() { int edited = 6 * 7; return edited; } }",
   idempotencyKey: "33333333-3333-4333-8333-333333333333",

@@ -1,11 +1,14 @@
 import "dotenv/config";
 import http from "node:http";
+import { readFileSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import { createClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
+import { judgeParticipants } from "./judge-participants.js";
+import { restoreRoomStates } from "./room-restore.js";
 import {
   chatSendSchema,
   codeUpdateSchema,
@@ -16,6 +19,7 @@ import {
   timerActionSchema,
   whiteboardStrokeAddSchema,
   whiteboardUndoSchema,
+  judgeSubmissionRequestSchema,
   type RoomErrorCode,
   type RoomPermissions,
   type Acknowledgement,
@@ -51,6 +55,12 @@ type ProblemExample = Problem["examples"][number];
 const rooms = new Map<string, Room>();
 const activeRoomByUser = new Map<string, string>();
 const socketIdsByUser = new Map<string, Set<string>>();
+if (process.env.ROOM_RESTORE_FILE) {
+  for (const room of restoreRoomStates(readFileSync(process.env.ROOM_RESTORE_FILE, "utf8"))) {
+    rooms.set(room.roomId, room);
+    for (const member of room.members) activeRoomByUser.set(member.userId, room.roomId);
+  }
+}
 const maxWhiteboardStrokes = 2_000;
 const roomIdAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 const server = http.createServer(app);
@@ -82,6 +92,51 @@ function activeRoomForUser(userId: string): Room | null {
 
   return room;
 }
+
+app.get("/judge/participants", async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  const token = /^Bearer ([^\s]+)$/.exec(request.header("authorization") ?? "")?.[1];
+  if (!token) return void response.status(401).json({ error: "Authentication required." });
+  const parsed = judgeSubmissionRequestSchema.shape.problemId.safeParse(request.query.problemId);
+  if (!parsed.success) return void response.status(400).json({ error: "Invalid problem." });
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) return void response.status(401).json({ error: "Authentication required." });
+    // No awaits after reading room/presence: membership changes cannot interleave
+    // with this capture within this realtime process.
+    const room = activeRoomForUser(data.user.id);
+    const joined = io.sockets.adapter.rooms.get(room?.roomId ?? "");
+    const present = new Set((room?.members ?? []).filter(member =>
+      [...(socketIdsByUser.get(member.userId) ?? [])].some(id => joined?.has(id))).map(member => member.userId));
+    return void response.json(judgeParticipants(room, data.user.id, parsed.data, present));
+  } catch {
+    return void response.status(503).json({ error: "Room participation unavailable." });
+  }
+});
+
+app.post("/judge/refresh", express.json({ limit: "2kb" }), async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  const token = /^Bearer ([^\s]+)$/.exec(request.header("authorization") ?? "")?.[1];
+  if (!token) return void response.status(401).json({ error: "Authentication required." });
+  const parsed = judgeSubmissionRequestSchema.shape.idempotencyKey.safeParse(request.body?.submissionId);
+  if (!parsed.success) return void response.status(400).json({ error: "Invalid submission." });
+  try {
+    const { data: identity, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !identity.user) return void response.status(401).json({ error: "Authentication required." });
+    const client = createClient(supabaseUrl!, supabaseAnonKey!, {
+      auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const { data, error } = await client.from("submissions")
+      .select("problem_id, execution_room_id, execution_action, judge_state, verdict, tests_total, tests_passed")
+      .eq("id", parsed.data).eq("user_id", identity.user.id).maybeSingle();
+    if (error) throw error;
+    if (data?.execution_room_id && data.execution_action === "submit" && data.judge_state === "completed"
+      && data.verdict === "accepted" && data.tests_total > 0 && data.tests_passed === data.tests_total) {
+      io.to(data.execution_room_id).emit("practice:refresh", { problemId: data.problem_id });
+    }
+    return void response.status(202).json({ ok: true });
+  } catch { return void response.status(503).json({ error: "Completion refresh unavailable." }); }
+});
 
 function memberCan(
   room: Room,
@@ -240,7 +295,6 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     unregisterSocket(socket.data.userId, socket.id);
   });
-
   socket.on("room:create", async (payload, callback) => {
     const currentRoom = activeRoomForUser(socket.data.userId);
     if (currentRoom) {

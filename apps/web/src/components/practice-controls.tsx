@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { judgeStatusResponseSchema, judgeSubmissionResponseSchema, type JudgeStatusResponse } from "@leetcollab/contracts";
 import { useAuth } from "./auth-provider";
+import { useSocket } from "./socket-provider";
 import { supabase } from "../lib/supabase";
 import { CheckCircle2, Circle, Play, RotateCw, ShieldCheck } from "lucide-react";
 import { Button } from "./ui/button";
@@ -27,6 +28,7 @@ export function PracticeControls({ problemId, code, codeVersion = 0, onExecution
 }
 
 function SessionPracticeControls({ problemId, code, codeVersion = 0, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
+  const socket = useSocket();
   const mounted = useRef(false);
   const statusGeneration = useRef(0);
   const reviewGeneration = useRef(0);
@@ -60,20 +62,29 @@ function SessionPracticeControls({ problemId, code, codeVersion = 0, token, user
   const refreshCompletion = useCallback(async () => {
     const generation = ++completionGeneration.current;
     try {
-      // Submissions are server-owned. Historical client progress and grades are not evidence.
-      const { data, error } = await supabase.from("submissions")
-        .select("verification, judge_state, verdict, tests_passed, tests_total")
-        .eq("user_id", userId).eq("problem_id", problemId)
-        .eq("verification", "leetcollab").eq("judge_state", "completed").eq("verdict", "accepted");
+      // Protected credits reference real accepted Submits, including room credit.
+      const { data, error } = await supabase.from("verified_problem_solves")
+        .select("submission_id").eq("user_id", userId).eq("problem_id", problemId);
       if (error) throw error;
-      const solved = (data ?? []).some(row => row.verification === "leetcollab"
-        && row.judge_state === "completed" && row.verdict === "accepted"
-        && row.tests_total > 0 && row.tests_passed === row.tests_total);
+      const solved = (data ?? []).some(row => typeof row.submission_id === "string");
       if (mounted.current && generation === completionGeneration.current) setCompletion(solved ? "solved" : "unsolved");
     } catch {
       if (mounted.current && generation === completionGeneration.current) setCompletion("unavailable");
     }
   }, [problemId, userId]);
+
+  useEffect(() => {
+    const refresh = () => { void refreshCompletion(); };
+    const onRoomCredit = (event: { problemId: string }) => { if (event.problemId === problemId) refresh(); };
+    socket?.on("practice:refresh", onRoomCredit);
+    socket?.on("connect", refresh);
+    if (typeof window !== "undefined") window.addEventListener("focus", refresh);
+    return () => {
+      socket?.off("practice:refresh", onRoomCredit);
+      socket?.off("connect", refresh);
+      if (typeof window !== "undefined") window.removeEventListener("focus", refresh);
+    };
+  }, [socket, problemId, refreshCompletion]);
 
   useEffect(() => {
     let current = true;
@@ -103,7 +114,7 @@ function SessionPracticeControls({ problemId, code, codeVersion = 0, token, user
       const response = await fetch("/api/judge/submissions", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId, sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ problemId, action: action === "Submit" ? "submit" : "run", sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
       });
       const result = judgeSubmissionResponseSchema.parse(await response.json());
       if (result.ok && result.submission.problemId !== problemId) throw new Error("Submission belongs to another exercise.");
@@ -153,14 +164,14 @@ function SessionPracticeControls({ problemId, code, codeVersion = 0, token, user
           {completion === "solved" ? "Solved - LeetCollab verified" : completion === "unavailable" ? "Completion status unavailable. Refresh status to try again." : completion === "loading" ? "Loading completion status…" : "Not solved"}
         </p>
       </div>
-      <p className="practice-help">Run and Submit both judge all test cases and save a submission. Only a LeetCollab-verified pass marks this problem solved.</p>
+      <p className="practice-help">Run tests your code. An accepted Submit marks the problem solved for you and the room members present when you submit. Each click uses only your allowance.</p>
       <div className={`practice-quota${quota?.unavailableReason === "quota_exhausted" ? " is-exhausted" : statusError ? " is-error" : ""}`} role="status">
         {quota ? <>
-          <p><strong>{quota.remaining} of {quota.limit}</strong> shared executions remaining</p>
+          <p><strong>{quota.remaining} of {quota.limit}</strong> executions remaining in your allowance</p>
           <p className="practice-reset">Resets <time dateTime={quota.resetAt}>{formatTime(quota.resetAt)}</time></p>
           {quota.unavailableReason === "provider_unconfigured" && <p className="practice-quota-detail">External sandbox is not configured.</p>}
           {quota.unavailableReason === "quota_exhausted" && (quota.fallback ? <p className="practice-quota-detail"><a href={quota.fallback.url} target="_blank" rel="noreferrer">Practice on {quota.fallback.name}</a>. External results are not LeetCollab-verified.</p> : <p className="practice-quota-detail">This original exercise must wait for quota reset.</p>)}
-        </> : <p>{statusError || (busy ? "Updating execution status…" : "Loading shared execution quota…")}</p>}
+        </> : <p>{statusError || (busy ? "Updating execution status…" : "Loading your execution allowance…")}</p>}
       </div>
     </section>
     <section className="practice-review" aria-label="Personal review">

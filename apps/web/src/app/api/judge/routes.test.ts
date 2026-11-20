@@ -20,12 +20,25 @@ describe("authenticated judge HTTP boundary", () => {
     expect((await POST(request({ ...payload, language: "javascript" }))).status).toBe(400);
     expect(mocks.submit).not.toHaveBeenCalled();
   });
+  it("accepts explicit Submit intent but discards caller-supplied participant identity", async () => {
+    mocks.submit.mockResolvedValue({ status: 200, body: { ok: true } });
+    const response = await POST(request({ ...payload, action: "submit", userId: "victim",
+      participantIds: ["victim"], roomId: "abcdefgh" }));
+    expect(response.status).toBe(200);
+    expect(mocks.compose).toHaveBeenCalledWith("owner", payload.problemId, "valid");
+    expect(mocks.submit).toHaveBeenCalledWith("owner", { ...payload, action: "submit" });
+  });
+  it.each(["accepted", "Submit", "", null])("refuses invalid execution action %s before admission", async action => {
+    expect((await POST(request({ ...payload, action }))).status).toBe(400);
+    expect(mocks.compose).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
   it("uses the validated user rather than caller-supplied ownership", async () => {
     mocks.submit.mockResolvedValue({ status: 429, body: { ok: false, error: { code: "QUOTA_EXHAUSTED" }, fallback: null } });
     const response = await POST(request({ ...payload, userId: "victim", verdict: "accepted",
-      provenance: { provider: "render" }, quota: { used: 0 }, policyId: "forged", resolution: "gone" }));
-    expect(mocks.compose).toHaveBeenCalledWith("owner", payload.problemId);
-    expect(mocks.submit).toHaveBeenCalledWith("owner", payload);
+      provenance: { provider: "render" }, quota: { used: 0 }, policyId: "forged", resolution: "gone", participantIds: ["victim"], roomMembers: ["victim"] }));
+    expect(mocks.compose).toHaveBeenCalledWith("owner", payload.problemId, "valid");
+    expect(mocks.submit).toHaveBeenCalledWith("owner", { ...payload, action: "run" });
     expect(response.status).toBe(429);
     expect(await response.json()).toMatchObject({ fallback: null });
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -86,7 +99,7 @@ describe("bounded submission JSON ingress", () => {
     const split = bytes.indexOf(0xc3) + 1;
     const { req } = raw([bytes.slice(0, split), bytes.slice(split)]);
     expect((await POST(req)).status).toBe(200);
-    expect(mocks.submit).toHaveBeenCalledWith("owner", payload);
+    expect(mocks.submit).toHaveBeenCalledWith("owner", { ...payload, action: "run" });
   });
   it("counts multibyte bytes, not JavaScript characters", async () => {
     const body = JSON.stringify({ ...payload, ignored: "é".repeat(max / 2) });

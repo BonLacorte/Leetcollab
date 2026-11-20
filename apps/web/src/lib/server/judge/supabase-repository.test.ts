@@ -8,6 +8,21 @@ const problemId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const submissionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const period = { start: "2026-11-13T00:00:00Z", end: "2026-11-14T00:00:00Z" };
 
+it("binds normal quota and execution intent to the authenticated actor while peer IDs only describe captured credit", async () => {
+  const rpc = vi.fn(async (_name: string, _args: unknown) => ({ data: {
+    used: 1, limit: 25, active: 0, resetAt: period.end, result: "reserved", submissionId,
+  }, error: null }));
+  const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient, { userId });
+  await repo.getQuota(period, 25);
+  expect(rpc).toHaveBeenCalledWith("get_user_judge_quota_status", expect.objectContaining({ p_user_id: userId, p_quota_limit: 25 }));
+  await repo.reserve({ userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
+    period, quotaLimit: 25, activeLimit: 4, reservationSeconds: 45, runner: "onlinecompiler", action: "submit",
+    participants: { roomId: "abcdefgh", capturedAt: period.start, userIds: [userId, problemId] } });
+  expect(rpc).toHaveBeenLastCalledWith("reserve_judge_execution", expect.objectContaining({
+    p_scope: "user", p_user_id: userId, p_action: "submit", p_runner: "onlinecompiler", p_participant_ids: [userId, problemId],
+  }));
+});
+
 function repository() {
   const rpc = vi.fn().mockResolvedValue({ data: {
     used: 1, limit: 20, active: 0, resetAt: "2026-11-14T00:00:00+00:00",

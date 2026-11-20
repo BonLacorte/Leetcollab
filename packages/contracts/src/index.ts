@@ -95,9 +95,18 @@ export const judgeSubmissionRequestSchema = z.object({
   language: judgeLanguageSchema,
   sourceCode: z.string().min(1).max(32_768),
   idempotencyKey: z.string().uuid(),
+  // Old callers can run code, but must explicitly opt into Submit credit.
+  action: z.enum(["run", "submit"]).default("run"),
 });
 
 export type JudgeSubmissionRequest = z.infer<typeof judgeSubmissionRequestSchema>;
+
+export const judgeParticipantSnapshotSchema = z.object({
+  problemId: z.string().uuid(),
+  roomId: roomCodeSchema.nullable(),
+  capturedAt: z.string().datetime(),
+  userIds: z.array(z.string().uuid()).min(1).max(256),
+});
 
 export const judgeVerdictSchema = z.enum([
   "accepted",
@@ -152,6 +161,7 @@ export const judgeSubmissionSchema = z.object({
   problemId: z.string().uuid(),
   language: judgeLanguageSchema,
   verdict: judgeVerdictSchema,
+  action: z.enum(["run", "submit", "legacy"]).optional(),
   verification: z.literal("leetcollab"),
   testsPassed: z.number().int().min(0),
   testsTotal: z.number().int().min(0),
@@ -328,6 +338,7 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
+  "practice:refresh": (payload: { problemId: string }) => void;
   "room:state": (state: RoomState) => void;
   "room:presence": (members: RoomState["members"]) => void;
   "code:updated": (code: string) => void;

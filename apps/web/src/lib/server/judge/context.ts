@@ -5,6 +5,7 @@ import { OnlineCompilerProvider } from "./onlinecompiler";
 import { JudgeService } from "./service";
 import { SupabaseJudgeRepository } from "./supabase-repository";
 import { ProviderFailure, type ExecutionProvider } from "./types";
+import { captureSubmissionParticipants, notifyRoomCompletion } from "./room-participants";
 
 function integerEnvironment(name: string, fallback: number): number {
   const value = process.env[name];
@@ -25,18 +26,20 @@ function localTestingEnabled(): boolean {
   }
 }
 
-export function getJudgeService(userId?: string, problemId?: string): JudgeService {
+export function getJudgeService(userId?: string, problemId?: string, accessToken?: string): JudgeService {
   const evaluation = readJudgeEvaluation();
   const beforeRequest = () => assertEvaluationAdmission(evaluation, userId, problemId);
   // Refuse before constructing a provider or a quota-mutating repository path.
   beforeRequest();
   return new JudgeService(
-    new SupabaseJudgeRepository(getSupabaseAdmin()),
+    new SupabaseJudgeRepository(getSupabaseAdmin(), { userId, sharedQuota: Boolean(evaluation) }),
     getExecutionProvider(beforeRequest),
     {
       evaluation,
       localTesting: localTestingEnabled(),
-      quotaLimit: integerEnvironment("JUDGE_DAILY_LIMIT", 20),
+      quotaLimit: integerEnvironment("JUDGE_DAILY_LIMIT", 25),
+      ...(accessToken && userId ? { captureParticipants: () => captureSubmissionParticipants(accessToken, userId, problemId!) } : {}),
+      ...(accessToken ? { notifyCompletion: (id: string) => notifyRoomCompletion(accessToken, id) } : {}),
       activeLimit: integerEnvironment("JUDGE_MAX_CONCURRENCY", 4),
       reservationSeconds: integerEnvironment("JUDGE_RESERVATION_SECONDS", 45),
     },

@@ -61,13 +61,15 @@ const harness = `class Main {
 
 function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true, providerError?: string) {
   let stored: StoredSubmission | null = null;
+  let recordedAction = "run";
   const quota = { used: 0, limit: 20, remaining: 20, active: 0, resetAt: new Date(Date.now() + 3_600_000).toISOString() };
   const repository: JudgeRepository = {
     readQuota: vi.fn(async () => null),
     getConfig: vi.fn(async () => ({ problemId, fixtureVersion: 1, harnessSource: harness,
       expectedOutput: ["true", "false", "true", "false"], fallback: null })),
     getQuota: vi.fn(async () => ({ ...quota })),
-    reserve: vi.fn<JudgeRepository["reserve"]>(async () => {
+    reserve: vi.fn<JudgeRepository["reserve"]>(async input => {
+      recordedAction = input.action ?? "run";
       quota.used += 1; quota.remaining -= 1; quota.active += 1;
       return { result: "reserved", submissionId: "22222222-2222-4222-8222-222222222222", quota: { ...quota } };
     }),
@@ -88,8 +90,10 @@ function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true,
   const service = new JudgeService(repository, new OnlineCompilerProvider({ apiKey: "synthetic-key",
     policyAccepted: true, executionApproved: configured, fetch: send }));
   mocks.service.mockReturnValue(service);
-  mocks.rows.mockImplementation(() => stored ? [{ verification: stored.verification, judge_state: stored.judgeState,
-    verdict: stored.verdict, tests_passed: stored.testsPassed, tests_total: stored.testsTotal }] : []);
+  mocks.rows.mockImplementation(() => stored && recordedAction === "submit"
+    && stored.judgeState === "completed" && stored.verdict === "accepted"
+    && stored.testsTotal > 0 && stored.testsPassed === stored.testsTotal
+    ? [{ submission_id: stored.id }] : []);
   const responses: Response[] = [];
   const fetch = vi.fn(async (url: string, options?: RequestInit) => {
     const request = new Request(`https://app.test${url}`, options);
@@ -126,7 +130,7 @@ it.each(["Run", "Submit"])("%s accepts the imported Bracket Beacon solution thro
     compiler: "openjdk-25", code: `${imported}\n\n${harness.replace("class Main", "public class Main")}\n`,
   });
   expect(renderer!.root.findByType("h2").children).toEqual(["Accepted"]);
-  expect(output()).toContain("Solved - LeetCollab verified");
+  expect(output().includes("Solved - LeetCollab verified")).toBe(label === "Submit");
   expect(output()).not.toContain("isBalanced");
 });
 

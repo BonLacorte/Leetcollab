@@ -180,4 +180,12 @@ update public.judge_quota_periods
 set quota_limit = 50, updated_at = now()
 where period_start = date_trunc('day', now() + interval '5 minutes') - interval '5 minutes';
 
+-- New per-user allowances retain exactly the same charged usage.
+do $$ begin
+  if to_regclass('public.judge_user_quota_periods') is not null then
+    update public.judge_user_quota_periods set quota_limit=50
+      where period_start=date_trunc('day',now()+interval '5 minutes')-interval '5 minutes';
+  end if;
+end $$;
+
 commit;

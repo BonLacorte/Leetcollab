@@ -5,9 +5,9 @@ Disabled buttons with `External sandbox is not configured.` mean the selected
 provider lacks credentials or approval. A successful status request alone does
 not verify real Java execution.
 
-The normal application ceiling stays at 20 executions per shared daily period.
+The normal application ceiling is 25 executions per user per daily period.
 For explicitly authorized local testing, the development server supports up to
-50 total executions in that period, including usage already charged. It never
+50 personal executions in that period, including usage already charged. It never
 resets usage or enlarges the provider's account allowance.
 
 The preview owner should first verify current provider allowance and explicit
@@ -24,7 +24,7 @@ must never be applied to a hosted database. It raises only the database ceiling
 and current local period's limit, preserving `used`, submission history and RPC
 permissions. It aborts if reservations are active. Subsequent status/reservation
 calls continue to preserve any lower limit, so an older server still configured
-at 20 can lower the period again. Stop admission from that server before setup.
+at a lower limit can lower that personal period again. Stop admission from that server before setup.
 
 Set these server-only values in the local web environment, retaining the existing
 Supabase keys and realtime settings:
@@ -46,9 +46,9 @@ tester-only deployment. Start the web app with `next dev`, so
 `[::1]`. The server's effective `SUPABASE_URL` takes precedence over
 `NEXT_PUBLIC_SUPABASE_URL`. Production builds, remote databases, other providers,
 and restricted evaluation retain their existing ceilings. The local flag alone
-does not enable any provider or raise the default configured daily limit of 20.
+does not enable any provider or raise the default configured daily limit of 25.
 
-The preview owner restarts only its own web service after environment changes.
+The preview owner restarts only its own web service after environment changes. A new realtime version for server-captured room credit requires the separate state-preserving handoff in [execution credit](execution-credit.md); never drop live rooms during that upgrade.
 Refresh judge status before the user tests. Expected allowance is
 `50 - previously charged usage`; if it is lower, inspect the actual quota row
 and active callers rather than deleting usage or automatically retrying calls.
@@ -56,6 +56,6 @@ Only the user performs the authorized Run/Submit acceptance calls.
 
 To stop testing, set `ONLINECOMPILER_EXECUTION_APPROVED=false` and restart the
 owning web service. For the next normal configuration, set
-`JUDGE_LOCAL_TESTING=false` and `JUDGE_DAILY_LIMIT=20`. Existing usage remains
-charged, even if it exceeds 20, until the normal 23:55 UTC reset. The opt-in SQL
+`JUDGE_LOCAL_TESTING=false` and `JUDGE_DAILY_LIMIT=25`. Existing usage remains
+charged, even if it exceeds 25, until the normal 23:55 UTC reset. The opt-in SQL
 is unnecessary on any other database and is not part of deployment.

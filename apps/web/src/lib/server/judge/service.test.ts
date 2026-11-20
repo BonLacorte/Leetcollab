@@ -125,7 +125,7 @@ function config(fallback: JudgeConfig["fallback"] = null): JudgeConfig {
 }
 
 function request(key = randomUUID()): JudgeSubmissionRequest {
-  return { problemId, language: "java", sourceCode, idempotencyKey: key };
+  return { problemId, language: "java", sourceCode, idempotencyKey: key, action: "run" };
 }
 
 describe("structured public results", () => {
@@ -201,6 +201,31 @@ describe("structured public results", () => {
 });
 
 describe("JudgeService", () => {
+  it.each(["run", "submit"] as const)("persists authenticated %s intent and captures room credit only for Submit", async action => {
+    const repository = new MemoryRepository(config());
+    const reserve = vi.spyOn(repository, "reserve");
+    const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a", "user-b"], capturedAt: now.toISOString() }));
+    const notifyCompletion = vi.fn(async () => { throw new Error("Hint lost after durable completion"); });
+    const service = new JudgeService(repository, new OutputProvider(), { now: () => now, captureParticipants, notifyCompletion });
+    const result = await service.submit("user-a", { ...request(), action });
+    expect(result.status).toBe(200);
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-a", action,
+      participants: { roomId: action === "submit" ? "abcdefgh" : null,
+        userIds: action === "submit" ? ["user-a", "user-b"] : ["user-a"], capturedAt: now.toISOString() } }));
+    expect(captureParticipants).toHaveBeenCalledTimes(action === "submit" ? 1 : 0);
+    expect(notifyCompletion).toHaveBeenCalledTimes(action === "submit" ? 1 : 0);
+  });
+
+  it("refuses an unverified room snapshot before charging or executing", async () => {
+    const repository = new MemoryRepository(config());
+    const reserve = vi.spyOn(repository, "reserve");
+    const provider = new OutputProvider();
+    const service = new JudgeService(repository, provider, { captureParticipants: async () => { throw new Error("Snapshot unavailable"); } });
+    await expect(service.submit("user-a", { ...request(), action: "submit" })).rejects.toThrow("Snapshot unavailable");
+    expect(reserve).not.toHaveBeenCalled();
+    expect(provider.calls).toBe(0);
+  });
+
   it("retains prior local usage and refuses the 51st execution", async () => {
     const repository = new MemoryRepository(config());
     repository.limit = 50;
@@ -217,12 +242,12 @@ describe("JudgeService", () => {
     expect(provider.calls).toBe(1);
   });
 
-  it.each([[undefined, true], ["jdoodle", true], ["onlinecompiler", false]] as const)("keeps the 20 ceiling for provider %s with localTesting=%s", async (id, localTesting) => {
+  it.each([[undefined, true], ["jdoodle", true], ["onlinecompiler", false]] as const)("keeps the normal 25 ceiling for provider %s with localTesting=%s", async (id, localTesting) => {
     const repository = new MemoryRepository(config());
     repository.limit = 50;
     const provider = Object.assign(new OutputProvider(), { id });
     const service = new JudgeService(repository, provider, { localTesting, quotaLimit: 50, now: () => now });
-    expect((await service.status(problemId)).body).toMatchObject({ limit: 20 });
+    expect((await service.status(problemId)).body).toMatchObject({ limit: 25 });
   });
 
   it("retains the evaluation ceiling even with an injected local opt-in", async () => {
