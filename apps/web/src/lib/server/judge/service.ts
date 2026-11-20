@@ -189,6 +189,7 @@ export class JudgeService {
       body: {
         available,
         provider: this.provider.id ?? null,
+        quotaScope: this.evaluation || this.renderPolicyId ? "shared" : "user",
         ...quota,
         fallback: exhausted ? config.fallback : null,
         unavailableReason: exhausted
@@ -225,6 +226,7 @@ export class JudgeService {
 
     const action = request.action ?? "run";
     const participants = action === "submit" && this.captureParticipants
+      && !await this.repository.hasSubmissionKey(userId, request.idempotencyKey)
       ? await this.captureParticipants()
       : { roomId: null, capturedAt: this.now().toISOString(), userIds: [userId] };
     this.assertAdmission(userId, request.problemId);

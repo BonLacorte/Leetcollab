@@ -81,7 +81,6 @@ export function usePracticeDraft(options: Options) {
       if (pendingDraftWrites.get(persistenceScope) === currentWrite) pendingDraftWrites.delete(persistenceScope);
       pendingSave = null;
     }
-    const initialRevision = context.revision;
     void (async () => {
       try {
         while (pendingDraftWrites.has(persistenceScope)) await pendingDraftWrites.get(persistenceScope);
@@ -92,18 +91,9 @@ export function usePracticeDraft(options: Options) {
         if (error) throw error;
         const row = data as ProgressRow | null;
         const hasDraft = Boolean(row?.last_saved_at && row.draft_language === "java" && typeof row.draft_code === "string");
-        context.lastSaved = hasDraft ? row!.draft_code! : context.problem?.starterCode ?? context.initialCode;
+        context.lastSaved = hasDraft ? context.initialCode : context.problem?.starterCode ?? context.initialCode;
         context.ready = true;
-        let status = "Autosaves every 10 minutes when code changes.";
-        if (hasDraft && context.canEditCode && context.connected && context.revision === initialRevision
-          && context.initialCode === context.problem?.starterCode && context.code === context.initialCode) {
-          context.code = row!.draft_code!;
-          context.onCodeChange(context.code);
-          status = "Saved draft restored into the shared editor.";
-        } else if (hasDraft && context.code !== context.lastSaved) {
-          status = "Current shared code was kept instead of replacing it with your saved draft.";
-        }
-        updateCurrent({ progress: row ? progressFromRow(row) : null, status });
+        updateCurrent({ progress: row ? progressFromRow(row) : null, status: "Autosaves every 10 minutes when code changes." });
       } catch {
         updateCurrent({ status: "Could not load your saved draft. Autosave is paused to protect it. Reopen the room to retry." });
       } finally { if (active) context.loading = false; updateCurrent({ loading: false }); }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
 import { judgeStatusResponseSchema, judgeSubmissionResponseSchema, type JudgeStatusResponse } from "@leetcollab/contracts";
 import { useAuth } from "./auth-provider";
 import { useSocket } from "./socket-provider";
@@ -24,7 +24,7 @@ type PracticeControlsProps = {
 export function PracticeControls({ problemId, code, codeVersion = 0, onExecutionChange }: PracticeControlsProps) {
   const { session } = useAuth();
   if (!session) return null;
-  return <SessionPracticeControls key={`${problemId}:${session.access_token}`} problemId={problemId} code={code} codeVersion={codeVersion} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
+  return <SessionPracticeControls key={`${problemId}:${session.user.id}`} problemId={problemId} code={code} codeVersion={codeVersion} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
 }
 
 function SessionPracticeControls({ problemId, code, codeVersion = 0, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
@@ -58,6 +58,9 @@ function SessionPracticeControls({ problemId, code, codeVersion = 0, token, user
       if (mounted.current && generation === statusGeneration.current) { setQuota(null); setStatusError("Judge status unavailable. Refresh status to try again."); }
     }
   }, [problemId, token]);
+
+  const currentRefreshStatus = useRef(refreshStatus);
+  useLayoutEffect(() => { currentRefreshStatus.current = refreshStatus; }, [refreshStatus]);
 
   const refreshCompletion = useCallback(async () => {
     const generation = ++completionGeneration.current;
@@ -121,7 +124,7 @@ function SessionPracticeControls({ problemId, code, codeVersion = 0, token, user
       if (!mounted.current) return;
       onExecutionChange({ ...snapshot, state: "finished", response: result });
       setQuota(null);
-      await Promise.all([refreshStatus(), refreshCompletion()]);
+      await Promise.all([currentRefreshStatus.current(), refreshCompletion()]);
     } catch { if (mounted.current) { setQuota(null); onExecutionChange({ ...snapshot, state: "unavailable" }); } }
     finally { if (mounted.current) setBusy(false); }
   }
@@ -164,14 +167,14 @@ function SessionPracticeControls({ problemId, code, codeVersion = 0, token, user
           {completion === "solved" ? "Solved - LeetCollab verified" : completion === "unavailable" ? "Completion status unavailable. Refresh status to try again." : completion === "loading" ? "Loading completion status…" : "Not solved"}
         </p>
       </div>
-      <p className="practice-help">Run tests your code. An accepted Submit marks the problem solved for you and the room members present when you submit. Each click uses only your allowance.</p>
+      <p className="practice-help">Run tests your code. An accepted Submit marks the problem solved for you and the room members present when you submit.</p>
       <div className={`practice-quota${quota?.unavailableReason === "quota_exhausted" ? " is-exhausted" : statusError ? " is-error" : ""}`} role="status">
         {quota ? <>
-          <p><strong>{quota.remaining} of {quota.limit}</strong> executions remaining in your allowance</p>
+          <p><strong>{quota.remaining} of {quota.limit}</strong> executions remaining{quota.quotaScope === "shared" ? " in the shared allowance" : quota.quotaScope === "user" ? " in your allowance" : ""}</p>
           <p className="practice-reset">Resets <time dateTime={quota.resetAt}>{formatTime(quota.resetAt)}</time></p>
           {quota.unavailableReason === "provider_unconfigured" && <p className="practice-quota-detail">External sandbox is not configured.</p>}
           {quota.unavailableReason === "quota_exhausted" && (quota.fallback ? <p className="practice-quota-detail"><a href={quota.fallback.url} target="_blank" rel="noreferrer">Practice on {quota.fallback.name}</a>. External results are not LeetCollab-verified.</p> : <p className="practice-quota-detail">This original exercise must wait for quota reset.</p>)}
-        </> : <p>{statusError || (busy ? "Updating execution status…" : "Loading your execution allowance…")}</p>}
+        </> : <p>{statusError || (busy ? "Updating execution status…" : "Loading execution allowance…")}</p>}
       </div>
     </section>
     <section className="practice-review" aria-label="Personal review">

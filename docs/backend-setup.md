@@ -36,7 +36,7 @@ does not persist these Maps; personal saved drafts and grades live in Supabase.
 | --- | --- |
 | Web public build configuration | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SOCKET_URL`. Use the hosted Supabase URL/key and Render public HTTPS origin. Rebuild when these values change. |
 | Web server runtime | `SUPABASE_SERVICE_ROLE_KEY`; optional `SUPABASE_URL` override must select the same project. The service-role key is required even for disabled-judge status paths that instantiate the admin client. |
-| Realtime runtime | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN` set to the exact frontend origin. Render supplies `PORT`. Realtime needs no service-role key. |
+| Realtime runtime | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN` set to an exact frontend origin or a comma-separated allowlist. Render supplies `PORT`. Realtime needs no service-role key. |
 | Deferred judge, web server only | `JDOODLE_CLIENT_ID`, `JDOODLE_CLIENT_SECRET`, `JDOODLE_JAVA_VERSION_INDEX`, `JDOODLE_LIMITS_CONFIRMED`; tuning: `JUDGE_DAILY_LIMIT`, `JUDGE_MAX_CONCURRENCY`, `JUDGE_RESERVATION_SECONDS`, `JUDGE_REQUEST_TIMEOUT_MS`. Keep `JDOODLE_LIMITS_CONFIRMED=false` and execution disabled. |
 
 The anonymous key is public by design and relies on RLS. Never prefix service-role
@@ -44,6 +44,9 @@ or provider credentials with `NEXT_PUBLIC_`, expose them in browser assets/netwo
 or commit values. Keep the Google client secret in Supabase provider configuration.
 The tracked app `.env.example` files list local defaults; loopback addresses cannot
 serve hosted apps.
+
+For a realtime service shared by production and staging, set
+`CORS_ORIGIN=https://leetcollab-staging.vercel.app,https://leetcollab.vercel.app`.
 
 Choose a stable staging frontend HTTPS origin. Match it in realtime `CORS_ORIGIN`,
 Google JavaScript origins and Supabase Site URL/redirect allowlists. Configure

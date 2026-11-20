@@ -173,6 +173,13 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     return { result: result.result, quota: resultQuota };
   }
 
+  async hasSubmissionKey(userId: string, key: string): Promise<boolean> {
+    const { data, error } = await this.client.from("submissions").select("id")
+      .eq("user_id", userId).eq("idempotency_key", key).maybeSingle();
+    if (error) throw error;
+    return Boolean(data);
+  }
+
   async getSubmission(userId: string, submissionId: string): Promise<StoredSubmission | null> {
     const { data, error } = await this.client
       .from("submissions")

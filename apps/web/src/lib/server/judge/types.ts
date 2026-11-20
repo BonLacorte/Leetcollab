@@ -95,6 +95,7 @@ export interface JudgeRepository {
     runner?: "onlinecompiler";
     render?: { policyId: string; provenance: RenderProvenance };
   }): Promise<Reservation>;
+  hasSubmissionKey(userId: string, key: string): Promise<boolean>;
   getSubmission(userId: string, submissionId: string): Promise<StoredSubmission | null>;
   complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota }>;
   exhaust(periodStart: string): Promise<JudgeQuota>;

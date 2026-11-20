@@ -1,3 +1,6 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { casePassed, framedHarness, publicCaseResults, readCaseOutputs, readPublicCasePlan } from "./public-cases";
@@ -25,14 +28,44 @@ it.each([
   expect(readPublicCasePlan(invalid(), 1, harness, ["42", "42"])).toBeUndefined();
 });
 
-it("frames trusted println values including empty, multiline and Unicode results without rewriting submitted source", () => {
-  const source = "class Solution { static String answer() { return \"hello\"; } }";
-  const program = buildJavaProgram(source, framedHarness(harness));
-  expect(program.startsWith(source + "\n\n")).toBe(true);
-  expect(program).toContain("__leetcollabRecord(Solution.answer())");
-  expect(program).toContain('System.out.println("__LEETCOLLAB_CASE_V1__"');
-  expect(readCaseOutputs(frame(0, "") + frame(1, "hello\n世界"), 2)).toEqual(["", "hello\n世界"]);
+const hasJavaCompiler = spawnSync("javac", ["-version"]).error === undefined;
+
+it.skipIf(!hasJavaCompiler)("emits framed Java values in invocation order", () => {
+  const source = `class Solution {
+    static int calls;
+    static String answer(String input) {
+      return input + (calls++ == 0 ? "" : "\\n世界");
+    }
+  }`;
+  const orderedHarness = `class Main {
+    public static void main(String[] args) {
+      System.out.println(Solution.answer(""));
+      System.out.println(Solution.answer("second"));
+    }
+  }`;
+  const dir = mkdtempSync(join(process.cwd(), ".judge-java-"));
+  try {
+    const file = join(dir, "Main.java");
+    writeFileSync(file, buildJavaProgram(source, framedHarness(orderedHarness)));
+    const compile = spawnSync("javac", ["-encoding", "UTF-8", file], { encoding: "utf8", timeout: 10_000 });
+    expect(compile.status, compile.stderr).toBe(0);
+    const run = spawnSync("java", ["-cp", dir, "Main"], { encoding: "utf8", timeout: 10_000 });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe(frame(0, "") + frame(1, "second\n世界"));
+    expect(readCaseOutputs(run.stdout, 2)).toEqual(["", "second\n世界"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
+
+it.each([["\uFEFF", ""], ["\uFEFF42", "42"], ["42\uFEFF ", "42"]])(
+  "preserves a returned byte order mark as data",
+  (actual, expected) => {
+    const values = readCaseOutputs(frame(0, actual), 1);
+    expect(values).toEqual([actual]);
+    expect(casePassed(values![0], expected)).toBe(false);
+  },
+);
 
 it.each([
   "42\n", frame(1, "42"), frame(0, "42") + frame(0, "42"),

@@ -77,7 +77,7 @@ it("denies the tester's wrong problem on both endpoints", async () => {
 it("allows only A's pinned problem, using the exact shared cap and synthetic transport", async () => {
   const available = await status();
   expect(available.status).toBe(200);
-  expect(await available.json()).toMatchObject({ available: true, provider: "onlinecompiler" });
+  expect(await available.json()).toMatchObject({ available: true, provider: "onlinecompiler", quotaScope: "shared" });
   expect(network).not.toHaveBeenCalled();
   const response = await submit();
   expect(response.status).toBe(200);

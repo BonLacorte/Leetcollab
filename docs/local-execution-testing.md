@@ -20,8 +20,8 @@ With all judge admission stopped and no active reservations, apply
 [the local SQL opt-in](../supabase/local/enable-test-quota.sql) to the verified
 local Supabase database using its existing operator connection. Apply the normal
 migrations first. The script is deliberately outside `supabase/migrations` and
-must never be applied to a hosted database. It raises only the database ceiling
-and current local period's limit, preserving `used`, submission history and RPC
+must never be applied to a hosted database. It raises existing personal limits
+for the current local period, preserving `used`, submission history and RPC
 permissions. It aborts if reservations are active. Subsequent status/reservation
 calls continue to preserve any lower limit, so an older server still configured
 at a lower limit can lower that personal period again. Stop admission from that server before setup.

@@ -51,10 +51,12 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.replaceChildren(); vi.useRealTimers(); });
 
-it("restores a scoped saved draft and saves the latest dirty code every ten minutes without restarting on edits", async () => {
+it("keeps a scoped draft private and saves the latest dirty code every ten minutes without restarting on edits", async () => {
   mocks.read.mockResolvedValue({ data: row("saved Java"), error: null });
   await render();
-  expect(input.code).toBe("saved Java");
+  expect(input.code).toBe(problem.starterCode);
+  expect(latest.progress?.draftCode).toBe("saved Java");
+  expect(mocks.replace).not.toHaveBeenCalled();
   expect(mocks.query).toHaveBeenCalledWith("user_problem_progress", "user_id", "user");
   expect(mocks.query).toHaveBeenCalledWith("user_problem_progress", "problem_id", problem.id);
   await advance(300_000);
@@ -68,7 +70,7 @@ it("restores a scoped saved draft and saves the latest dirty code every ten minu
   expect(mocks.save).toHaveBeenCalledTimes(1);
 });
 
-it("does not save starter code before restoration or replace edits made while loading", async () => {
+it("does not save starter code before reading the draft or replace edits made while loading", async () => {
   let finish!: (value: unknown) => void;
   mocks.read.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   await render();
@@ -192,14 +194,16 @@ it("waits for a navigation save before reading that exercise again", async () =>
   expect(mocks.read).toHaveBeenCalledTimes(readsBeforeReturn);
   mocks.read.mockResolvedValue({ data: row("latest A edit"), error: null });
   await act(async () => finish({ data: row("latest A edit"), error: null }));
-  expect(input.code).toBe("latest A edit");
+  expect(input.code).toBe(problem.starterCode);
+  expect(latest.progress?.draftCode).toBe("latest A edit");
 });
 
-it("restores an intentionally empty saved draft", async () => {
+it("keeps an intentionally empty saved draft private", async () => {
   mocks.read.mockResolvedValue({ data: row(""), error: null });
   await render();
-  expect(input.code).toBe("");
-  expect(latest.status).toContain("Saved draft restored");
+  expect(input.code).toBe(problem.starterCode);
+  expect(latest.progress?.draftCode).toBe("");
+  expect(mocks.replace).not.toHaveBeenCalled();
   await advance();
   expect(mocks.save).not.toHaveBeenCalled();
 });

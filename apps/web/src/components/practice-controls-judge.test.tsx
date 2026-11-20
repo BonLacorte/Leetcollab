@@ -9,10 +9,10 @@ import { POST } from "../app/api/judge/submissions/route";
 import { GET } from "../app/api/judge/status/route";
 import { PracticeResult, type PracticeExecution } from "./room/practice-result";
 
-const mocks = vi.hoisted(() => ({ service: vi.fn(), rows: vi.fn() }));
-vi.mock("./auth-provider", () => ({ useAuth: () => ({ session: { access_token: "synthetic-token", user: { id: "owner" } } }) }));
+const mocks = vi.hoisted(() => ({ service: vi.fn(), rows: vi.fn(), token: "synthetic-token" }));
+vi.mock("./auth-provider", () => ({ useAuth: () => ({ session: { access_token: mocks.token, user: { id: "owner" } } }) }));
 vi.mock("../lib/server/supabase-admin", () => ({ getSupabaseAdmin: () => ({ auth: {
-  getUser: async (token: string) => ({ data: { user: token === "synthetic-token" ? { id: "owner" } : null }, error: null }),
+  getUser: async (token: string) => ({ data: { user: ["synthetic-token", "refreshed-token"].includes(token) ? { id: "owner" } : null }, error: null }),
 } }) }));
 vi.mock("../lib/server/judge/context", () => ({ getJudgeService: (...args: unknown[]) => mocks.service(...args) }));
 vi.mock("../lib/supabase", () => ({ supabase: { from: () => {
@@ -28,6 +28,7 @@ let renderer: ReactTestRenderer | undefined;
 afterEach(async () => {
   if (renderer) await act(async () => renderer!.unmount());
   renderer = undefined;
+  mocks.token = "synthetic-token";
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -73,6 +74,7 @@ function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true,
       quota.used += 1; quota.remaining -= 1; quota.active += 1;
       return { result: "reserved", submissionId: "22222222-2222-4222-8222-222222222222", quota: { ...quota } };
     }),
+    hasSubmissionKey: vi.fn(async () => false),
     getSubmission: vi.fn(async () => stored),
     complete: vi.fn(async completion => {
       quota.active -= 1;
@@ -132,6 +134,32 @@ it.each(["Run", "Submit"])("%s accepts the imported Bracket Beacon solution thro
   expect(renderer!.root.findByType("h2").children).toEqual(["Accepted"]);
   expect(output().includes("Solved - LeetCollab verified")).toBe(label === "Submit");
   expect(output()).not.toContain("isBalanced");
+});
+
+it.each(["Run", "Submit"])("%s finishes across same-user token refresh and reloads current quota", async label => {
+  const { fetch, send } = setup();
+  let finish!: (response: Response) => void;
+  send.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  function Harness() {
+    const [execution, setExecution] = useState<PracticeExecution | null>(null);
+    return <><PracticeControls problemId={problemId} code={imported} onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
+  }
+  await act(async () => { renderer = create(<Harness />); });
+  const button = renderer!.root.findAllByType("button").find(node => node.children.includes(label))!;
+  let pending!: Promise<void>;
+  await act(async () => { pending = button.props.onClick(); });
+  expect(output()).toContain("Judging solution");
+  mocks.token = "refreshed-token";
+  await act(async () => { renderer!.update(<Harness />); });
+  await act(async () => {
+    finish(new Response(JSON.stringify({ output: "true\nfalse\ntrue\nfalse\n", error: "",
+      status: "success", exit_code: 0, signal: null, truncated: false })));
+    await pending;
+  });
+  expect(renderer!.root.findByType("h2").children).toEqual(["Accepted"]);
+  expect(fetch).toHaveBeenLastCalledWith(`/api/judge/status?problemId=${problemId}`, {
+    headers: { Authorization: "Bearer refreshed-token" },
+  });
 });
 
 it.each([

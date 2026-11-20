@@ -24,6 +24,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - run: pnpm --filter @leetcollab/realtime exec tsx --test src/cors.test.ts
       - run: pnpm typecheck
       - run: pnpm build
 

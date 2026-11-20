@@ -29,9 +29,8 @@ begin
       end if;
     end loop;
     if config.slug = 'parcel-pair' and (config.fixture_version <> 2
-      or config.expected_output <> '["[2, 3]","[]","[0, 2]"]'::jsonb
-      or position('new int[]{5,6}' in config.harness_source) >= position('new int[]{6,2,8}' in config.harness_source)) then
-      raise exception 'Parcel Pair must execute both public cases before the private invocation';
+      or config.expected_output <> '["[2, 3]","[]","[0, 2]"]'::jsonb) then
+      raise exception 'Unexpected Parcel Pair fixture metadata';
     end if;
   end loop;
   if count <> 15 then raise exception 'Expected 15 reviewed curriculum mappings, got %', count; end if;

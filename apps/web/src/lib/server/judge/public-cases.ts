@@ -58,14 +58,14 @@ export function readCaseOutputs(output: string, count: number): string[] | null 
     if (!match || Number(match[1]) !== index) return null;
     const bytes = Buffer.from(match[2], "base64");
     if (bytes.toString("base64") !== match[2]) return null;
-    try { values.push(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+    try { values.push(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)); }
     catch { return null; }
   }
   return values;
 }
 
 export function casePassed(actual: string, expected: string): boolean {
-  return !/[\r\n]/.test(actual) && actual.trimEnd() === expected;
+  return !/[\r\n]/.test(actual) && actual.replace(/[^\S\uFEFF]+$/u, "") === expected;
 }
 
 export function publicCaseResults(config: JudgeConfig, outputs?: string[]): JudgePublicCase[] | undefined {

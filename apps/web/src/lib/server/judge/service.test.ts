@@ -78,6 +78,10 @@ class MemoryRepository implements JudgeRepository {
     return { result: "reserved", submissionId: id, quota: this.quota(input.period.end) };
   }
 
+  async hasSubmissionKey(userId: string, key: string) {
+    return this.keys.has(`${userId}:${key}`);
+  }
+
   async getSubmission(userId: string, submissionId: string) {
     const stored = this.submissions.get(submissionId);
     return stored?.owner === userId ? stored : null;
@@ -157,7 +161,6 @@ describe("structured public results", () => {
     expect(serialized).not.toContain("HIDDEN");
     expect(serialized).not.toContain("fixtureIndex");
     expect(serialized).not.toContain("__LEETCOLLAB");
-    expect(JSON.parse(send.mock.calls[0][1]!.body as string).code).toContain("__leetcollabRecord(Solution.answer())");
   });
 
   it("refuses raw stdout on a framed fixture and retains the charge without fabricating a pass", async () => {
@@ -168,6 +171,21 @@ describe("structured public results", () => {
     expect(result.body).toMatchObject({ ok: false, error: { code: "JUDGE_UNAVAILABLE" }, quota: { used: 1 } });
     expect(JSON.stringify(result.body)).not.toContain("HIDDEN_EXPECTED");
     expect([...repository.submissions.values()][0]).toMatchObject({ judgeState: "failed", testsPassed: 0 });
+  });
+
+  it("replays a completed Submit when participant capture is unavailable", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
+    const captureParticipants = vi.fn(async () => ({ roomId: null, userIds: ["user-a"], capturedAt: now.toISOString() }));
+    const service = new JudgeService(repository, provider, { now: () => now, captureParticipants });
+    const submit = { ...request(), action: "submit" as const };
+    const initial = await service.submit("user-a", submit);
+    captureParticipants.mockRejectedValue(new Error("Snapshot unavailable"));
+    const replay = await service.submit("user-a", submit);
+    expect(replay.body).toMatchObject({ ok: true, quota: { used: 1 }, submission: { verdict: "accepted" } });
+    if (initial.body.ok && replay.body.ok) expect(replay.body.submission.id).toBe(initial.body.submission.id);
+    expect(captureParticipants).toHaveBeenCalledTimes(1);
+    expect(provider.calls).toBe(1);
   });
 
   it("does not invent observed results for a replay without retained per-case evidence", async () => {

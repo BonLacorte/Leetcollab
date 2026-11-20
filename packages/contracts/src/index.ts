@@ -213,6 +213,7 @@ export type JudgeSubmissionResponse = z.infer<typeof judgeSubmissionResponseSche
 
 export const judgeStatusResponseSchema = z.object({
   available: z.boolean(),
+  quotaScope: z.enum(["user", "shared"]).optional(),
   provider: z.enum(["jdoodle", "onlinecompiler", "render"]).nullable().optional(),
   used: z.number().int().min(0),
   limit: z.number().int().positive(),
