@@ -1766,22 +1766,6 @@ html[data-theme="dark"] .execution-result.is-accepted h2 {
   tab-size: 4;
 }
 
-.compiler-source mark {
-  padding: 0;
-  color: inherit;
-  background: hsl(var(--destructive) / 0.25);
-  text-decoration: underline wavy hsl(var(--destructive));
-  text-underline-offset: 0.2rem;
-}
-
-.compiler-source mark:empty::after {
-  content: "";
-  display: inline-block;
-  height: 1em;
-  border-left: 2px solid hsl(var(--destructive));
-  vertical-align: -0.15em;
-}
-
 .code-editor .cm-line:has(.cm-lintRange-error),
 .code-editor .cm-line:has(.cm-lintPoint-error) {
   background: hsl(var(--destructive) / 0.09);

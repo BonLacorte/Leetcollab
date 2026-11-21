@@ -9,16 +9,16 @@ const problemId = "11111111-1111-4111-8111-111111111111";
 const source = "class Solution {\n  static int answer() {\n    return 12\n  }\n}";
 const submission: StructuredSubmission = { id: "22222222-2222-4222-8222-222222222222", problemId, language: "java", verdict: "compile_error",
   verification: "leetcollab", testsPassed: 0, testsTotal: 4, durationMs: 10, diagnostics: "Compile failure", createdAt: "2026-11-18T03:00:00.000Z",
-  compilerDiagnostics: [{ line: 3, column: 12, message: "Expected a semicolon (;)." }], compilerErrorCount: 1, compilerDiagnosticsComplete: true };
+  compilerDiagnostics: [{ line: 3, message: "Expected a semicolon (;)." }], compilerErrorCount: 1, compilerDiagnosticsComplete: true };
 const execution: PracticeExecution = { action: "Run", sourceCode: source, codeVersion: 5, state: "finished", response: {
   ok: true, submission, quota: { used: 1, limit: 50, remaining: 49, active: 0, resetAt: "2026-11-18T23:55:00.000Z" },
 } };
 
-it("marks only the reported location in the matching editor revision", () => {
+it("marks the full reported line in the matching editor revision", () => {
   const state = EditorState.create({ doc: source });
   const markers = editorDiagnostics(state, execution, problemId, source, 5);
   expect(markers).toHaveLength(1);
-  expect(markers[0]).toMatchObject({ from: state.doc.line(3).from + 11, to: state.doc.line(3).from + 12, severity: "error", message: "Expected a semicolon (;)." });
+  expect(markers[0]).toMatchObject({ from: state.doc.line(3).from, to: state.doc.line(3).to, severity: "error", message: "Expected a semicolon (;)." });
 });
 
 it("does not apply stale markers after an edit, reset/retrieve, or exercise switch", () => {
@@ -43,7 +43,7 @@ it("maps CRLF source lines onto CodeMirror's normalized document", () => {
   expect(editorDiagnostics(state, { ...execution, sourceCode: crlf }, problemId, crlf, 5)).toHaveLength(1);
 });
 
-it("ignores out-of-source locations and falls back to a whole-line marker when the column is unknown", () => {
+it("ignores out-of-source locations while keeping the valid line marker", () => {
   const state = EditorState.create({ doc: source });
   const value: StructuredSubmission = { ...submission, compilerDiagnostics: [{ line: 3, message: "Missing semicolon" }, { line: 900, message: "PRIVATE_HARNESS" }] };
   const result = { ...execution, state: "finished" as const, response: { ...execution.response, ok: true as const, submission: value, quota: { used: 1, limit: 50, remaining: 49, active: 0, resetAt: "2026-11-18T23:55:00.000Z" } } };

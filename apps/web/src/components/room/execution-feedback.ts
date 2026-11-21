@@ -6,13 +6,8 @@ export type StructuredSubmission = JudgeSubmission;
 
 export function sourceDiagnostics(submission: StructuredSubmission, source: string): CodeDiagnostic[] {
   const lines = source.split(/\r\n?|\n/);
-  return (submission.compilerDiagnostics ?? []).flatMap(diagnostic => {
-    if (!Number.isSafeInteger(diagnostic.line) || diagnostic.line < 1 || diagnostic.line > lines.length) return [];
-    const suppliedColumn = diagnostic.column;
-    const column = typeof suppliedColumn === "number" && Number.isSafeInteger(suppliedColumn) && suppliedColumn > 0 && suppliedColumn <= lines[diagnostic.line - 1].length + 1
-      ? suppliedColumn : null;
-    return [{ line: diagnostic.line, column, message: diagnostic.message }];
-  });
+  return (submission.compilerDiagnostics ?? []).filter(({ line }) =>
+    Number.isSafeInteger(line) && line >= 1 && line <= lines.length);
 }
 
 export function compilerCountLabel(submission: StructuredSubmission, available: number): string {

@@ -57,7 +57,7 @@ export function usePracticeDraft(options: Options) {
       if (active) setState(current => current.scope === scope ? { ...current, ...value } : current);
     };
     async function save(): Promise<void> {
-      if (!context.ready || !context.canEditCode || !context.connected || context.draftEdit === null || context.draftEdit === context.lastSaved) return;
+      if (!context.ready || !context.connected || context.draftEdit === null || context.draftEdit === context.lastSaved) return;
       if (pendingSave) { await pendingSave; return save(); }
       const savedCode = context.draftEdit;
       updateCurrent({ saving: true, status: "Saving draft…" });

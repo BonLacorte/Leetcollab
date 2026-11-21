@@ -11,7 +11,7 @@ const submission: StructuredSubmission = {
   id: "22222222-2222-4222-8222-222222222222", problemId: "11111111-1111-4111-8111-111111111111", language: "java",
   verdict: "compile_error", verification: "leetcollab", testsPassed: 0, testsTotal: 4, durationMs: 10,
   diagnostics: "Generic legacy compiler summary", createdAt: "2026-11-18T03:00:00.000Z",
-  compilerDiagnostics: [{ line: 3, column: 14, message: "Expected a semicolon (;)." }, { line: 3, message: "Not a valid Java statement." }],
+  compilerDiagnostics: [{ line: 3, message: "Expected a semicolon (;)." }, { line: 3, message: "Not a valid Java statement." }],
   compilerErrorCount: 2, compilerDiagnosticsComplete: true,
 };
 let root: Root;
@@ -33,7 +33,7 @@ it("shows each diagnostic with the matching submitted source and a confirmed tot
   const excerpts = container.querySelectorAll(".compiler-source");
   expect(excerpts).toHaveLength(2);
   expect(Array.from(excerpts, node => node.textContent)).toEqual(["    return 12", "    return 12"]);
-  expect(container.querySelector(".compiler-source mark")).not.toBeNull();
+  expect(container.querySelector(".compiler-diagnostic-message strong")?.textContent).toBe("Line 3:");
   expect(container.textContent).not.toContain("Generic legacy compiler summary");
 });
 

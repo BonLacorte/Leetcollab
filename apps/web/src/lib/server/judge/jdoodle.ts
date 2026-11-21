@@ -59,7 +59,7 @@ function executionFailure(output: string, durationMs: number, cpuTime: string | 
     return { kind: "execution_error", verdict: "memory_limit", diagnostics, durationMs, cpuTime, memory };
   }
   if (/compil(?:e|ation).*(?:error|failed)|\berror\s*:/i.test(output)) {
-    return { kind: "execution_error", verdict: "compile_error", diagnostics, durationMs, cpuTime, memory };
+    return { kind: "execution_error", verdict: "compile_error", diagnostics: output, durationMs, cpuTime, memory };
   }
   return { kind: "execution_error", verdict: "runtime_error", diagnostics, durationMs, cpuTime, memory };
 }

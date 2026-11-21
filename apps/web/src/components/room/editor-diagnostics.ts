@@ -18,9 +18,7 @@ export function editorDiagnostics(
 
   return sourceDiagnostics(execution.response.submission, execution.sourceCode).map(diagnostic => {
     const line = state.doc.line(diagnostic.line);
-    const from = diagnostic.column ? line.from + diagnostic.column - 1 : line.from;
-    const width = (line.text.codePointAt(from - line.from) ?? 0) > 0xffff ? 2 : 1;
-    return { from, to: diagnostic.column ? Math.min(line.to, from + width) : line.to,
+    return { from: line.from, to: line.to,
       severity: "error", source: "Java compiler", message: diagnostic.message };
   });
 }

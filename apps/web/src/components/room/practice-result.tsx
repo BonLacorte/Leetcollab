@@ -22,11 +22,9 @@ function CompilerFeedback({ submission, source }: { submission: StructuredSubmis
     {diagnostics.length ? <ol className="compiler-diagnostics" aria-label="Compiler diagnostics">
       {diagnostics.map((diagnostic, index) => {
         const line = lines[diagnostic.line - 1];
-        const at = diagnostic.column ? diagnostic.column - 1 : null;
-        const width = at !== null && (line.codePointAt(at) ?? 0) > 0xffff ? 2 : 1;
         return <li key={index}>
-          <p className="compiler-diagnostic-message"><strong>Line {diagnostic.line}{diagnostic.column ? `:${diagnostic.column}` : ""}:</strong> {diagnostic.message}</p>
-          <pre className="compiler-source" aria-label={`Submitted source, line ${diagnostic.line}`}><code>{at === null ? line : <>{line.slice(0, at)}<mark>{line.slice(at, at + width)}</mark>{line.slice(at + width)}</>}</code></pre>
+          <p className="compiler-diagnostic-message"><strong>Line {diagnostic.line}:</strong> {diagnostic.message}</p>
+          <pre className="compiler-source" aria-label={`Submitted source, line ${diagnostic.line}`}><code>{line}</code></pre>
         </li>;
       })}
     </ol> : <pre className="execution-diagnostics">{submission.diagnostics || "Java compilation failed. Detailed compiler diagnostics are unavailable."}</pre>}

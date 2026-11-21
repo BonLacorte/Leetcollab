@@ -9,7 +9,7 @@ import type {
 } from "@leetcollab/contracts";
 import { assertEvaluationAdmission, type JudgeEvaluation } from "./evaluation";
 import { buildJavaProgram, validateJavaSource } from "./safety";
-import { publicCompilerReport, publicExecutionDiagnostics, type CompilerReport } from "./diagnostics";
+import { compilerSummary, publicCompilerReport, publicExecutionDiagnostics, type CompilerReport } from "./diagnostics";
 import { casePassed, framedHarness, publicCaseResults, readCaseOutputs } from "./public-cases";
 import {
   ProviderFailure,
@@ -104,7 +104,7 @@ function publicSubmission(
     ? "All LeetCollab fixture checks passed."
     : submission.verdict === "wrong_answer"
       ? `${submission.testsPassed} of ${submission.testsTotal} LeetCollab fixture checks passed.`
-      : publicExecutionDiagnostics(submission.verdict, source, submission.diagnostics, []),
+      : publicExecutionDiagnostics(submission.verdict, source, submission.diagnostics),
     ...(submission.verdict === "compile_error" ? compiler ?? {
       // A replay has no retained raw report or verified source snapshot.
       compilerDiagnostics: [], compilerErrorCount: null, compilerDiagnosticsComplete: false,
@@ -312,7 +312,7 @@ export class JudgeService {
           judgeState: "completed",
           verdict: execution.verdict,
           testsPassed: 0,
-          diagnostics: publicExecutionDiagnostics(execution.verdict, request.sourceCode, execution.diagnostics, execution.compilerDiagnostics),
+          diagnostics: compiler ? compilerSummary(compiler.compilerDiagnostics) : publicExecutionDiagnostics(execution.verdict, request.sourceCode, null),
         };
       } else {
         let comparison: { verdict: JudgeVerdict; passed: number };

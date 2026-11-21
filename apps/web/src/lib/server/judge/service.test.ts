@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { JudgeQuota, JudgeSubmissionRequest, JudgeVerdict } from "@leetcollab/contracts";
 import { JudgeService } from "./service";
+import { JdoodleProvider } from "./jdoodle";
 import { OnlineCompilerProvider } from "./onlinecompiler";
 import { judgeSubmissionResponseSchema } from "@leetcollab/contracts";
 import type {
@@ -215,6 +216,32 @@ describe("structured public results", () => {
     expect(result.body).toMatchObject({ ok: true, submission: { verdict: "accepted" } });
     expect(result.body.ok && result.body.submission.publicCases).toBeUndefined();
     expect(provider.calls).toBe(1);
+  });
+
+  it.each([0, 400])("retains a JDoodle compiler total for a live response with %i echo fragments", async fragments => {
+    const echo = "PRIVATE_ECHO".repeat(fragments);
+    const send = vi.fn(async () => new Response(JSON.stringify({
+      statusCode: 200, output: `Main.java:1: error: ';' expected\n${echo}\n1 error\n`,
+    })));
+    const provider = new JdoodleProvider({
+      clientId: "synthetic", clientSecret: "synthetic", javaVersionIndex: "0", limitsConfirmed: true, fetch: send,
+    });
+    const repository = new MemoryRepository(config());
+    const service = new JudgeService(repository, provider, { now: () => now });
+    const input = request();
+    const live = judgeSubmissionResponseSchema.parse((await service.submit("user-a", input)).body);
+    const diagnostic = "Expected a semicolon (;).";
+    const summary = `Line 1: ${diagnostic}`;
+    expect(live).toMatchObject({ ok: true, submission: { verdict: "compile_error",
+      diagnostics: summary, compilerDiagnostics: [{ line: 1, message: diagnostic }],
+      compilerErrorCount: 1, compilerDiagnosticsComplete: true,
+    } });
+    expect([...repository.submissions.values()][0].diagnostics).toBe(summary);
+    const replay = judgeSubmissionResponseSchema.parse((await service.submit("user-a", input)).body);
+    expect(replay).toMatchObject({ ok: true, submission: { diagnostics: summary,
+      compilerDiagnostics: [], compilerErrorCount: null, compilerDiagnosticsComplete: false,
+    } });
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it("returns source-mapped structured compiler errors and an authentic total without private echoes", async () => {

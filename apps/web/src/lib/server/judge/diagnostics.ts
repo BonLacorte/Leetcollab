@@ -54,46 +54,42 @@ export function compilerReport(output: string): CompilerReport {
   };
 }
 
-export function compilerDiagnostics(output: string): CompilerDiagnostic[] {
-  return compilerReport(output).compilerDiagnostics;
-}
-
 export function publicCompilerReport(
   source: string, output: string | null, issues?: CompilerDiagnostic[],
   errorCount: number | null = null, complete = false,
 ): CompilerReport {
-  const sourceLines = source.split(/\r\n?|\n/).length;
-  // Stored diagnostics contain only our mapped messages, never raw compiler text.
-  const stored = (output ?? "").slice(0, 8192).split(/\r\n?|\n/).flatMap(line => {
-    const match = /^Line ([1-9]\d*): (.+)$/.exec(line);
-    return match && Number(match[1]) <= sourceLines && allowedMessages.has(match[2])
-      ? [{ line: Number(match[1]), message: match[2] }] : [];
-  });
+  const report = issues === undefined ? compilerReport(output ?? "") : {
+    compilerDiagnostics: issues,
+    compilerErrorCount: errorCount,
+    compilerDiagnosticsComplete: complete,
+  };
   const compiledLines = source.trim().split(/\r\n?|\n/).length;
   const leadingLines = source.slice(0, source.length - source.trimStart().length).split(/\r\n?|\n/).length - 1;
-  const candidates = issues ?? compilerDiagnostics(output ?? "");
-  const mapped = candidates
+  const mapped = report.compilerDiagnostics
     .filter(issue => Number.isSafeInteger(issue.line) && issue.line > 0 && issue.line <= compiledLines && allowedMessages.has(issue.message))
-    // Columns are omitted: trimming the first source line can change its offset.
     .map(issue => ({ line: issue.line + leadingLines, message: issue.message }));
-  const safe = stored.length ? stored : mapped;
   return {
-    compilerDiagnostics: safe.slice(0, 8),
-    compilerErrorCount: errorCount,
-    compilerDiagnosticsComplete: complete && safe.length <= 8 && safe.length === candidates.length && errorCount === safe.length
-      && safe.every(issue => issue.message !== unknownCompilerMessage),
+    compilerDiagnostics: mapped.slice(0, 8),
+    compilerErrorCount: report.compilerErrorCount,
+    compilerDiagnosticsComplete: report.compilerDiagnosticsComplete && mapped.length <= 8
+      && mapped.length === report.compilerDiagnostics.length && report.compilerErrorCount === mapped.length
+      && mapped.every(issue => issue.message !== unknownCompilerMessage),
   };
 }
 
-export function publicExecutionDiagnostics(
-  verdict: JudgeVerdict,
-  source: string,
-  output: string | null,
-  issues?: CompilerDiagnostic[],
-): string {
+export function compilerSummary(issues: CompilerDiagnostic[]): string {
+  return issues.map(issue => `Line ${issue.line}: ${issue.message}`).join("\n") || unknownCompilerMessage;
+}
+
+export function publicExecutionDiagnostics(verdict: JudgeVerdict, source: string, storedSummary: string | null): string {
   if (verdict === "compile_error") {
-    return publicCompilerReport(source, output, issues).compilerDiagnostics
-      .map(issue => `Line ${issue.line}: ${issue.message}`).join("\n") || unknownCompilerMessage;
+    const sourceLines = source.split(/\r\n?|\n/).length;
+    const stored = (storedSummary ?? "").slice(0, 8192).split(/\r\n?|\n/).flatMap(line => {
+      const match = /^Line ([1-9]\d*): (.+)$/.exec(line);
+      return match && Number(match[1]) <= sourceLines && allowedMessages.has(match[2])
+        ? [{ line: Number(match[1]), message: match[2] }] : [];
+    });
+    return compilerSummary(stored.slice(0, 8));
   }
   switch (verdict) {
     case "runtime_error": return "The Java program stopped with a runtime error.";

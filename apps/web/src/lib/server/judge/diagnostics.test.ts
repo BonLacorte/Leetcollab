@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { compilerDiagnostics, compilerReport, publicCompilerReport, publicExecutionDiagnostics } from "./diagnostics";
+import { compilerReport, compilerSummary, publicCompilerReport, publicExecutionDiagnostics } from "./diagnostics";
 
 const source = "\n\n  class Solution {\n  public static int answer() {\n    return 0;\n  }\n}";
 const issue = "/private/workspace/Main.java:3: error: ';' expected\n    PRIVATE_SOURCE_ECHO\n    ^";
@@ -13,7 +13,7 @@ it("maps original source lines and retains two real errors with the same locatio
   });
   expect(JSON.stringify(report)).not.toContain("PRIVATE");
   expect(JSON.stringify(report)).not.toContain("workspace");
-  expect(publicExecutionDiagnostics("compile_error", source, null, raw.compilerDiagnostics).split("\n")).toHaveLength(2);
+  expect(compilerSummary(report.compilerDiagnostics).split("\n")).toHaveLength(2);
 });
 
 it("reports the compiler total separately from filtered private-harness locations", () => {
@@ -44,26 +44,26 @@ it("does not claim completeness or echo arbitrary compiler message text", () => 
 const legacySource = "\n\nclass Solution {\n  static Object answer() {\n    Stack<Character> stack = new Stack<>();\n    return stack;\n  }\n}\n";
 
 it("maps only compiler locations in submitted source back to original editor lines", () => {
-  const issues = compilerDiagnostics("/private/path/Main.java:3: error: cannot find symbol\n"
+  const report = publicCompilerReport(legacySource, "/private/path/Main.java:3: error: cannot find symbol\n"
     + "    Stack<Character> stack = new Stack<>();\n    ^\n symbol: class Stack\n"
     + "Main.java:3: error: cannot find symbol\n"
     + "Main.java:11: error: incompatible types: PRIVATE_FIXTURE_LITERAL\nsecret harness source\n");
-  const result = publicExecutionDiagnostics("compile_error", legacySource, null, issues);
+  const result = compilerSummary(report.compilerDiagnostics);
   expect(result).toBe(Array(2).fill("Line 5: Cannot find symbol. Check spelling and imports.").join("\n"));
-  expect(publicExecutionDiagnostics("compile_error", legacySource, result, [])).toBe(result);
+  expect(publicExecutionDiagnostics("compile_error", legacySource, result)).toBe(result);
 });
 
 it("withholds arbitrary compiler messages, source echoes, paths, symbols and private values", () => {
   const raw = "C:\\private\\code.java:2: error: incompatible types: PRIVATE_TYPE cannot be converted to PRIVATE_VALUE\n"
     + "source echo with secrets\nMain.java:4: error: unknown PRIVATE_DIAGNOSTIC\n";
-  const result = publicExecutionDiagnostics("compile_error", legacySource, raw);
+  const result = compilerSummary(publicCompilerReport(legacySource, raw).compilerDiagnostics);
   expect(result).toContain("Incompatible types. Check declarations and return values.");
   expect(result).toContain("Detailed compiler diagnostics are unavailable.");
   expect(result).not.toMatch(/PRIVATE|source echo|private|code.java/);
 });
 
 it.each(["", "error without a compiler location", "Main.java:999: error: cannot find symbol", "Main.java:0: error: cannot find symbol"])("honestly falls back when usable compiler details are absent: %s", raw => {
-  expect(publicExecutionDiagnostics("compile_error", legacySource, raw)).toBe("Java compilation failed. Detailed compiler diagnostics are unavailable.");
+  expect(compilerSummary(publicCompilerReport(legacySource, raw).compilerDiagnostics)).toBe("Java compilation failed. Detailed compiler diagnostics are unavailable.");
 });
 
 it.each(["runtime_error", "time_limit", "memory_limit", "output_limit"] as const)("does not expose raw %s output containing private test data", verdict => {
@@ -73,6 +73,5 @@ it.each(["runtime_error", "time_limit", "memory_limit", "output_limit"] as const
 
 it("bounds displayed diagnostics while preserving actual multiplicity", () => {
   const raw = Array.from({ length: 100 }, () => "Main.java:1: error: ';' expected").join("\n");
-  expect(compilerDiagnostics(raw)).toHaveLength(8);
-  expect(publicExecutionDiagnostics("compile_error", legacySource, raw)).toBe(Array(8).fill("Line 3: Expected a semicolon (;).").join("\n"));
+  expect(compilerSummary(publicCompilerReport(legacySource, raw).compilerDiagnostics)).toBe(Array(8).fill("Line 3: Expected a semicolon (;).").join("\n"));
 });

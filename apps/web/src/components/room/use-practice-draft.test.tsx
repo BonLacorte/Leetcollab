@@ -109,6 +109,24 @@ it.each([{ canEditCode: false }, { connected: false }])("respects permissions an
   expect(mocks.save).not.toHaveBeenCalled();
 });
 
+it.each(["timer", "navigation"])("saves the last authorized edit after permission is revoked via %s", async trigger => {
+  mocks.read.mockResolvedValue({ data: row("previous private draft"), error: null });
+  await render();
+  await act(async () => latest.editCode("authorized edit"));
+  await act(async () => change({ canEditCode: false, code: "collaborator edit" }));
+  await act(async () => {
+    latest.editCode("unauthorized edit");
+    latest.restoreDraft();
+    latest.resetCode();
+    await latest.retrieveSubmission();
+  });
+  expect(mocks.replace).toHaveBeenCalledExactlyOnceWith("authorized edit");
+  expect(mocks.submitted).not.toHaveBeenCalled();
+  if (trigger === "timer") await advance();
+  else { await act(async () => root!.unmount()); root = undefined; }
+  expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ draft_code: "authorized edit" }));
+});
+
 it("resets to the current starter and retrieves only this user's latest actual Java submission", async () => {
   await render({ code: "unsaved code" });
   await act(async () => latest.resetCode());

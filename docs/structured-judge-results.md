@@ -4,7 +4,7 @@ Successful submission responses retain the existing verdict, aggregate check
 counts and sanitized `diagnostics` string. Optional `JudgeSubmission` fields add:
 
 ```ts
-compilerDiagnostics?: { line: number; column?: number | null; message: string }[];
+compilerDiagnostics?: { line: number; message: string }[];
 compilerErrorCount?: number | null;
 compilerDiagnosticsComplete?: boolean;
 publicCases?: {
@@ -17,9 +17,8 @@ Compiler locations use the original submitted source's 1-based line numbers.
 Messages come from the existing server-written category allowlist. Raw source
 echoes, symbols, paths and harness locations are withheld. Duplicate compiler
 errors are retained, even when their mapped locations and categories match.
-At most eight diagnostics are available. Columns are currently omitted because
-source trimming can change the first line's column offset. The UI derives
-excerpts from its captured submission source and owns editor revision checks.
+At most eight line-level diagnostics are available. The UI derives excerpts
+from its captured submission source and owns editor revision checks.
 
 `compilerErrorCount` is supplied only from an explicit terminal javac error
 summary, never inferred from the number of matched headers. It is null when no

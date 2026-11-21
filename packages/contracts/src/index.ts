@@ -140,7 +140,6 @@ export type JudgeFallback = z.infer<typeof judgeFallbackSchema>;
 
 export const judgeCompilerDiagnosticSchema = z.object({
   line: z.number().int().positive(),
-  column: z.number().int().positive().nullable().optional(),
   message: z.string().max(512),
 });
 
