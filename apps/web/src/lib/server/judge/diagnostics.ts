@@ -31,11 +31,17 @@ const categories: Array<[RegExp, string]> = [
 const unknownCompilerMessage = "Java compilation failed. Detailed compiler diagnostics are unavailable.";
 const allowedMessages = new Set([...categories.map(([, message]) => message), unknownCompilerMessage]);
 
+const compilerHeader = /^(?:[^\r\n]*[/\\])?(?:Main|code|Solution)\.java:([1-9]\d*)(?::\d+)?:\s*error:\s*(.*)$/;
+
+export function hasCompilerLocation(output: string): boolean {
+  return output.split(/\r\n?|\n/).some(line => compilerHeader.test(line));
+}
+
 export function compilerReport(output: string): CompilerReport {
   const diagnostics: CompilerDiagnostic[] = [];
   let headers = 0;
   for (const line of output.slice(0, 8192).split(/\r\n?|\n/)) {
-    const header = /^(?:[^\r\n]*[/\\])?(?:Main|code|Solution)\.java:([1-9]\d*)(?::\d+)?:\s*error:\s*(.*)$/.exec(line);
+    const header = compilerHeader.exec(line);
     if (!header) continue;
     headers += 1;
     const message = categories.find(([pattern]) => pattern.test(header[2].trim()))?.[1] ?? unknownCompilerMessage;

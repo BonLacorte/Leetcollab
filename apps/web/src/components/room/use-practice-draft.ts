@@ -21,6 +21,7 @@ function progressFromRow(row: ProgressRow): ProblemProgress {
 type Options = {
   roomId: string; userId?: string; problem: Problem | null; code: string;
   canEditCode: boolean; connected: boolean; onCodeChange: (code: string) => void;
+  onCodeReplace: (problemId: string, expectedCode: string, code: string) => Promise<void>;
 };
 
 export function usePracticeDraft(options: Options) {
@@ -57,13 +58,13 @@ export function usePracticeDraft(options: Options) {
       if (active) setState(current => current.scope === scope ? { ...current, ...value } : current);
     };
     async function save(): Promise<void> {
-      if (!context.ready || !context.connected || context.draftEdit === null || context.draftEdit === context.lastSaved) return;
+      if (context.draftEdit === null) return;
       if (pendingSave) { await pendingSave; return save(); }
-      const savedCode = context.draftEdit;
-      updateCurrent({ saving: true, status: "Saving draft…" });
-      const previousWrite = pendingDraftWrites.get(persistenceScope);
       pendingSave = (async () => {
-        await previousWrite;
+        await read;
+        const savedCode = context.draftEdit;
+        if (!context.ready || savedCode === null || savedCode === context.lastSaved) return;
+        updateCurrent({ saving: true, status: "Saving draft…" });
         try {
           const { data, error } = await supabase.from("user_problem_progress").upsert({
             user_id: userId, problem_id: problemId, draft_code: savedCode, draft_language: "java", last_saved_at: new Date().toISOString(),
@@ -81,13 +82,13 @@ export function usePracticeDraft(options: Options) {
       if (pendingDraftWrites.get(persistenceScope) === currentWrite) pendingDraftWrites.delete(persistenceScope);
       pendingSave = null;
     }
-    void (async () => {
+    const previousWrite = pendingDraftWrites.get(persistenceScope);
+    const read = (async () => {
       try {
-        while (pendingDraftWrites.has(persistenceScope)) await pendingDraftWrites.get(persistenceScope);
-        if (!active) return;
+        await previousWrite;
+        if (!active && context.draftEdit === null) return;
         const { data, error } = await supabase.from("user_problem_progress").select(progressSelect)
           .eq("user_id", userId).eq("problem_id", problemId).maybeSingle();
-        if (!active) return;
         if (error) throw error;
         const row = data as ProgressRow | null;
         const hasDraft = Boolean(row?.last_saved_at && row.draft_language === "java" && typeof row.draft_code === "string");
@@ -103,7 +104,14 @@ export function usePracticeDraft(options: Options) {
       clearInterval(timer);
       // Normal in-app navigation also saves dirty code. Never flush starter
       // content before the saved draft has been read successfully.
-      void save();
+      const saving = pendingSave;
+      const flush = save();
+      if (saving) {
+        pendingDraftWrites.set(persistenceScope, flush);
+        void flush.then(() => {
+          if (pendingDraftWrites.get(persistenceScope) === flush) pendingDraftWrites.delete(persistenceScope);
+        });
+      }
       active = false;
       context.active = false;
     };
@@ -117,47 +125,52 @@ export function usePracticeDraft(options: Options) {
     context.onCodeChange(nextCode);
   }
 
+  async function replaceCode(load: () => Promise<string | null>, status: string, restored = false) {
+    if (!context.active || !context.canEditCode || !context.connected || context.loading || context.retrieving || !problemId) return;
+    const { code: expectedCode, revision, draftEdit } = context;
+    context.retrieving = true;
+    update({ retrieving: true, status: "Preparing shared code replacement…" });
+    try {
+      const nextCode = await load();
+      if (!context.active) return;
+      if (nextCode === null) {
+        update({ status: "No submitted Java code found for this exercise." });
+      } else if (!context.canEditCode || !context.connected || revision !== context.revision) {
+        update({ status: "Code was not loaded because the shared editor or your edit permission changed. Try again." });
+      } else {
+        await context.onCodeReplace(problemId, expectedCode, nextCode);
+        if (restored && context.draftEdit === draftEdit) context.draftEdit = null;
+        update({ status });
+      }
+    } catch {
+      update({ status: "Could not confirm the shared code replacement. Check the editor and try again." });
+    } finally {
+      context.retrieving = false;
+      update({ retrieving: false });
+    }
+  }
+
   function restoreDraft() {
-    if (!context.active || !context.canEditCode || !context.connected || context.loading || context.retrieving
-      || context.lastSaved === null) return;
-    context.revision += 1;
-    context.draftEdit = null;
-    context.code = context.lastSaved;
-    context.onCodeChange(context.code);
-    update({ status: "Saved draft restored into the shared editor." });
+    const saved = context.lastSaved;
+    if (saved === null) return;
+    return replaceCode(async () => saved, "Saved draft restored into the shared editor.", true);
   }
 
   function resetCode() {
-    if (!context.active || !context.canEditCode || !context.connected || context.loading || context.retrieving || !context.problem) return;
-    context.revision += 1;
-    context.code = context.problem.starterCode;
-    context.onCodeChange(context.code);
-    update({ status: "Shared editor reset to the default Java definition." });
+    const problem = context.problem;
+    if (!problem) return;
+    return replaceCode(async () => problem.starterCode, "Shared editor reset to the default Java definition.");
   }
 
-  async function retrieveSubmission() {
-    if (!context.active || !context.canEditCode || !context.connected || context.loading || context.retrieving || !userId || !problemId) return;
-    const revision = context.revision;
-    context.retrieving = true;
-    update({ retrieving: true, status: "Retrieving last submitted Java code…" });
-    try {
+  function retrieveSubmission() {
+    if (!userId || !problemId) return;
+    return replaceCode(async () => {
       const { data, error } = await supabase.from("submissions").select("source_code, created_at")
         .eq("user_id", userId).eq("problem_id", problemId).eq("language", "java").eq("verification", "leetcollab")
         .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle();
-      if (!context.active) return;
       if (error) throw error;
-      if (!data || typeof data.source_code !== "string" || !data.source_code) {
-        update({ status: "No submitted Java code found for this exercise." });
-      } else if (!context.canEditCode || !context.connected || revision !== context.revision) {
-        update({ status: "Submitted code was not loaded because the shared editor or your edit permission changed. Try again." });
-      } else {
-        context.revision += 1;
-        context.code = data.source_code;
-        context.onCodeChange(context.code);
-        update({ status: "Last submitted Java code restored into the shared editor." });
-      }
-    } catch { update({ status: "Could not retrieve submitted code. Your editor content was kept. Try again." }); }
-    finally { context.retrieving = false; update({ retrieving: false }); }
+      return typeof data?.source_code === "string" && data.source_code ? data.source_code : null;
+    }, "Last submitted Java code restored into the shared editor.");
   }
 
   const current = state.scope === scope ? state : { progress: null, status: "Loading saved draft…", loading: true, saving: false, retrieving: false };

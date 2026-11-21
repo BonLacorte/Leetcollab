@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { RoomState } from "@leetcollab/contracts";
-import { judgeParticipants } from "../../../../../realtime/src/judge-participants.js";
+import { judgeParticipants, waitForJudgeParticipants } from "../../../../../realtime/src/judge-participants.js";
 import { captureSubmissionParticipants } from "./room-participants";
 
 const actor = "11111111-1111-4111-8111-111111111111";
@@ -24,19 +24,36 @@ it("captures unique live members synchronously; departures retain eligibility an
 });
 
 it("does not grant unrelated, disconnected or other-exercise members credit", () => {
-  expect(judgeParticipants(room(), actor, problem, new Set([peer]))).toMatchObject({ roomId: null, userIds: [actor] });
+  expect(judgeParticipants(room(), actor, problem, new Set([peer]))).toBeNull();
   expect(judgeParticipants(room(), actor, late, new Set([actor, peer]))).toMatchObject({ roomId: null, userIds: [actor] });
   expect(judgeParticipants(null, actor, problem, new Set())).toMatchObject({ roomId: null, userIds: [actor] });
+});
+
+it("waits for the actor to rejoin and captures only live room members", async () => {
+  const present = new Set([peer]);
+  const result = waitForJudgeParticipants(() => judgeParticipants(room(), actor, problem, present, "abcdefgh"));
+  expect(judgeParticipants(null, actor, problem, present, "abcdefgh")).toBeNull();
+  expect(judgeParticipants(room(), actor, late, present, "abcdefgh")).toBeNull();
+  present.add(actor);
+  await expect(result).resolves.toMatchObject({ roomId: "abcdefgh", userIds: [actor, peer] });
+});
+
+it("refuses actor-only fallback for a room Submit with reconnect feedback", async () => {
+  const request = vi.fn(async () => new Response(JSON.stringify({
+    problemId: problem, roomId: null, capturedAt: new Date().toISOString(), userIds: [actor],
+  })));
+  await expect(captureSubmissionParticipants("synthetic-token", actor, problem, "abcdefgh", request))
+    .rejects.toThrow("Reconnect to the room");
 });
 
 it("uses only the configured authenticated realtime authority, not client-supplied member IDs", async () => {
   vi.stubEnv("REALTIME_INTERNAL_URL", "http://127.0.0.1:3201");
   const snapshot = { problemId: problem, roomId: "abcdefgh", capturedAt: new Date().toISOString(), userIds: [actor, peer] };
   const request = vi.fn(async (_url: string | URL | Request, _options?: RequestInit) => new Response(JSON.stringify(snapshot)));
-  await expect(captureSubmissionParticipants("synthetic-token", actor, problem, request)).resolves.toEqual({
+  await expect(captureSubmissionParticipants("synthetic-token", actor, problem, "abcdefgh", request)).resolves.toEqual({
     roomId: snapshot.roomId, capturedAt: snapshot.capturedAt, userIds: [actor, peer],
   });
-  expect(String(request.mock.calls[0][0])).toBe(`http://127.0.0.1:3201/judge/participants?problemId=${problem}`);
+  expect(String(request.mock.calls[0][0])).toBe(`http://127.0.0.1:3201/judge/participants?problemId=${problem}&roomId=abcdefgh`);
   expect(request.mock.calls[0][1]).toMatchObject({ headers: { Authorization: "Bearer synthetic-token" }, redirect: "error" });
 });
 
@@ -46,7 +63,7 @@ it("uses the public socket origin when the optional internal URL is blank", asyn
   const request = vi.fn(async (_url: string | URL | Request) => new Response(JSON.stringify({
     problemId: problem, roomId: null, capturedAt: new Date().toISOString(), userIds: [actor],
   })));
-  await captureSubmissionParticipants("synthetic-token", actor, problem, request);
+  await captureSubmissionParticipants("synthetic-token", actor, problem, undefined, request);
   expect(String(request.mock.calls[0][0])).toBe(`http://localhost:3201/judge/participants?problemId=${problem}`);
 });
 
@@ -57,12 +74,12 @@ it.each([
   { problemId: problem, roomId: "abcdefgh", userIds: [actor, actor] },
 ])("refuses ambiguous or unrelated snapshots before execution", async fields => {
   const request = vi.fn(async () => new Response(JSON.stringify({ ...fields, capturedAt: new Date().toISOString() })));
-  await expect(captureSubmissionParticipants("synthetic-token", actor, problem, request)).rejects.toThrow("No execution was started");
+  await expect(captureSubmissionParticipants("synthetic-token", actor, problem, undefined, request)).rejects.toThrow("No execution was started");
 });
 
 it("never sends credentials to a client URL or insecure remote realtime target", async () => {
   vi.stubEnv("REALTIME_INTERNAL_URL", "http://untrusted.example");
   const request = vi.fn();
-  await expect(captureSubmissionParticipants("synthetic-token", actor, problem, request)).rejects.toThrow("No execution was started");
+  await expect(captureSubmissionParticipants("synthetic-token", actor, problem, undefined, request)).rejects.toThrow("No execution was started");
   expect(request).not.toHaveBeenCalled();
 });

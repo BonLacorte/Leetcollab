@@ -14,16 +14,20 @@ shared budget, admission checks and 20-run ceiling.
 
 `POST /api/judge/submissions` accepts `action: "run" | "submit"`. Missing action
 defaults to Run for older clients. The bearer session supplies the actor; client
-user IDs, room IDs, participant lists and verdicts cannot grant credit.
+user IDs, participant lists and verdicts cannot grant credit. Room clients send
+the expected room ID with Submit so the server can verify the current room and
+exercise before spending an attempt.
 
 Immediately before reserving a Submit, the web server forwards the verified
 bearer token to its configured realtime authority at `/judge/participants`.
 That service authenticates the token independently and synchronously captures
 the actor's room, selected problem and unique authenticated users with joined
 live sockets. Stale disconnected members, users in other rooms and users in a
-room showing another problem are excluded. An actor outside a matching live
-room receives only personal eligibility. A failed authority lookup refuses
-Submit before reservation or any provider request. Run needs no room lookup.
+room showing another problem are excluded. A room Submit waits briefly for
+confirmed membership and returns reconnect feedback if the room or exercise
+cannot be verified. A solo Submit receives personal eligibility. A failed
+authority lookup refuses Submit before reservation or any provider request. Run
+neither looks up nor stores participants.
 
 The captured membership is stored transactionally with the first reservation.
 A participant who leaves after capture keeps eligibility for that attempt. A
@@ -36,13 +40,14 @@ matching passed/total counts, the completion transaction grants
 `verified_problem_solves` rows to the captured participants only if its stored
 action is Submit. Runs and unsuccessful Submits never grant or erase credit.
 No peer submission is invented, and private submission source remains private.
-Credits are readable under the recipient's RLS policy; direct client writes
-and direct service-role inserts are forbidden. Reservation and completion RPCs
+Recipients can read their solved problem IDs under RLS. The originating
+submission IDs and timestamps stay private. Direct client writes and direct
+service-role inserts are forbidden. Reservation and completion RPCs
 are restricted to the trusted server role.
 
 The realtime completion endpoint independently checks that a submission belongs
 to the authenticated caller and is an accepted Submit before sending a refresh
-hint. Clients read their protected credit again on that hint, reconnect, window
+hint to captured recipients still connected to the room. Clients read their protected credit again on that hint, reconnect, window
 focus or Refresh status. Losing a hint cannot undo durable credit or trigger a
 provider retry. This process-local membership authority requires one realtime
 room owner; a future multi-instance deployment needs shared authoritative room

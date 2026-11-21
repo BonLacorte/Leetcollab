@@ -1,6 +1,7 @@
 import { judgeSubmissionRequestSchema } from "@leetcollab/contracts";
 import { NextResponse } from "next/server";
 import { authenticateBearer, bearerToken } from "../../../../lib/server/authenticate";
+import { RoomParticipationUnavailable } from "../../../../lib/server/judge/room-participants";
 import { readSubmissionJson } from "../../../../lib/server/judge/request-body";
 import { getJudgeService } from "../../../../lib/server/judge/context";
 import { getSupabaseAdmin } from "../../../../lib/server/supabase-admin";
@@ -36,7 +37,8 @@ export async function POST(request: Request) {
   try {
     const result = await getJudgeService(userId, parsed.data.problemId, bearerToken(request)!).submit(userId, parsed.data);
     return json(result.body, result.status);
-  } catch {
-    return json({ ok: false, error: { code: "JUDGE_UNAVAILABLE", message: "The judge is temporarily unavailable." } }, 503);
+  } catch (error) {
+    const message = error instanceof RoomParticipationUnavailable ? error.message : "The judge is temporarily unavailable.";
+    return json({ ok: false, error: { code: "JUDGE_UNAVAILABLE", message } }, 503);
   }
 }

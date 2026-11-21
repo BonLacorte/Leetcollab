@@ -100,7 +100,7 @@ class MemoryRepository implements JudgeRepository {
       durationMs: value.durationMs,
       diagnostics: value.diagnostics,
     });
-    return { submission: stored, quota: this.quota() };
+    return { submission: stored, quota: this.quota(), applied: true };
   }
 
   async exhaust() {
@@ -164,6 +164,28 @@ describe("structured public results", () => {
     expect(serialized).not.toContain("__LEETCOLLAB");
   });
 
+  it.each(["accepted", "compile_error"] as const)("omits late %s feedback when another transaction finalized the submission", async verdict => {
+    const repository = new MemoryRepository(publicConfig());
+    const complete = repository.complete.bind(repository);
+    const provider: ExecutionProvider = verdict === "accepted"
+      ? new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]))
+      : { configured: true, execute: async () => ({ kind: "execution_error", verdict: "compile_error",
+        diagnostics: "Main.java:1: error: ';' expected\n1 error", durationMs: 1, cpuTime: null, memory: null }) };
+    const notifyCompletion = vi.fn();
+    vi.spyOn(repository, "complete").mockImplementation(async completion => {
+      const stored = await complete({ ...completion, judgeState: "failed", verdict: "runtime_error", testsPassed: 0 });
+      return { ...stored, applied: false };
+    });
+    const service = new JudgeService(repository, provider, { notifyCompletion, captureParticipants: async () => ({
+      roomId: "abcdefgh", userIds: ["user-a", "user-b"], capturedAt: now.toISOString(),
+    }) });
+    const response = await service.submit("user-a", { ...request(), action: "submit" });
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({ ok: false, error: { code: "JUDGE_UNAVAILABLE" }, quota: { used: 1 } });
+    expect(response.body).not.toHaveProperty("submission");
+    expect(notifyCompletion).not.toHaveBeenCalled();
+  });
+
   it("refuses raw stdout on a framed fixture and retains the charge without fabricating a pass", async () => {
     const repository = new MemoryRepository(publicConfig());
     const provider = new OutputProvider("42\nHIDDEN_EXPECTED\n");
@@ -218,8 +240,8 @@ describe("structured public results", () => {
     expect(provider.calls).toBe(1);
   });
 
-  it.each([0, 400])("retains a JDoodle compiler total for a live response with %i echo fragments", async fragments => {
-    const echo = "PRIVATE_ECHO".repeat(fragments);
+  it.each(['"time limit"', '"memory limit"', "PRIVATE_ECHO".repeat(400).length])("preserves JDoodle compiler reports for echo case %s", async fragment => {
+    const echo = typeof fragment === "number" ? "x".repeat(fragment) : fragment;
     const send = vi.fn(async () => new Response(JSON.stringify({
       statusCode: 200, output: `Main.java:1: error: ';' expected\n${echo}\n1 error\n`,
     })));
@@ -269,12 +291,13 @@ describe("JudgeService", () => {
     const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a", "user-b"], capturedAt: now.toISOString() }));
     const notifyCompletion = vi.fn(async () => { throw new Error("Hint lost after durable completion"); });
     const service = new JudgeService(repository, new OutputProvider(), { now: () => now, captureParticipants, notifyCompletion });
-    const result = await service.submit("user-a", { ...request(), action });
+    const result = await service.submit("user-a", { ...request(), action, roomId: "abcdefgh" });
     expect(result.status).toBe(200);
     expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-a", action,
-      participants: { roomId: action === "submit" ? "abcdefgh" : null,
-        userIds: action === "submit" ? ["user-a", "user-b"] : ["user-a"], capturedAt: now.toISOString() } }));
-    expect(captureParticipants).toHaveBeenCalledTimes(action === "submit" ? 1 : 0);
+      participants: action === "submit" ? { roomId: "abcdefgh", userIds: ["user-a", "user-b"], capturedAt: now.toISOString() } : null,
+    }));
+    if (action === "submit") expect(captureParticipants).toHaveBeenCalledExactlyOnceWith("abcdefgh");
+    else expect(captureParticipants).not.toHaveBeenCalled();
     expect(notifyCompletion).toHaveBeenCalledTimes(action === "submit" ? 1 : 0);
   });
 

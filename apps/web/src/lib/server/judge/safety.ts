@@ -25,7 +25,11 @@ export function validateJavaSource(source: string): string | null {
   // Allow only ordinary imports from the same two packages recommended for
   // qualified names. Check every other restriction against the original source,
   // including imported names; imports must never hide a forbidden API.
-  const withoutSupportedImports = source.replace(
+  const importTokens = source.replace(
+    /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
+    token => token.startsWith("/") ? " " : token,
+  );
+  const withoutSupportedImports = importTokens.replace(
     /\bimport\s+java\s*\.\s*(?:util|math)\s*\.\s*(?:[A-Za-z_$][\w$]*|\*)\s*;/g,
     "",
   );

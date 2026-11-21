@@ -45,7 +45,8 @@ alter table public.judge_submission_participants enable row level security;
 alter table public.verified_problem_solves enable row level security;
 revoke all on public.judge_user_quota_periods, public.judge_submission_participants,
   public.verified_problem_solves from public, anon, authenticated, service_role;
-grant select on public.verified_problem_solves to authenticated, service_role;
+grant select (user_id, problem_id) on public.verified_problem_solves to authenticated;
+grant select on public.verified_problem_solves to service_role;
 grant select on public.judge_user_quota_periods to service_role;
 create policy "users read their verified solved credit" on public.verified_problem_solves
   for select to authenticated using (auth.uid() = user_id);
@@ -91,11 +92,12 @@ create function public.reserve_judge_execution(
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 declare account public.judge_quota_periods; personal public.judge_user_quota_periods;
   attempt public.submissions; result jsonb; expired_count integer;
-  replay_only boolean := p_action='submit' and p_room_id is null and p_participant_ids is null and p_captured_at is null;
+  no_snapshot boolean := p_room_id is null and p_participant_ids is null and p_captured_at is null;
 begin
   if p_scope is null or p_scope not in ('user','shared') or p_runner is null or p_runner not in ('jdoodle','onlinecompiler')
     or p_action is null or p_action not in ('run','submit')
-    or (not replay_only and (
+    or (not no_snapshot and (
+      p_action <> 'submit' or
       p_captured_at is null or p_participant_ids is null or not (p_user_id=any(p_participant_ids))
       or cardinality(p_participant_ids) not between 1 and 256
       or array_position(p_participant_ids,null) is not null
@@ -157,7 +159,7 @@ begin
     end if;
   end if;
   if result->>'result'='reserved' then
-    if replay_only then
+    if p_action='submit' and no_snapshot then
       raise exception 'new submit requires captured participants' using errcode='22023';
     end if;
     if p_scope='shared' then
@@ -167,8 +169,10 @@ begin
     end if;
     update public.submissions set execution_action=p_action,execution_room_id=p_room_id,
       participants_captured_at=p_captured_at where id=(result->>'submissionId')::uuid;
-    insert into public.judge_submission_participants(submission_id,user_id)
-      select (result->>'submissionId')::uuid,unnest(p_participant_ids) on conflict do nothing;
+    if p_action='submit' then
+      insert into public.judge_submission_participants(submission_id,user_id)
+        select (result->>'submissionId')::uuid,unnest(p_participant_ids) on conflict do nothing;
+    end if;
   elsif result->>'result' in ('existing','in_progress') then
     select * into strict attempt from public.submissions where id=(result->>'submissionId')::uuid;
     if attempt.runner <> p_runner or attempt.problem_id <> p_problem_id or attempt.source_code <> p_source_code
@@ -208,6 +212,18 @@ begin
   end if;
   return result;
 end $$;
+
+create function public.judge_refresh_recipients(p_submission_id uuid)
+returns table(user_id uuid, room_id text, problem_id uuid)
+language sql stable security definer set search_path=public as $$
+  select p.user_id, s.execution_room_id, s.problem_id
+    from public.submissions s join public.judge_submission_participants p on p.submission_id=s.id
+    where s.id=p_submission_id and s.user_id=auth.uid() and s.execution_room_id is not null
+      and s.execution_action='submit' and s.judge_state='completed' and s.verdict='accepted'
+      and s.tests_total>0 and s.tests_passed=s.tests_total
+$$;
+revoke all on function public.judge_refresh_recipients(uuid) from public,anon,authenticated,service_role;
+grant execute on function public.judge_refresh_recipients(uuid) to authenticated;
 
 alter function public.exhaust_judge_quota(timestamptz) rename to exhaust_judge_quota_account_internal;
 revoke all on function public.exhaust_judge_quota_account_internal(timestamptz) from public,anon,authenticated,service_role;

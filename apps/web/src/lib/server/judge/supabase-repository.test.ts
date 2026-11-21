@@ -23,11 +23,11 @@ it("binds normal quota and execution intent to the authenticated actor while pee
   }));
 });
 
-function repository() {
-  const rpc = vi.fn().mockResolvedValue({ data: {
+function repository(completionResult = "completed") {
+  const rpc = vi.fn(async (name: string) => ({ data: {
     used: 1, limit: 20, active: 0, resetAt: "2026-11-14T00:00:00+00:00",
-    result: "reserved", submissionId,
-  }, error: null });
+    result: name === "complete_judge_submission" ? completionResult : "reserved", submissionId,
+  }, error: null }));
   const query = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
@@ -48,6 +48,7 @@ describe("PostgreSQL timestamps satisfy the public judge response contract", () 
       testsPassed: 1, testsTotal: 1, durationMs: 10, diagnostics: "",
       providerCpuTime: null, providerMemory: null,
     });
+    expect(completion.applied).toBe(true);
     const reservation = await repo.reserve({
       userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
       period, quotaLimit: 20, activeLimit: 2, reservationSeconds: 45,
@@ -58,6 +59,16 @@ describe("PostgreSQL timestamps satisfy the public judge response contract", () 
     }
     expect(judgeSubmissionSchema.parse(completion.submission).createdAt)
       .toBe("2026-11-13T23:55:00.000Z");
+  });
+
+  it("distinguishes an existing completion from a newly applied outcome", async () => {
+    const completion = await repository("existing").complete({
+      userId, submissionId, judgeState: "completed", verdict: "wrong_answer",
+      testsPassed: 0, testsTotal: 1, durationMs: 10, diagnostics: "",
+      providerCpuTime: null, providerMemory: null,
+    });
+    expect(completion.applied).toBe(false);
+    expect(completion.submission.verdict).toBe("accepted");
   });
 
   it("normalizes timestamps when loading an existing submission", async () => {

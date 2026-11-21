@@ -112,8 +112,8 @@ export class SupabaseJudgeRepository implements JudgeRepository {
         p_scope: this.options.sharedQuota ? "shared" : "user",
         p_runner: input.runner ?? "jdoodle", p_action: input.action ?? "run",
         p_room_id: input.participants?.roomId ?? null,
-        p_participant_ids: input.participants === null ? null : input.participants?.userIds ?? [input.userId],
-        p_captured_at: input.participants === null ? null : input.participants?.capturedAt ?? new Date().toISOString(),
+        p_participant_ids: input.participants?.userIds ?? null,
+        p_captured_at: input.participants?.capturedAt ?? null,
       } : {}),
       p_user_id: input.userId,
       p_problem_id: input.problemId,
@@ -190,7 +190,7 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     return data ? submission(data) : null;
   }
 
-  async complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota }> {
+  async complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota; applied: boolean }> {
     const { data, error } = await this.client.rpc("complete_judge_submission", {
       p_user_id: completion.userId,
       p_submission_id: completion.submissionId,
@@ -206,7 +206,8 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     if (error) throw error;
     const stored = await this.getSubmission(completion.userId, completion.submissionId);
     if (!stored) throw new Error("Completed submission could not be loaded.");
-    return { submission: stored, quota: quota(data as RpcQuota) };
+    const result = data as RpcQuota & { result?: string };
+    return { submission: stored, quota: quota(result), applied: result.result === "completed" };
   }
 
   async exhaust(periodStart: string): Promise<JudgeQuota> {

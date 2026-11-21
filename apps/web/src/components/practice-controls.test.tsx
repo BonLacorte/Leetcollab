@@ -68,7 +68,7 @@ it("clears a status failure after a successful refresh", async () => {
 
 
 const quota = { available: true, used: 0, limit: 20, remaining: 20, active: 0, resetAt: "2026-11-13T23:55:00.000Z", fallback: null, unavailableReason: null };
-const credit = { submission_id: "22222222-2222-4222-8222-222222222222" };
+const credit = { problem_id: "11111111-1111-4111-8111-111111111111" };
 const passing = { verification: "leetcollab", judge_state: "completed", verdict: "accepted", tests_passed: 4, tests_total: 4 };
 const button = (label: string) => renderer.root.findAllByType("button").find(node => node.children.includes(label))!;
 const output = () => JSON.stringify(renderer.toJSON());
@@ -146,7 +146,7 @@ it.each(["Run", "Submit"])("%s calls the existing authenticated judge and reload
   expect(output()).toContain("Not solved");
   fetch.mockImplementation(async (_url, options) => {
     if (!options?.method) return response(quota);
-    mocks.submissions.mockResolvedValue({ data: label === "Submit" ? [credit] : [], error: null });
+    mocks.submissions.mockResolvedValue({ data: [credit], error: null });
     return response({ ok: true, quota, submission: {
       id: "22222222-2222-4222-8222-222222222222", problemId: "11111111-1111-4111-8111-111111111111", language: "java",
       verdict: "accepted", verification: "leetcollab", testsPassed: 4, testsTotal: 4,
@@ -160,7 +160,7 @@ it.each(["Run", "Submit"])("%s calls the existing authenticated judge and reload
   expect(JSON.parse(options.body)).toEqual({
     problemId: "11111111-1111-4111-8111-111111111111", action: label.toLowerCase(), sourceCode: "class Solution {}", language: "java", idempotencyKey: expect.any(String),
   });
-  expect(output().includes("Solved - LeetCollab verified")).toBe(label === "Submit");
+  expect(output()).toContain("Solved - LeetCollab verified");
   expect(renderer.root.findByType("h2").children).toEqual(["Accepted"]);
 });
 
@@ -195,7 +195,7 @@ it("reloads only protected completion on a room-credit hint without spending or 
 it("an accepted Run preserves historical Submit credit", async () => {
   mocks.submissions.mockResolvedValue({ data: [credit], error: null });
   vi.stubGlobal("fetch", vi.fn(async (_url, options) => response(options?.method ? {
-    ok: true, quota, submission: { id: credit.submission_id, problemId: "11111111-1111-4111-8111-111111111111",
+    ok: true, quota, submission: { id: "22222222-2222-4222-8222-222222222222", problemId: "11111111-1111-4111-8111-111111111111",
       language: "java", verification: "leetcollab", verdict: "accepted", action: "run",
       testsPassed: 4, testsTotal: 4, durationMs: 1, diagnostics: "", createdAt: "2026-11-13T12:00:00.000Z" },
   } : quota)));

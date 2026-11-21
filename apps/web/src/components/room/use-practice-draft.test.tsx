@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Problem } from "@leetcollab/contracts";
 import { usePracticeDraft } from "./use-practice-draft";
 
-const mocks = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn(), submitted: vi.fn(), query: vi.fn(), replace: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn(), submitted: vi.fn(), acknowledge: vi.fn(), query: vi.fn(), replace: vi.fn() }));
 vi.mock("../../lib/supabase", () => ({ supabase: { from: (table: string) => {
   let payload: unknown;
   const query = {
@@ -33,7 +33,13 @@ function Harness() {
   const [value, setValue] = useState(input);
   input = value;
   change = values => setValue(previous => ({ ...previous, ...values }));
-  latest = usePracticeDraft({ ...value, onCodeChange: code => { mocks.replace(code); change({ code }); } });
+  latest = usePracticeDraft({ ...value, onCodeChange: code => { mocks.replace(code); change({ code }); },
+    onCodeReplace: async (problemId, expectedCode, code) => {
+      await mocks.acknowledge(problemId, expectedCode, code);
+      mocks.replace(code);
+      change({ code });
+    },
+  });
   return <output>{value.code}</output>;
 }
 async function render(values: Partial<Input> = {}) {
@@ -47,6 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.read.mockResolvedValue({ data: null, error: null });
   mocks.submitted.mockResolvedValue({ data: null, error: null });
+  mocks.acknowledge.mockResolvedValue(undefined);
   mocks.save.mockImplementation(async value => ({ data: row(value.draft_code, value.problem_id), error: null }));
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.replaceChildren(); vi.useRealTimers(); });
@@ -149,7 +156,7 @@ it("reports absent submissions and retrieval failures without replacing code", a
   expect(input.code).toBe("unsaved code");
   mocks.submitted.mockRejectedValue(new Error("offline"));
   await act(async () => { await latest.retrieveSubmission(); });
-  expect(latest.status).toContain("Could not retrieve");
+  expect(latest.status).toContain("Could not confirm");
   expect(input.code).toBe("unsaved code");
 });
 
@@ -162,6 +169,39 @@ it("discards a retrieved submission when the shared editor changes during the re
   await act(async () => finish({ data: { source_code: "older submitted code" }, error: null }));
   expect(input.code).toBe("newer edit");
   expect(latest.status).toContain("was not loaded");
+});
+
+it.each(["restoreDraft", "resetCode", "retrieveSubmission"] as const)("keeps the editor intact until realtime accepts %s", async action => {
+  mocks.read.mockResolvedValue({ data: row("previous private draft"), error: null });
+  mocks.submitted.mockResolvedValue({ data: { source_code: "last submitted code" }, error: null });
+  let reject!: (error: Error) => void;
+  mocks.acknowledge.mockImplementationOnce(() => new Promise((_resolve, refuse) => { reject = refuse; }));
+  await render({ code: "visible shared code" });
+  await act(async () => { void latest[action](); });
+  const replacement = { restoreDraft: "previous private draft", resetCode: problem.starterCode, retrieveSubmission: "last submitted code" }[action];
+  expect(mocks.acknowledge).toHaveBeenCalledExactlyOnceWith(problem.id, "visible shared code", replacement);
+  expect(latest.status).toContain("Preparing");
+  expect(mocks.replace).not.toHaveBeenCalled();
+  await act(async () => reject(new Error("The shared exercise or code changed.")));
+  expect(latest.status).toContain("Could not confirm");
+  expect(input.code).toBe("visible shared code");
+});
+
+it.each([false, true])("flushes captured edits after a pending read only if it succeeds (failure=%s)", async failure => {
+  let finish!: (value: unknown) => void;
+  mocks.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await render();
+  await act(async () => latest.editCode("captured during read"));
+  const second = { ...problem, id: "problem-b" };
+  await act(async () => change({ problem: second, code: second.starterCode }));
+  const readsBeforeReturn = mocks.read.mock.calls.length;
+  await act(async () => change({ problem, code: problem.starterCode }));
+  expect(mocks.read).toHaveBeenCalledTimes(readsBeforeReturn);
+  expect(mocks.save).not.toHaveBeenCalled();
+  await act(async () => finish(failure ? { error: new Error("offline") } : { data: row("previous draft"), error: null }));
+  if (failure) expect(mocks.save).not.toHaveBeenCalled();
+  else expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ problem_id: problem.id, draft_code: "captured during read" }));
+  expect(input.code).toBe(problem.starterCode);
 });
 
 it("flushes dirty code under the old exercise and cancels its timer when switching or unmounting", async () => {

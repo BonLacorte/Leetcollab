@@ -27,7 +27,7 @@ export type JudgeServiceOptions = {
   quotaLimit?: number;
   // Server composition permits this only in development with a loopback database.
   localTesting?: boolean;
-  captureParticipants?: () => Promise<SubmissionParticipants>;
+  captureParticipants?: (roomId?: string) => Promise<SubmissionParticipants>;
   notifyCompletion?: (submissionId: string) => Promise<void>;
   activeLimit?: number;
   reservationSeconds?: number;
@@ -131,7 +131,7 @@ export class JudgeService {
   private readonly now: () => Date;
   private readonly renderPolicyId?: string;
   private readonly evaluation?: JudgeEvaluation;
-  private readonly captureParticipants?: () => Promise<SubmissionParticipants>;
+  private readonly captureParticipants?: (roomId?: string) => Promise<SubmissionParticipants>;
   private readonly notifyCompletion?: (submissionId: string) => Promise<void>;
 
   constructor(
@@ -225,17 +225,20 @@ export class JudgeService {
     }
 
     const action = request.action ?? "run";
-    let participants: SubmissionParticipants | null = { roomId: null, capturedAt: this.now().toISOString(), userIds: [userId] };
+    let participants: SubmissionParticipants | null = null;
     if (action === "submit" && this.captureParticipants) {
       const hasExisting = () => this.repository.hasSubmissionKey(userId, request.idempotencyKey);
       participants = null;
       if (!await hasExisting()) {
         try {
-          participants = await this.captureParticipants();
+          participants = await this.captureParticipants(request.roomId);
         } catch (error) {
           if (!await hasExisting()) throw error;
         }
       }
+    } else if (action === "submit") {
+      if (request.roomId) return errorResponse("JUDGE_UNAVAILABLE", "Room participation could not be verified. No execution was started.");
+      participants = { roomId: null, capturedAt: this.now().toISOString(), userIds: [userId] };
     }
     this.assertAdmission(userId, request.problemId);
     const reservation = await this.repository.reserve({
@@ -337,7 +340,8 @@ export class JudgeService {
       }
 
       const completed = await this.repository.complete(completion);
-      if (action === "submit" && completion.verdict === "accepted") {
+      if (!completed.applied) return failedExisting(completed.submission, completed.quota, request.sourceCode);
+      if (participants?.roomId && completed.submission.verdict === "accepted") {
         // Notification is a refresh hint after durable credit, never authority to
         // grant a solve. A failed hint cannot turn success into a charged retry.
         try { await this.notifyCompletion?.(completed.submission.id); } catch { /* Refresh/reconnect reads durable credit. */ }
@@ -364,6 +368,9 @@ export class JudgeService {
           providerMemory: null,
         });
         quota = completed.quota;
+        if (!completed.applied && failure.kind !== "quota_exhausted") {
+          return failedExisting(completed.submission, quota, request.sourceCode);
+        }
       } catch {
         // JDoodle leases expire. Render retains active capacity until durable cleanup evidence or operator reconciliation.
       }

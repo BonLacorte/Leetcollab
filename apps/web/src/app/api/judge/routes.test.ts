@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ compose: vi.fn(), getUser: vi.fn(), submit: vi.fn(), status: vi.fn() }));
 vi.mock("../../../lib/server/supabase-admin", () => ({ getSupabaseAdmin: () => ({ auth: { getUser: mocks.getUser } }) }));
 vi.mock("../../../lib/server/judge/context", () => ({ getJudgeService: (...args: unknown[]) => { mocks.compose(...args); return { submit: mocks.submit, status: mocks.status }; } }));
+import { RoomParticipationUnavailable } from "../../../lib/server/judge/room-participants";
 import { POST } from "./submissions/route";
 import { GET } from "./status/route";
 const payload = { problemId: "11111111-1111-4111-8111-111111111111", language: "java", sourceCode: "class Solution {}", idempotencyKey: "22222222-2222-4222-8222-222222222222" };
@@ -10,6 +11,17 @@ function request(body: unknown = payload, token = "valid") {
 }
 beforeEach(() => { vi.resetAllMocks(); mocks.getUser.mockResolvedValue({ data: { user: { id: "owner" } }, error: null }); });
 describe("authenticated judge HTTP boundary", () => {
+  it("returns reconnect feedback for an unconfirmed room Submit", async () => {
+    const roomId = "abcdefgh";
+    mocks.submit.mockRejectedValue(new RoomParticipationUnavailable(roomId));
+    const response = await POST(request({ ...payload, roomId, action: "submit" }));
+    expect(mocks.submit).toHaveBeenCalledWith("owner", expect.objectContaining({ action: "submit", roomId }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, error: { code: "JUDGE_UNAVAILABLE",
+      message: expect.stringContaining("No execution was started"),
+    } });
+  });
+
   it("rejects absent and rejected sessions before judging", async () => {
     expect((await POST(new Request("https://app.test", { method: "POST" }))).status).toBe(401);
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: { message: "invalid" } });
@@ -26,7 +38,7 @@ describe("authenticated judge HTTP boundary", () => {
       participantIds: ["victim"], roomId: "abcdefgh" }));
     expect(response.status).toBe(200);
     expect(mocks.compose).toHaveBeenCalledWith("owner", payload.problemId, "valid");
-    expect(mocks.submit).toHaveBeenCalledWith("owner", { ...payload, action: "submit" });
+    expect(mocks.submit).toHaveBeenCalledWith("owner", { ...payload, action: "submit", roomId: "abcdefgh" });
   });
   it.each(["accepted", "Submit", "", null])("refuses invalid execution action %s before admission", async action => {
     expect((await POST(request({ ...payload, action }))).status).toBe(400);

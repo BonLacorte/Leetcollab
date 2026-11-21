@@ -93,7 +93,7 @@ References: [Supabase Google setup](https://supabase.com/docs/guides/auth/social
 
 ## Judge integration
 
-Both judge endpoints require `Authorization: Bearer <Supabase access token>`. The server verifies the token through Supabase Auth. `POST /api/judge/submissions` accepts `{ problemId, action: "run" | "submit", language: "java", sourceCode, idempotencyKey }`; use one UUID per click and reuse it for retries. Success returns `{ ok: true, submission, quota }`. Failures return `{ ok: false, error, quota?, fallback? }`. `GET /api/judge/status?problemId=<uuid>` returns availability, selected provider, quota, reset time and eligible fallback.
+Both judge endpoints require `Authorization: Bearer <Supabase access token>`. The server verifies the token through Supabase Auth. `POST /api/judge/submissions` accepts `{ problemId, action: "run" | "submit", language: "java", sourceCode, idempotencyKey, roomId? }`. Room clients supply the expected `roomId` on Submit. Use one UUID per click and reuse it for retries. Success returns `{ ok: true, submission, quota }`. Failures return `{ ok: false, error, quota?, fallback? }`. `GET /api/judge/status?problemId=<uuid>` returns availability, selected provider, quota, reset time and eligible fallback.
 
 After authentication, submission ingestion accepts at most 256 KiB of raw UTF-8 JSON, counted before full parsing regardless of `Content-Length`. An oversized body, malformed UTF-8/JSON, or malformed or oversized declared length returns HTTP 400 with `INVALID_REQUEST` before judge admission. This transport bound is separate from source and assembled-program limits.
 

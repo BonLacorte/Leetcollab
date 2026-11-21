@@ -7,11 +7,12 @@ import express from "express";
 import helmet from "helmet";
 import { createClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
-import { judgeParticipants } from "./judge-participants.js";
+import { judgeParticipants, waitForJudgeParticipants } from "./judge-participants.js";
 import { restoreRoomStates } from "./room-restore.js";
 import {
   chatSendSchema,
   codeUpdateSchema,
+  codeReplaceSchema,
   createRoomSchema,
   roomIdSchema,
   setMemberPermissionsSchema,
@@ -98,17 +99,21 @@ app.get("/judge/participants", async (request, response) => {
   const token = /^Bearer ([^\s]+)$/.exec(request.header("authorization") ?? "")?.[1];
   if (!token) return void response.status(401).json({ error: "Authentication required." });
   const parsed = judgeSubmissionRequestSchema.shape.problemId.safeParse(request.query.problemId);
-  if (!parsed.success) return void response.status(400).json({ error: "Invalid problem." });
+  const expectedRoom = judgeSubmissionRequestSchema.shape.roomId.safeParse(request.query.roomId);
+  if (!parsed.success || !expectedRoom.success) return void response.status(400).json({ error: "Invalid participation request." });
   try {
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data.user) return void response.status(401).json({ error: "Authentication required." });
-    // No awaits after reading room/presence: membership changes cannot interleave
-    // with this capture within this realtime process.
-    const room = activeRoomForUser(data.user.id);
-    const joined = io.sockets.adapter.rooms.get(room?.roomId ?? "");
-    const present = new Set((room?.members ?? []).filter(member =>
-      [...(socketIdsByUser.get(member.userId) ?? [])].some(id => joined?.has(id))).map(member => member.userId));
-    return void response.json(judgeParticipants(room, data.user.id, parsed.data, present));
+    const userId = data.user.id;
+    const snapshot = await waitForJudgeParticipants(() => {
+      const room = activeRoomForUser(userId);
+      const joined = io.sockets.adapter.rooms.get(room?.roomId ?? "");
+      const present = new Set((room?.members ?? []).filter(member =>
+        [...(socketIdsByUser.get(member.userId) ?? [])].some(id => joined?.has(id))).map(member => member.userId));
+      return judgeParticipants(room, userId, parsed.data, present, expectedRoom.data);
+    });
+    if (!snapshot) return void response.status(409).json({ error: "Reconnect to the current room and exercise before submitting." });
+    return void response.json(snapshot);
   } catch {
     return void response.status(503).json({ error: "Room participation unavailable." });
   }
@@ -126,13 +131,13 @@ app.post("/judge/refresh", express.json({ limit: "2kb" }), async (request, respo
     const client = createClient(supabaseUrl!, supabaseAnonKey!, {
       auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${token}` } },
     });
-    const { data, error } = await client.from("submissions")
-      .select("problem_id, execution_room_id, execution_action, judge_state, verdict, tests_total, tests_passed")
-      .eq("id", parsed.data).eq("user_id", identity.user.id).maybeSingle();
+    const { data, error } = await client.rpc("judge_refresh_recipients", { p_submission_id: parsed.data });
     if (error) throw error;
-    if (data?.execution_room_id && data.execution_action === "submit" && data.judge_state === "completed"
-      && data.verdict === "accepted" && data.tests_total > 0 && data.tests_passed === data.tests_total) {
-      io.to(data.execution_room_id).emit("practice:refresh", { problemId: data.problem_id });
+    for (const { user_id, room_id, problem_id } of data ?? []) {
+      const joined = io.sockets.adapter.rooms.get(room_id);
+      for (const socketId of socketIdsByUser.get(user_id) ?? []) {
+        if (joined?.has(socketId)) io.to(socketId).emit("practice:refresh", { problemId: problem_id });
+      }
     }
     return void response.status(202).json({ ok: true });
   } catch { return void response.status(503).json({ error: "Completion refresh unavailable." }); }
@@ -484,6 +489,23 @@ io.on("connection", (socket) => {
     if (!memberCan(room, socket.data.userId, "canEditCode")) return;
     room.code = parsed.data.code;
     socket.to(room.roomId).emit("code:updated", room.code);
+  });
+
+  socket.on("code:replace", (payload, callback) => {
+    if (typeof callback !== "function") return;
+    const parsed = codeReplaceSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid code replacement."));
+    const { roomId, problemId, expectedCode, code } = parsed.data;
+    const room = roomForMember(roomId, socket.data.userId);
+    if (!room || !socket.rooms.has(roomId) || !memberCan(room, socket.data.userId, "canEditCode")) {
+      return callback(failure("You must be connected with edit permission to replace shared code."));
+    }
+    if (room.problem?.id !== problemId || room.code !== expectedCode) {
+      return callback(failure("The shared exercise or code changed. Try again."));
+    }
+    room.code = code;
+    io.to(roomId).emit("code:updated", code);
+    callback(success(null));
   });
 
   socket.on("chat:send", (payload, callback) => {

@@ -38,7 +38,7 @@ export function getJudgeService(userId?: string, problemId?: string, accessToken
       evaluation,
       localTesting: localTestingEnabled(),
       quotaLimit: integerEnvironment("JUDGE_DAILY_LIMIT", 25),
-      ...(accessToken && userId ? { captureParticipants: () => captureSubmissionParticipants(accessToken, userId, problemId!) } : {}),
+      ...(accessToken && userId ? { captureParticipants: (roomId?: string) => captureSubmissionParticipants(accessToken, userId, problemId!, roomId) } : {}),
       ...(accessToken ? { notifyCompletion: (id: string) => notifyRoomCompletion(accessToken, id) } : {}),
       activeLimit: integerEnvironment("JUDGE_MAX_CONCURRENCY", 4),
       reservationSeconds: integerEnvironment("JUDGE_RESERVATION_SECONDS", 45),

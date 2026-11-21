@@ -97,6 +97,7 @@ export const judgeSubmissionRequestSchema = z.object({
   idempotencyKey: z.string().uuid(),
   // Old callers can run code, but must explicitly opt into Submit credit.
   action: z.enum(["run", "submit"]).default("run"),
+  roomId: roomCodeSchema.optional(),
 });
 
 export type JudgeSubmissionRequest = z.infer<typeof judgeSubmissionRequestSchema>;
@@ -292,6 +293,10 @@ export const createRoomSchema = z.object({
 export const roomIdSchema = z.object({ roomId: roomCodeSchema });
 export const setProblemSchema = roomIdSchema.extend({ problemId: z.string().uuid() });
 export const codeUpdateSchema = roomIdSchema.extend({ code: z.string().max(100_000) });
+export const codeReplaceSchema = codeUpdateSchema.extend({
+  problemId: z.string().uuid(),
+  expectedCode: codeUpdateSchema.shape.code,
+});
 export const chatSendSchema = roomIdSchema.extend({ body: z.string().trim().min(1).max(2_000) });
 export const whiteboardStrokeAddSchema = roomIdSchema.extend({ stroke: whiteboardStrokeInputSchema });
 export const whiteboardUndoSchema = roomIdSchema;
@@ -316,6 +321,7 @@ export interface ClientToServerEvents {
   "room:timer:pause": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "room:timer:reset": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "code:update": (payload: z.infer<typeof codeUpdateSchema>) => void;
+  "code:replace": (payload: z.infer<typeof codeReplaceSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "chat:send": (payload: z.infer<typeof chatSendSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "whiteboard:stroke:add": (
     payload: z.infer<typeof whiteboardStrokeAddSchema>,

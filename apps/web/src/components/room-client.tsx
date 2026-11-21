@@ -286,7 +286,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const canChat = isHost || currentMember?.permissions.canChat === true;
   const canChangeProblem = isHost || currentMember?.permissions.canChangeProblem === true;
   const draft = usePracticeDraft({ roomId, userId: session?.user.id, problem: room?.problem ?? null, code,
-    canEditCode, connected: socket?.connected ?? false, onCodeChange: updateCode });
+    canEditCode, connected: socket?.connected ?? false, onCodeChange: updateCode, onCodeReplace: replaceSharedCode });
   const filteredProblems = problemCatalog.filter((problem) => {
     const matchesDifficulty = difficultyFilter === "All" || problem.difficulty === difficultyFilter;
     const search = problemSearch.trim().toLowerCase();
@@ -315,6 +315,13 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (!canEditCode) return;
     replaceEditorCode(nextCode, true);
     socket?.emit("code:update", { roomId, code: nextCode });
+  }
+
+  async function replaceSharedCode(problemId: string, expectedCode: string, nextCode: string) {
+    if (!socket?.connected) throw new Error("Reconnect before replacing shared code.");
+    const response = await socket.timeout(3000).emitWithAck("code:replace", { roomId, problemId, expectedCode, code: nextCode });
+    if (!response.ok) throw new Error(response.error);
+    setCodeVersion(version => version + 1);
   }
 
   function sendMessage(event: FormEvent) {
@@ -635,6 +642,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       </section>
       <section className="editor-region">
         <EditorPanel
+          roomId={roomId}
           problemId={room.problem?.id ?? null}
           code={code}
           codeVersion={codeVersion}

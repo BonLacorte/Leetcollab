@@ -14,12 +14,14 @@ begin
       jsonb_build_object('username','intent_'||left(identity::text,20)));
   end loop;
   select id into strict problem from public.problems where slug='parcel-pair';
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,array[a],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
     a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
   attempt := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(a,attempt,'completed','accepted',3,3,1,'synthetic',null,null);
-  if exists(select 1 from public.verified_problem_solves where user_id=a) then
-    raise exception 'Accepted Run must not grant solved credit';
+  if exists(select 1 from public.verified_problem_solves where user_id=a)
+    or exists(select 1 from public.judge_submission_participants where submission_id=attempt)
+    or exists(select 1 from public.submissions where id=attempt and participants_captured_at is not null) then
+    raise exception 'Accepted Run must not store a snapshot or grant solved credit';
   end if;
   begin
     perform public.reserve_judge_execution('user','onlinecompiler','submit',null,array[a],now(),
@@ -64,7 +66,7 @@ begin
     raise exception 'Changed code must not reuse the execution key';
   exception when invalid_parameter_value then null; end;
 
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,array[a],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
     a,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
   perform public.complete_judge_submission(a,(result->>'submissionId')::uuid,'completed','accepted',3,3,1,'synthetic',null,null);
   if (select count(*) from public.verified_problem_solves where user_id=a)<>1 then
@@ -103,25 +105,25 @@ begin
     raise exception 'A shared reservation must charge its actor once toward normal usage';
   end if;
   for i in 2..25 loop
-    result := public.reserve_judge_execution('user','onlinecompiler','run',null,array[capped],now(),
+    result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
       capped,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
     if result->>'result'<>'reserved' then raise exception 'Personal execution % should reserve',i; end if;
     perform public.complete_judge_submission(capped,(result->>'submissionId')::uuid,'completed','accepted',3,3,1,'synthetic',null,null);
   end loop;
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,array[capped],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
     capped,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
   if result->>'result'<>'exhausted' or (result->>'used')::int<>25 then
     raise exception 'Personal execution 26 must be refused';
   end if;
   -- Aggregate account usage is now greater than 25; a different user still has
   -- their own full allowance, while the global provider concurrency stays bound.
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,array[fresh],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
     fresh,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,1,45);
   if result->>'result'<>'reserved' or (result->>'used')::int<>1 then
     raise exception 'One user must not spend another user allowance';
   end if;
   attempt := (result->>'submissionId')::uuid;
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,array[b],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
     b,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,1,45);
   if result->>'result'<>'busy' or (result->>'used')::int<>0 then
     raise exception 'Global concurrency must refuse peers without charging them';
@@ -139,9 +141,23 @@ begin
     or has_table_privilege('service_role','public.verified_problem_solves','insert') then
     raise exception 'Arbitrary recipient grants must not be exposed outside the completion function';
   end if;
+  if has_column_privilege('authenticated','public.verified_problem_solves','submission_id','select')
+    or has_column_privilege('authenticated','public.verified_problem_solves','credited_at','select') then
+    raise exception 'Client solved readback must omit private provenance';
+  end if;
+  perform set_config('request.jwt.claim.sub',a::text,true);
+  set local role authenticated;
+  select count(*) into credits from public.judge_refresh_recipients(accepted_submit) r where r.user_id in(a,b);
+  if credits<>2 or exists(select 1 from public.judge_refresh_recipients(accepted_submit) r where r.user_id=late) then
+    raise exception 'Refresh must target exactly the captured users';
+  end if;
+  reset role;
   perform set_config('request.jwt.claim.sub',b::text,true);
   set local role authenticated;
-  select count(*) into credits from public.verified_problem_solves;
+  select count(problem_id) into credits from public.verified_problem_solves;
+  if exists(select 1 from public.judge_refresh_recipients(accepted_submit)) then
+    raise exception 'Only the submission actor can trigger a refresh';
+  end if;
   if credits<>1 then raise exception 'RLS must expose only the current user credit'; end if;
   reset role;
 end $$;

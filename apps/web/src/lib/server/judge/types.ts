@@ -97,7 +97,7 @@ export interface JudgeRepository {
   }): Promise<Reservation>;
   hasSubmissionKey(userId: string, key: string): Promise<boolean>;
   getSubmission(userId: string, submissionId: string): Promise<StoredSubmission | null>;
-  complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota }>;
+  complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota; applied: boolean }>;
   exhaust(periodStart: string): Promise<JudgeQuota>;
 }
 

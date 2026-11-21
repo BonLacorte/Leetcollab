@@ -45,7 +45,7 @@ begin
 
   for count in 8..50 loop
     key := gen_random_uuid();
-    response := public.reserve_judge_execution('user', 'onlinecompiler', 'run', null, array[tester], now(),
+    response := public.reserve_judge_execution('user', 'onlinecompiler', 'run',null,null,null,
       tester, problem, key, 'java', 'class Solution {}', test_start, test_end, 50, 1, 45);
     if response->>'result' <> 'reserved' or (response->>'used')::integer <> count then
       raise exception 'Expected exactly one charge at execution %, got %', count, response;
@@ -54,19 +54,19 @@ begin
       'failed', 'runtime_error', 0, 3, 0, 'Synthetic failed attempt remains charged', null, null);
   end loop;
 
-  response := public.reserve_judge_execution('user', 'onlinecompiler', 'run', null, array[tester], now(),
+  response := public.reserve_judge_execution('user', 'onlinecompiler', 'run',null,null,null,
     tester, problem, key, 'java', 'class Solution {}', test_start, test_end, 50, 1, 45);
   if response->>'result' <> 'existing' or (response->>'used')::integer <> 50 then
     raise exception 'Duplicate consumed another personal execution: %', response;
   end if;
 
-  response := public.reserve_judge_execution('user', 'onlinecompiler', 'run', null, array[tester], now(),
+  response := public.reserve_judge_execution('user', 'onlinecompiler', 'run',null,null,null,
     tester, problem, gen_random_uuid(), 'java', 'class Solution {}', test_start, test_end, 50, 1, 45);
   if response->>'result' <> 'exhausted' or (response->>'used')::integer <> 50 then
     raise exception 'The actor must be refused execution 51: %', response;
   end if;
 
-  response := public.reserve_judge_execution('user', 'onlinecompiler', 'run', null, array[partner], now(),
+  response := public.reserve_judge_execution('user', 'onlinecompiler', 'run',null,null,null,
     partner, problem, gen_random_uuid(), 'java', 'class Solution {}', test_start, test_end, 50, 1, 45);
   if response->>'result' <> 'reserved' or (response->>'used')::integer <> 1 then
     raise exception 'The partner still has a separate allowance: %', response;

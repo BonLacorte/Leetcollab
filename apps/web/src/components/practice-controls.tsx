@@ -16,18 +16,19 @@ const reviewGrades = [
 
 type PracticeControlsProps = {
   problemId: string;
+  roomId?: string;
   code: string;
   codeVersion?: number;
   onExecutionChange: (execution: PracticeExecution) => void;
 };
 
-export function PracticeControls({ problemId, code, codeVersion = 0, onExecutionChange }: PracticeControlsProps) {
+export function PracticeControls({ problemId, roomId, code, codeVersion = 0, onExecutionChange }: PracticeControlsProps) {
   const { session } = useAuth();
   if (!session) return null;
-  return <SessionPracticeControls key={`${problemId}:${session.user.id}`} problemId={problemId} code={code} codeVersion={codeVersion} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
+  return <SessionPracticeControls key={`${problemId}:${session.user.id}`} problemId={problemId} roomId={roomId} code={code} codeVersion={codeVersion} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
 }
 
-function SessionPracticeControls({ problemId, code, codeVersion = 0, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
+function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
   const socket = useSocket();
   const mounted = useRef(false);
   const statusGeneration = useRef(0);
@@ -67,9 +68,9 @@ function SessionPracticeControls({ problemId, code, codeVersion = 0, token, user
     try {
       // Protected credits reference real accepted Submits, including room credit.
       const { data, error } = await supabase.from("verified_problem_solves")
-        .select("submission_id").eq("user_id", userId).eq("problem_id", problemId);
+        .select("problem_id").eq("user_id", userId).eq("problem_id", problemId);
       if (error) throw error;
-      const solved = (data ?? []).some(row => typeof row.submission_id === "string");
+      const solved = (data ?? []).some(row => row.problem_id === problemId);
       if (mounted.current && generation === completionGeneration.current) setCompletion(solved ? "solved" : "unsolved");
     } catch {
       if (mounted.current && generation === completionGeneration.current) setCompletion("unavailable");
@@ -117,7 +118,7 @@ function SessionPracticeControls({ problemId, code, codeVersion = 0, token, user
       const response = await fetch("/api/judge/submissions", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId, action: action === "Submit" ? "submit" : "run", sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ problemId, action: action === "Submit" ? "submit" : "run", ...(action === "Submit" && roomId ? { roomId } : {}), sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
       });
       const result = judgeSubmissionResponseSchema.parse(await response.json());
       if (result.ok && result.submission.problemId !== problemId) throw new Error("Submission belongs to another exercise.");

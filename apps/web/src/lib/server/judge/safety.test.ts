@@ -82,3 +82,17 @@ describe("Java submission boundary", () => {
     expect(validateJavaSource(`import java.util.Stack;\n${source}`)).not.toBeNull();
   });
 });
+
+it.each(["import java./* note */util.Stack;", "import/* note */java.math.BigInteger;", "import java.// note\nutil.Stack;"])(
+  "recognizes comments as whitespace in supported imports: %s", declaration => {
+    const source = declaration + "\nclass Solution {}";
+    expect(validateJavaSource(source)).toBeNull();
+    expect(buildJavaProgram(source, "class Main {}")).toBe(source + "\n\nclass Main {}\n");
+  },
+);
+
+it.each(["import/* note */java.time.LocalDate;", "import/* note */static java.util.Collections.sort;"])(
+  "rejects unsupported imports across comment boundaries: %s", declaration => {
+    expect(validateJavaSource(declaration + "\nclass Solution {}")).toContain("Only non-static imports");
+  },
+);

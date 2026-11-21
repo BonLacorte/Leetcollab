@@ -18,6 +18,7 @@ import { clearCompilerDiagnosticsOnEdit, editorDiagnostics } from "./editor-diag
 
 type EditorPanelProps = {
   problemId: string | null;
+  roomId?: string;
   code: string;
   codeVersion: number;
   execution: PracticeExecution | null;
@@ -46,6 +47,7 @@ function formatDateTime(value: string | null): string {
 
 export function EditorPanel({
   problemId,
+  roomId,
   code,
   codeVersion,
   execution,
@@ -135,7 +137,7 @@ export function EditorPanel({
       </div>
       <span className="sr-only" role="status">{maximized ? "Code card maximized. Press Escape to restore the workspace." : folded ? "Code card folded." : ""}</span>
       <div className="editor-content" id={`${tooltipId}-content`} hidden={folded}>
-        {problemId && <PracticeControls problemId={problemId} code={code} codeVersion={codeVersion} onExecutionChange={value => {
+        {problemId && <PracticeControls problemId={problemId} roomId={roomId} code={code} codeVersion={codeVersion} onExecutionChange={value => {
           if (value.state === "running") setViewMode(current => current === "maximized" ? "normal" : current);
           onExecutionChange(value);
         }} />}

@@ -166,8 +166,10 @@ it("permits a new period row only with an explicit zero baseline and limit two",
   quotaRow = null;
   vi.stubEnv("JUDGE_EVALUATION_BASELINE_USED", "0");
   vi.stubEnv("JUDGE_DAILY_LIMIT", "2");
-  db.rpc.mockResolvedValue({ error: null, data: { result: "reserved", submissionId: submission,
-    used: 1, limit: 2, active: 1, resetAt: periodEnd } });
+  db.rpc.mockImplementation(async name => ({ error: null, data: {
+    result: name === "complete_judge_submission" ? "completed" : "reserved", submissionId: submission,
+    used: 1, limit: 2, active: 1, resetAt: periodEnd,
+  } }));
   expect((await submit()).status).toBe(200);
   expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({ p_quota_limit: 2 }));
 });
@@ -185,7 +187,8 @@ it("rechecks after a delayed quota read before any quota mutation", async () => 
 it.each([settings.JUDGE_EVALUATION_EXPIRES_AT, periodEnd])("retains a queued reservation but sends nothing when admission ends at %s", async time => {
   db.rpc.mockImplementation(async name => {
     if (name === "reserve_judge_execution") vi.setSystemTime(new Date(time));
-    return { data: { result: "reserved", submissionId: submission, used: 8, active: 1, limit: 9, resetAt: periodEnd }, error: null };
+    return { data: { result: name === "complete_judge_submission" ? "completed" : "reserved",
+      submissionId: submission, used: 8, active: name === "complete_judge_submission" ? 0 : 1, limit: 9, resetAt: periodEnd }, error: null };
   });
   expect((await submit()).status).toBe(503);
   expect(network).not.toHaveBeenCalled();
@@ -255,8 +258,10 @@ it("allows the maximum valid baseline 18 with the hard ceiling 20", async () => 
   vi.stubEnv("JUDGE_EVALUATION_BASELINE_USED", "18");
   vi.stubEnv("JUDGE_DAILY_LIMIT", "20");
   quotaRow = { used: 18, quota_limit: 20, active: 0, period_end: periodEnd };
-  db.rpc.mockResolvedValue({ error: null, data: { result: "reserved", submissionId: submission,
-    used: 19, limit: 20, active: 1, resetAt: periodEnd } });
+  db.rpc.mockImplementation(async name => ({ error: null, data: {
+    result: name === "complete_judge_submission" ? "completed" : "reserved", submissionId: submission,
+    used: 19, limit: 20, active: 1, resetAt: periodEnd,
+  } }));
   expect((await submit()).status).toBe(200);
   expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({ p_quota_limit: 20 }));
   expect(network).toHaveBeenCalledTimes(1);
