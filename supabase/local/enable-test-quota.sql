@@ -13,6 +13,6 @@ $$;
 
 update public.judge_user_quota_periods
 set quota_limit = 50
-where period_start = date_trunc('day', now() + interval '5 minutes') - interval '5 minutes';
+where period_start = (date_trunc('day', (now() at time zone 'UTC') + interval '5 minutes') - interval '5 minutes') at time zone 'UTC';
 
 commit;

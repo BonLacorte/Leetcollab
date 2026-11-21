@@ -483,14 +483,21 @@ io.on("connection", (socket) => {
     callback(success(room));
   });
 
-  socket.on("code:update", (payload) => {
+  socket.on("code:update", (payload, callback) => {
+    const acknowledge = typeof callback === "function" ? callback : undefined;
     const parsed = codeUpdateSchema.safeParse(payload);
-    if (!parsed.success) return;
-    const room = roomForMember(parsed.data.roomId, socket.data.userId);
-    if (!room) return;
-    if (!memberCan(room, socket.data.userId, "canEditCode")) return;
-    room.code = parsed.data.code;
-    socket.to(room.roomId).emit("code:updated", room.code);
+    if (!parsed.success) return acknowledge?.(failure("Invalid code update."));
+    const { roomId, problemId, code } = parsed.data;
+    const room = roomForMember(roomId, socket.data.userId);
+    if (!room || !socket.rooms.has(roomId) || !memberCan(room, socket.data.userId, "canEditCode")) {
+      return acknowledge?.(failure("You must be connected with edit permission to update shared code."));
+    }
+    if (problemId !== undefined && (room.problem?.id ?? null) !== problemId) {
+      return acknowledge?.(failure("The shared exercise changed."));
+    }
+    room.code = code;
+    socket.to(roomId).emit("code:updated", code);
+    acknowledge?.(success(null));
   });
 
   socket.on("code:replace", (payload, callback) => {

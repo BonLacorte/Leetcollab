@@ -8,14 +8,10 @@ do $$ begin
   end if;
 end $$;
 
-alter table public.judge_quota_periods drop constraint judge_quota_periods_quota_limit_check,
-  add constraint judge_quota_periods_quota_limit_check check (quota_limit between 1 and 50);
 alter table public.judge_quota_periods add column provider_exhausted boolean not null default false;
 alter table public.submissions
   add column execution_action text not null default 'legacy' check (execution_action in ('legacy','run','submit')),
   add column quota_scope text not null default 'shared' check (quota_scope in ('shared','user'));
--- Old server callers can execute, but cannot implicitly manufacture Submit credit.
-alter table public.submissions alter column execution_action set default 'run';
 
 create table public.judge_user_quota_periods (
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -61,9 +57,9 @@ select distinct user_id,problem_id from public.submissions
 where verification='leetcollab' and judge_state='completed' and verdict='accepted'
   and tests_total > 0 and tests_passed=tests_total;
 insert into public.judge_user_quota_periods(user_id,period_start,period_end,quota_limit,used)
-select s.user_id,q.period_start,q.period_end,greatest(25,q.quota_limit),count(*)::integer
+select s.user_id,q.period_start,q.period_end,25,count(*)::integer
 from public.submissions s join public.judge_quota_periods q on q.period_start=s.quota_period_start
-where s.verification='leetcollab' group by s.user_id,q.period_start,q.period_end,q.quota_limit;
+where s.verification='leetcollab' group by s.user_id,q.period_start,q.period_end;
 
 create function public.charge_personal_judge_quota()
 returns trigger language plpgsql security definer set search_path=public as $$
@@ -127,13 +123,7 @@ begin
   end if;
   select * into attempt from public.submissions
     where user_id=p_user_id and idempotency_key=p_idempotency_key and execution_action='legacy';
-  if found then
-    if p_action <> 'run' or attempt.verification <> 'leetcollab'
-      or attempt.judge_state not in ('completed','failed')
-      or attempt.runner is distinct from p_runner or attempt.problem_id is distinct from p_problem_id
-      or attempt.language is distinct from p_language or attempt.source_code is distinct from p_source_code then
-      raise exception 'idempotency key belongs to another execution' using errcode='22023';
-    end if;
+  if found and attempt.judge_state<>'reserved' then
     if p_scope='shared' then
       select * into account from public.judge_quota_periods where period_start=p_period_start;
       result := jsonb_build_object('used',coalesce(account.used,0),
@@ -147,9 +137,8 @@ begin
         'limit',least(coalesce(personal.quota_limit,p_quota_limit),p_quota_limit),'active',active_count,
         'resetAt',coalesce(personal.period_end,p_period_end));
     end if;
-    return result || jsonb_build_object('result','existing','submissionId',attempt.id);
-  end if;
-  if p_scope='shared' then
+    result := result || jsonb_build_object('result','existing','submissionId',attempt.id);
+  elsif p_scope='shared' then
     -- Restricted evaluation retains the existing account budget and admission.
     result := public.reserve_judge_submission_for_runner(p_runner,p_user_id,p_problem_id,p_idempotency_key,
       p_language,p_source_code,p_period_start,p_period_end,p_quota_limit,p_active_limit,p_reservation_seconds);
@@ -211,9 +200,11 @@ begin
     end if;
   elsif result->>'result' in ('existing','in_progress') then
     select * into strict attempt from public.submissions where id=(result->>'submissionId')::uuid;
-    if attempt.runner <> p_runner or attempt.problem_id <> p_problem_id or attempt.source_code <> p_source_code
-      or attempt.execution_action <> p_action
-      or attempt.quota_scope <> p_scope then
+    if attempt.verification <> 'leetcollab'
+      or attempt.runner is distinct from p_runner or attempt.problem_id is distinct from p_problem_id
+      or attempt.language is distinct from p_language or attempt.source_code is distinct from p_source_code
+      or (attempt.execution_action='legacy' and p_action<>'run')
+      or (attempt.execution_action<>'legacy' and (attempt.execution_action<>p_action or attempt.quota_scope<>p_scope)) then
       raise exception 'idempotency key belongs to another execution' using errcode='22023';
     end if;
   end if;

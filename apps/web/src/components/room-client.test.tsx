@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import type { RoomState } from "@leetcollab/contracts";
+import type { Acknowledgement, RoomState } from "@leetcollab/contracts";
 import { RoomClient } from "./room-client";
 
 const mocks = vi.hoisted(() => {
@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
       connected: true,
       on: vi.fn(),
       off: vi.fn(),
+      timeout() { return this; },
       emit: vi.fn((event: string, _payload: unknown, callback: (response: { ok: true; data: RoomState }) => void) => {
         if (event === "room:join") callback({ ok: true, data: room });
       }),
@@ -41,7 +42,7 @@ vi.mock("../lib/supabase", () => ({ supabase: { from: () => {
     then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve) };
   return query;
 } } }));
-vi.mock("@uiw/react-codemirror", async importOriginal => ({ ...await importOriginal<typeof import("@uiw/react-codemirror")>(), default: ({ value }: { value: string }) => <textarea readOnly value={value} /> }));
+vi.mock("@uiw/react-codemirror", async importOriginal => ({ ...await importOriginal<typeof import("@uiw/react-codemirror")>(), default: ({ value, onChange, readOnly }: { value: string; onChange: (value: string) => void; readOnly: boolean }) => <textarea aria-label="Shared code" readOnly={readOnly} value={value} onChange={event => onChange(event.target.value)} /> }));
 
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
@@ -102,4 +103,47 @@ it("keeps a room with no selected problem usable without judge or review control
   expect(buttons).not.toContain("Mark solved");
   expect(container.querySelector('a[aria-label="LeetCollab home"]')?.getAttribute("href")).toBe("/");
   expect(buttons).not.toContain("again");
+});
+
+it("keeps an optimistic edit when a peer replacement arrives before its acknowledgement", async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+  mocks.socket.on.mockClear();
+  mocks.socket.emit.mockClear();
+  mocks.room.problem = {
+    id: "33333333-3333-4333-8333-333333333333", slug: "test", title: "Test", category: "Arrays",
+    difficulty: "Easy", sortOrder: 1, statement: "", starterCode: "original", examples: [], constraints: [],
+  };
+  mocks.room.code = "original";
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+    available: false, used: 0, limit: 25, remaining: 25, active: 0,
+    resetAt: new Date(Date.now() + 3_600_000).toISOString(), fallback: null, unavailableReason: "provider_unconfigured",
+  }))));
+  const container = document.createElement("div");
+  document.body.append(container);
+  await act(async () => { root = createRoot(container); root.render(<RoomClient roomId="abcdefgh" />); });
+  const editor = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Shared code"]')!;
+  const type = async (code: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(editor, code);
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const receive = mocks.socket.on.mock.calls.find(([event]) => event === "code:updated")![1] as (code: string) => void;
+  await type("my first edit");
+  await type("my latest edit");
+  expect(editor.value).toBe("my latest edit");
+  await act(async () => receive("peer replacement"));
+  expect(editor.value).toBe("my latest edit");
+  const acknowledgements = mocks.socket.emit.mock.calls.filter(([event]) => event === "code:update")
+    .map(([, , callback]) => callback as unknown as (error: Error | null, response: Acknowledgement<null>) => void);
+  expect(acknowledgements).toHaveLength(2);
+  await act(async () => acknowledgements[0](null, { ok: true, data: null }));
+  expect(editor.value).toBe("my latest edit");
+  await act(async () => acknowledgements[1](null, { ok: true, data: null }));
+  expect(editor.value).toBe("my latest edit");
+  await act(async () => receive("later peer edit"));
+  expect(editor.value).toBe("later peer edit");
+  await type("rejected local edit");
+  await act(async () => receive("authoritative code"));
+  const rejected = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
+  await act(async () => rejected(null, { ok: false, error: "Edit permission changed." }));
+  expect(editor.value).toBe("authoritative code");
 });

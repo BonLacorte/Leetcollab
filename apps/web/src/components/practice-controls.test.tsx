@@ -65,10 +65,10 @@ const quota = { available: true, used: 0, limit: 20, remaining: 20, active: 0, r
 const button = (label: string) => renderer.root.findAllByType("button").find(node => node.children.includes(label))!;
 const output = () => JSON.stringify(renderer.toJSON());
 const response = (body: unknown) => new Response(JSON.stringify(body));
-async function renderControls() {
+async function renderControls(roomId?: string) {
   function Harness() {
     const [execution, setExecution] = useState<PracticeExecution | null>(null);
-    return <><PracticeControls problemId="11111111-1111-4111-8111-111111111111" code="class Solution {}" onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
+    return <><PracticeControls problemId="11111111-1111-4111-8111-111111111111" roomId={roomId} code="class Solution {}" onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
   }
   await act(async () => { renderer = create(<Harness />); });
 }
@@ -135,6 +135,15 @@ it.each(["Run", "Submit"])("%s sends its action to the authenticated judge and r
     problemId: "11111111-1111-4111-8111-111111111111", action: label.toLowerCase(), sourceCode: "class Solution {}", language: "java", idempotencyKey: expect.any(String),
   });
   expect(renderer.root.findByType("h2").children).toEqual(["Accepted"]);
+});
+
+it.each(["user", "shared"])("sends the room ID on Submit with a %s allowance", async quotaScope => {
+  const fetch = vi.fn().mockResolvedValue(response({ ...quota, quotaScope }));
+  vi.stubGlobal("fetch", fetch);
+  await renderControls("abcdefgh");
+  await act(async () => { await button("Submit").props.onClick(); });
+  const [, options] = fetch.mock.calls.find(([, options]) => options?.method === "POST")!;
+  expect(JSON.parse(options.body)).toMatchObject({ action: "submit", roomId: "abcdefgh" });
 });
 
 it("does not infer completion from an accepted response without trusted persisted evidence", async () => {

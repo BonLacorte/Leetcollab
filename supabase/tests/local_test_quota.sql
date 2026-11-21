@@ -1,8 +1,9 @@
 -- Run only in a fresh disposable database after all migrations.
 \set ON_ERROR_STOP on
+set time zone 'Asia/Manila';
 
 select gen_random_uuid() as tester, gen_random_uuid() as partner,
-  date_trunc('day', now() + interval '5 minutes') - interval '5 minutes' as period_start
+  date_bin(interval '1 day', now(), timestamptz '2000-01-01 23:55+00') as period_start
 \gset
 
 insert into auth.users(id, email, raw_user_meta_data)
@@ -37,6 +38,11 @@ begin
     where period_start = test_start and used = 7 and quota_limit = 20 and active = 0) then
     raise exception 'Local opt-in changed the shared ledger or limit';
   end if;
+
+  begin
+    update public.judge_quota_periods set quota_limit=50 where period_start=test_start;
+    raise exception 'A shared quota period must reject the local personal limit';
+  exception when check_violation then null; end;
 
   response := public.get_user_judge_quota_status(tester, test_start, test_end, 50);
   if (response->>'used')::integer <> 7 or (response->>'limit')::integer <> 50 then

@@ -101,7 +101,7 @@ Fixtures, quota mutation and trusted verdict writes are server-only. Personal su
 
 Normal allowance is reserved atomically per authenticated actor before any provider request, with a default and ceiling of 25 per daily period. The authorized local opt-in permits 50. The shared account ledger still bounds global provider concurrency and records aggregate usage; a confirmed provider exhaustion still stops all callers. Restricted evaluation retains its pinned shared budget and existing 20-run hard ceiling. Lowering the configured daily limit preserves consumed usage, even when it exceeds the new limit; remaining credits then stay at zero until reset. JDoodle documents a reset at 23:55 UTC. Reservations are never refunded after an ambiguous provider failure, since a request might have consumed a credit. Use a dedicated provider credential for this application, with no other callers, to keep this accounting authoritative. Never automatically retry provider calls. Exhaustion disables execution and exposes the reset time. Original exercises wait for reset. A source destination may be configured only after it is verified to judge the same exercise; external results are never LeetCollab verified. External-result recording is retired: the retained table and RPC are inaccessible to application roles, including service_role; fallback is a link only.
 
-See [execution intent and room credit](execution-credit.md) for captured membership, permissions, migration and state-preserving realtime handoff.
+See [execution intent and room credit](execution-credit.md) for captured membership, permissions, migration and the fresh-room realtime restart.
 
 ## Provider capability gate
 

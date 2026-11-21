@@ -190,7 +190,7 @@ Normal access uses a personal application cap of 25 attempts/day, resetting at
 23:55 UTC, across JDoodle and OnlineCompiler. Explicit authorized local testing
 can use 50/user; restricted evaluation keeps its pinned shared cap of at most 20.
 Apply `202611180002_execution_intent_and_credit.sql` before enabling those normal
-semantics, following its [migration handoff](execution-credit.md#local-migration-and-restart-handoff).
+semantics, following its [migration and restart steps](execution-credit.md#migration-and-restart).
 The global account ledger still bounds concurrent provider requests. This is an
 application limit, not OnlineCompiler's monthly reset or an upgrade to 100,000
 application attempts. Existing consumed usage is preserved. Failed or ambiguous

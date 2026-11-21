@@ -118,6 +118,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   useEffect(() => { setExecution(null); }, [executionScope]);
   const [code, setCode] = useState("");
   const codeRef = useRef("");
+  const sharedCode = useRef<{ roomId: string; problemId: string | null; code: string; pendingEdit: symbol | null } | null>(null);
   const [codeVersion, setCodeVersion] = useState(0);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("Connecting to room…");
@@ -205,11 +206,15 @@ export function RoomClient({ roomId }: { roomId: string }) {
   useEffect(() => {
     if (!socket) return;
     const handleState = (state: RoomState) => {
+      const problemId = state.problem?.id ?? null;
+      if (sharedCode.current?.roomId !== state.roomId || sharedCode.current.problemId !== problemId) {
+        sharedCode.current = { roomId: state.roomId, problemId, code: state.code, pendingEdit: null };
+      }
       setRoom(state);
-      replaceEditorCode(state.code);
+      receiveEditorCode(state.code);
       setStatus("");
     };
-    const handleCode = (nextCode: string) => replaceEditorCode(nextCode);
+    const handleCode = (nextCode: string) => receiveEditorCode(nextCode);
     const handleMessage = (nextMessage: RoomState["messages"][number]) => setRoom((current) => current ? { ...current, messages: [...current.messages, nextMessage] } : current);
     const handleStrokeAdded = (stroke: WhiteboardStroke) => {
       setRoom((current) => {
@@ -252,6 +257,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       });
     };
     const handleDisconnect = () => {
+      sharedCode.current = null;
       setStatus("Connection interrupted. Reconnecting...");
     };
 
@@ -267,6 +273,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (socket.connected) joinRoom();
 
     return () => {
+      sharedCode.current = null;
       socket.off("room:state", handleState);
       socket.off("code:updated", handleCode);
       socket.off("chat:message", handleMessage);
@@ -311,19 +318,40 @@ export function RoomClient({ roomId }: { roomId: string }) {
     setCode(nextCode);
   }
 
+  function receiveEditorCode(nextCode: string, invalidate = false) {
+    const shared = sharedCode.current;
+    if (!shared) return;
+    shared.code = nextCode;
+    if (!shared.pendingEdit) replaceEditorCode(nextCode, invalidate);
+  }
+
   function updateCode(nextCode: string) {
     if (!canEditCode) return;
     replaceEditorCode(nextCode, true);
-    socket?.emit("code:update", { roomId, code: nextCode });
+    const shared = sharedCode.current;
+    if (!socket?.connected || !shared || shared.roomId !== roomId || shared.problemId !== (room?.problem?.id ?? null)) return;
+    const edit = Symbol();
+    shared.pendingEdit = edit;
+    socket.timeout(3000).emit("code:update", { roomId, problemId: shared.problemId, code: nextCode }, (error, response) => {
+      if (sharedCode.current !== shared) return;
+      if (!error && response.ok) shared.code = nextCode;
+      if (shared.pendingEdit !== edit) return;
+      shared.pendingEdit = null;
+      replaceEditorCode(shared.code);
+    });
   }
 
   async function replaceSharedCode(problemId: string, expectedCode: string, nextCode: string) {
-    if (!socket?.connected) throw new Error("Reconnect before replacing shared code.");
+    const shared = sharedCode.current;
+    if (!socket?.connected || !shared || shared.roomId !== roomId || shared.problemId !== problemId) {
+      throw new Error("Reconnect before replacing shared code.");
+    }
     await new Promise<void>((resolve, reject) => {
       socket.timeout(3000).emit("code:replace", { roomId, problemId, expectedCode, code: nextCode }, (error, response) => {
         if (error) return reject(error);
         if (!response.ok) return reject(new Error(response.error));
-        replaceEditorCode(nextCode, true);
+        if (sharedCode.current !== shared) return reject(new Error("The shared exercise changed."));
+        receiveEditorCode(nextCode, true);
         resolve();
       });
     });
@@ -656,6 +684,9 @@ export function RoomClient({ roomId }: { roomId: string }) {
           progress={draft.progress}
           progressStatus={draft.status}
           conflictingDraft={draft.conflictingDraft}
+          waitingForDraftWrite={draft.waitingForDraftWrite}
+          onRecoverConflict={draft.recoverConflict}
+          onDiscardConflict={draft.discardConflict}
           isProgressLoading={draft.loading || draft.saving}
           isRetrievingSubmission={draft.retrieving}
           connected={socket?.connected ?? false}

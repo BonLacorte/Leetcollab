@@ -253,8 +253,16 @@ it("warns about a stale save without replacing the unsaved editor text", async (
   expect(latest.progress?.draftCode).toBe("previous draft");
   mocks.read.mockResolvedValue({ data: { ...row("newer tab draft"), last_saved_at: "2026-11-18T03:01:00.000Z" }, error: null });
   await act(async () => latest.restoreDraft());
-  expect(input.code).toBe("newer tab draft");
+  expect(input.code).toBe("my unsaved edit");
   expect(latest.conflictingDraft).toBe("my unsaved edit");
+  mocks.acknowledge.mockRejectedValueOnce(new Error("replacement rejected"));
+  await act(async () => latest.recoverConflict());
+  expect(latest.conflictingDraft).toBe("my unsaved edit");
+  await act(async () => latest.recoverConflict());
+  expect(latest.conflictingDraft).toBeNull();
+  expect(latest.progress?.draftCode).toBe("newer tab draft");
+  await advance();
+  expect(mocks.save).toHaveBeenCalledTimes(1);
 });
 
 it("preserves a navigation save conflict privately when revisiting the exercise", async () => {
@@ -270,8 +278,22 @@ it("preserves a navigation save conflict privately when revisiting the exercise"
   expect(latest.progress?.draftCode).toBe("newer tab draft");
   expect(latest.conflictingDraft).toBe("unsaved first-tab edit");
   expect(input.code).toBe(problem.starterCode);
+  await act(async () => {
+    latest.editCode("second unsaved edit");
+    await latest.resetCode();
+    await latest.retrieveSubmission();
+  });
+  expect(latest.conflictingDraft).toBe("unsaved first-tab edit");
+  expect(input.code).toBe(problem.starterCode);
+  expect(mocks.acknowledge).not.toHaveBeenCalled();
   await advance();
   expect(mocks.save).toHaveBeenCalledTimes(1);
+  await act(async () => latest.discardConflict());
+  expect(latest.conflictingDraft).toBeNull();
+  expect(input.code).toBe(problem.starterCode);
+  mocks.read.mockResolvedValue({ data: { ...row("latest saved draft"), last_saved_at: "2026-11-18T03:02:00.000Z" }, error: null });
+  await act(async () => latest.restoreDraft());
+  expect(input.code).toBe("latest saved draft");
 });
 
 it("reports a save failure and retries dirty content at the next interval", async () => {
@@ -302,7 +324,7 @@ it("waits for a navigation save before reading that exercise again", async () =>
   expect(latest.progress?.draftCode).toBe("latest A edit");
 });
 
-it("waits for both earlier navigation saves before restoring on a third visit", async () => {
+it("waits for earlier saves before enabling edits on a revisit", async () => {
   const pending: Array<() => void> = [];
   let stored = row("previous draft");
   mocks.read.mockImplementation(async () => ({ data: stored, error: null }));
@@ -317,19 +339,19 @@ it("waits for both earlier navigation saves before restoring on a third visit", 
   await act(async () => latest.editCode("first visit departure"));
   await act(async () => change({ problem: second, code: second.starterCode }));
   await act(async () => change({ problem, code: problem.starterCode }));
-  await act(async () => latest.editCode("second visit departure"));
-  await act(async () => change({ problem: second, code: second.starterCode }));
+  await act(async () => latest.editCode("premature edit"));
+  expect(latest.waitingForDraftWrite).toBe(true);
+  expect(input.code).toBe(problem.starterCode);
   await act(async () => pending[0]());
   expect(pending).toHaveLength(2);
-  const readsBeforeReturn = mocks.read.mock.calls.length;
-  await act(async () => change({ problem, code: problem.starterCode }));
+  expect(latest.waitingForDraftWrite).toBe(true);
   await act(async () => pending[1]());
-  expect(pending).toHaveLength(3);
-  expect(mocks.read).toHaveBeenCalledTimes(readsBeforeReturn + 1);
-  expect(latest.loading).toBe(true);
+  expect(latest.waitingForDraftWrite).toBe(false);
+  expect(latest.progress?.draftCode).toBe("first visit departure");
+  await act(async () => latest.editCode("edit after previous save"));
+  expect(input.code).toBe("edit after previous save");
+  await advance();
   await act(async () => pending[2]());
-  expect(latest.progress?.draftCode).toBe("second visit departure");
-  expect(input.code).toBe(problem.starterCode);
 });
 
 it("keeps an intentionally empty saved draft private", async () => {

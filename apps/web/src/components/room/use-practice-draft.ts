@@ -45,7 +45,7 @@ export function usePracticeDraft(options: Options) {
   // without accidentally saving the next exercise's code under the old ID.
   const context = useMemo(() => ({
     ...options, revision: 0, ready: false, lastSaved: null as string | null, lastSavedAt: null as string | null, draftEdit: null as string | null,
-    retrieving: false, active: false, loading: true,
+    retrieving: false, active: false, loading: true, waitingForDraftWrite: false,
   }), [scope]); // The remaining fields track current values below, without restarting the timer.
   useLayoutEffect(() => {
     if (context.code !== code) context.revision += 1;
@@ -75,7 +75,7 @@ export function usePracticeDraft(options: Options) {
         await previousSave;
         await read;
         const savedCode = context.draftEdit;
-        if (!context.ready || savedCode === null || savedCode === context.lastSaved) return;
+        if (!context.ready || conflictingDrafts.has(persistenceScope) || savedCode === null || savedCode === context.lastSaved) return;
         updateCurrent({ saving: true, status: "Saving draft…" });
         try {
           const { data, error } = await supabase.rpc("save_practice_draft", {
@@ -84,11 +84,11 @@ export function usePracticeDraft(options: Options) {
           if (error) throw error;
           if (!data) {
             conflictingDrafts.set(persistenceScope, context.draftEdit ?? savedCode);
+            context.draftEdit = null;
             updateCurrent({ status: "Your saved draft changed in another tab. This edit was not saved." });
             return;
           }
           const row = data as ProgressRow;
-          if (conflictingDrafts.get(persistenceScope) === savedCode) conflictingDrafts.delete(persistenceScope);
           context.lastSaved = savedCode;
           context.lastSavedAt = row.last_saved_at;
           updateCurrent({ progress: progressFromRow(row), status: "Draft autosaved." });
@@ -101,6 +101,7 @@ export function usePracticeDraft(options: Options) {
       if (pendingDraftWrites.get(persistenceScope) === currentWrite) pendingDraftWrites.delete(persistenceScope);
     }
     const previousWrite = pendingDraftWrites.get(persistenceScope);
+    context.waitingForDraftWrite = Boolean(previousWrite);
     const read = (async () => {
       try {
         await previousWrite;
@@ -112,7 +113,11 @@ export function usePracticeDraft(options: Options) {
         updateCurrent({ progress: row ? progressFromRow(row) : null, status: "Autosaves every 10 minutes when code changes." });
       } catch {
         updateCurrent({ status: "Could not load your saved draft. Autosave is paused to protect it. Reopen the room to retry." });
-      } finally { if (active) context.loading = false; updateCurrent({ loading: false }); }
+      } finally {
+        context.waitingForDraftWrite = false;
+        if (active) context.loading = false;
+        updateCurrent({ loading: false });
+      }
     })();
     const timer = setInterval(() => { if (!context.retrieving) void save(); }, autosaveMs);
     return () => {
@@ -126,7 +131,8 @@ export function usePracticeDraft(options: Options) {
   }, [context, scope, persistenceScope, userId, problemId]);
 
   function editCode(nextCode: string) {
-    if (!context.active || !context.canEditCode || context.retrieving || nextCode === context.code) return;
+    if (!context.active || !context.canEditCode || context.retrieving || context.waitingForDraftWrite
+      || conflictingDrafts.has(persistenceScope) || nextCode === context.code) return;
     context.draftEdit = nextCode;
     context.revision += 1;
     context.code = nextCode;
@@ -159,11 +165,20 @@ export function usePracticeDraft(options: Options) {
     }
   }
 
+  function applySavedProgress(row: ProgressRow | null) {
+    context.lastSaved = javaDraft(row);
+    context.lastSavedAt = row?.last_saved_at ?? null;
+    context.ready = true;
+    context.draftEdit = null;
+    update({ progress: row ? progressFromRow(row) : null });
+  }
+
   function restoreDraft() {
-    if (!userId || !problemId || (context.lastSaved === null && !conflictingDrafts.has(persistenceScope))) return;
-    let row: ProgressRow | null;
+    if (!userId || !problemId || context.lastSaved === null || conflictingDrafts.has(persistenceScope)) return;
+    let row: ProgressRow | null = null;
     return replaceCode(async () => {
       await pendingDraftWrites.get(persistenceScope);
+      if (conflictingDrafts.has(persistenceScope)) throw new Error("Resolve the unsaved draft first.");
       row = await readProgress(userId, problemId);
       return javaDraft(row);
     }, "Saved draft restored into the shared editor.", "No saved Java draft found for this exercise.", () => {
@@ -172,21 +187,49 @@ export function usePracticeDraft(options: Options) {
         && context.lastSavedAt !== row?.last_saved_at) {
         conflictingDrafts.set(persistenceScope, context.draftEdit);
       }
-      context.lastSaved = savedCode;
-      context.lastSavedAt = row?.last_saved_at ?? null;
-      context.draftEdit = null;
-      update({ progress: row ? progressFromRow(row) : null });
+      applySavedProgress(row);
     });
+  }
+
+  function recoverConflict() {
+    const conflict = conflictingDrafts.get(persistenceScope);
+    if (!userId || !problemId || conflict === undefined) return;
+    let row: ProgressRow | null = null;
+    return replaceCode(async () => {
+      row = await readProgress(userId, problemId);
+      return conflict;
+    }, "Unsaved draft recovered into the shared editor.", "", () => {
+      conflictingDrafts.delete(persistenceScope);
+      applySavedProgress(row);
+    });
+  }
+
+  async function discardConflict() {
+    if (!userId || !problemId || !context.active || context.loading || context.retrieving || !conflictingDrafts.has(persistenceScope)) return;
+    context.retrieving = true;
+    update({ retrieving: true });
+    try {
+      const row = await readProgress(userId, problemId);
+      if (!context.active) return;
+      conflictingDrafts.delete(persistenceScope);
+      applySavedProgress(row);
+      update({ status: "Unsaved draft discarded." });
+    } catch {
+      update({ status: "Could not reload your saved draft. The unsaved edit is still available." });
+    } finally {
+      context.retrieving = false;
+      update({ retrieving: false });
+    }
   }
 
   function resetCode() {
     const problem = context.problem;
-    if (!problem) return;
+    if (!problem || conflictingDrafts.has(persistenceScope)) return;
     return replaceCode(async () => problem.starterCode, "Shared editor reset to the default Java definition.", "No default Java definition found.");
   }
 
   function retrieveSubmission() {
-    if (!userId || !problemId) return;
+    if (!userId || !problemId || conflictingDrafts.has(persistenceScope)) return;
     return replaceCode(async () => {
       const { data, error } = await supabase.from("submissions").select("source_code, created_at")
         .eq("user_id", userId).eq("problem_id", problemId).eq("language", "java").eq("verification", "leetcollab")
@@ -197,5 +240,7 @@ export function usePracticeDraft(options: Options) {
   }
 
   const current = state.scope === scope ? state : { progress: null, status: "Loading saved draft…", loading: true, saving: false, retrieving: false };
-  return { ...current, conflictingDraft: conflictingDrafts.get(persistenceScope) ?? null, editCode, restoreDraft, resetCode, retrieveSubmission };
+  return { ...current, waitingForDraftWrite: context.waitingForDraftWrite,
+    conflictingDraft: conflictingDrafts.get(persistenceScope) ?? null,
+    editCode, restoreDraft, recoverConflict, discardConflict, resetCode, retrieveSubmission };
 }

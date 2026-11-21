@@ -125,16 +125,33 @@ begin
   key := gen_random_uuid();
   result := public.reserve_judge_submission(capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
   if result->>'result'<>'reserved' then raise exception 'Legacy JDoodle should still reserve'; end if;
+  attempt := (result->>'submissionId')::uuid;
+  result := public.reserve_judge_execution('user','jdoodle','run',null,null,
+    capped,problem,key,'java','class Solution {}',starts,ends,25,4,45);
+  if result->>'result'<>'in_progress' or (result->>'submissionId')::uuid<>attempt then
+    raise exception 'Redeploy must recognize a rollback reservation still in flight';
+  end if;
   perform public.complete_judge_submission(capped,(result->>'submissionId')::uuid,'failed','runtime_error',0,0,1,'synthetic',null,null);
   result := public.reserve_judge_submission(capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
   if result->>'result'<>'existing' then raise exception 'Legacy JDoodle should still replay'; end if;
+  result := public.reserve_judge_execution('user','jdoodle','run',null,null,
+    capped,problem,key,'java','class Solution {}',starts,ends,25,4,45);
+  if result->>'result'<>'existing' or (result->>'submissionId')::uuid<>attempt then
+    raise exception 'Redeploy must replay the original JDoodle rollback reservation';
+  end if;
 
   key := gen_random_uuid();
   result := public.reserve_onlinecompiler_submission(capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
   if result->>'result'<>'reserved' then raise exception 'Legacy OnlineCompiler should still reserve'; end if;
+  attempt := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(capped,(result->>'submissionId')::uuid,'completed','accepted',3,3,1,'synthetic',null,null);
   result := public.reserve_onlinecompiler_submission(capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
   if result->>'result'<>'existing' then raise exception 'Legacy OnlineCompiler should still replay'; end if;
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
+    capped,problem,key,'java','class Solution {}',starts,ends,25,4,45);
+  if result->>'result'<>'existing' or (result->>'submissionId')::uuid<>attempt then
+    raise exception 'Redeploy must replay the original OnlineCompiler rollback reservation';
+  end if;
   quota := public.get_user_judge_quota_status(capped,starts,ends,25);
   if (quota->>'used')::int<>3 then
     raise exception 'Each rollback reservation must count once toward the personal limit after redeploy';
@@ -232,7 +249,6 @@ begin
   result := public.reserve_onlinecompiler_submission(late,problem,key,'java','class Solution {}',
     starts+interval '10 days',ends+interval '10 days',20,4,45);
   attempt := (result->>'submissionId')::uuid;
-  update public.submissions set execution_action='legacy' where id=attempt;
   perform public.complete_judge_submission(late,attempt,'completed','accepted',3,3,1,'synthetic',null,null);
   result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
     late,problem,key,'java','class Solution {}',starts+interval '11 days',ends+interval '11 days',25,4,45);

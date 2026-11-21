@@ -73,6 +73,13 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     expect(await owner.emitWithAck("code:replace", { roomId, problemId: submission, expectedCode: "newer", code: "old exercise" }))
       .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
 
+    expect(await owner.emitWithAck("code:update", { roomId, problemId: submission, code: "old exercise" }))
+      .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
+    const typed = new Promise<string>(resolve => partner.once("code:updated", resolve));
+    expect(await owner.emitWithAck("code:update", { roomId, problemId: problem, code: "collaborator edit" }))
+      .toEqual({ ok: true, data: null });
+    expect(await typed).toBe("collaborator edit");
+
     const requestSnapshot = (secret?: string, token = actor) => fetch(`${base}/judge/participants?problemId=${problem}&roomId=${roomId}`, {
       headers: { Authorization: `Bearer ${token}`, ...(secret ? { "X-Realtime-Judge-Secret": secret } : {}) },
       signal: AbortSignal.timeout(3000),
@@ -84,7 +91,7 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     expect((await requestSnapshot("synthetic-capture-secret")).status).toBe(409);
     const reconnected = await connect(actor);
     const pending = requestSnapshot("synthetic-capture-secret");
-    expect(await reconnected.emitWithAck("room:join", { roomId })).toMatchObject({ ok: true, data: { code: "newer" } });
+    expect(await reconnected.emitWithAck("room:join", { roomId })).toMatchObject({ ok: true, data: { code: "collaborator edit" } });
     expect(await (await pending).json()).toMatchObject({ roomId, userIds: [actor, peer] });
 
     const newcomer = await connect(late);

@@ -26,6 +26,9 @@ type EditorPanelProps = {
   progress: ProblemProgress | null;
   progressStatus: string;
   conflictingDraft?: string | null;
+  waitingForDraftWrite?: boolean;
+  onRecoverConflict?: () => void;
+  onDiscardConflict?: () => void;
   isProgressLoading: boolean;
   isRetrievingSubmission: boolean;
   connected: boolean;
@@ -56,6 +59,9 @@ export function EditorPanel({
   progress,
   progressStatus,
   conflictingDraft,
+  waitingForDraftWrite,
+  onRecoverConflict,
+  onDiscardConflict,
   isProgressLoading,
   isRetrievingSubmission,
   connected,
@@ -95,8 +101,9 @@ export function EditorPanel({
   useEffect(() => {
     if (editorView) editorView.dispatch(setDiagnostics(editorView.state, editorDiagnostics(editorView.state, execution, problemId, code, codeVersion)));
   }, [editorView, execution, problemId, code, codeVersion]);
-  const editorEditable = canEditCode && !isRetrievingSubmission;
-  const actionsDisabled = !problemId || !canEditCode || !connected || isProgressLoading || isRetrievingSubmission;
+  const editorEditable = canEditCode && !isRetrievingSubmission && !waitingForDraftWrite && conflictingDraft == null;
+  const replacementUnavailable = !problemId || !canEditCode || !connected || isProgressLoading || isRetrievingSubmission;
+  const actionsDisabled = replacementUnavailable || conflictingDraft != null;
 
   return (
     <Card className="workspace-card editor-panel" data-view={viewMode}>
@@ -110,7 +117,7 @@ export function EditorPanel({
             <span className="editor-tooltip" id={`${tooltipId}-reset`} role="tooltip">Reset to default code definition</span>
           </span>
           <span className="editor-tool">
-            <Button aria-label="Restore saved draft to shared editor" aria-describedby={`${tooltipId}-draft`} disabled={actionsDisabled || (conflictingDraft == null && (!progress?.lastSavedAt || progress.draftLanguage !== "java"))} onClick={onRestoreDraft} size="icon" variant="secondary">
+            <Button aria-label="Restore saved draft to shared editor" aria-describedby={`${tooltipId}-draft`} disabled={actionsDisabled || !progress?.lastSavedAt || progress.draftLanguage !== "java"} onClick={onRestoreDraft} size="icon" variant="secondary">
               <FileDown aria-hidden="true" />
             </Button>
             <span className="editor-tooltip" id={`${tooltipId}-draft`} role="tooltip">Restore saved draft to shared editor</span>
@@ -171,10 +178,16 @@ export function EditorPanel({
             <strong>Prior manual completion (unverified)</strong>
             <p className="muted">{formatDateTime(progress.solvedAt)}. With: {progress.solvedWith.map(member => member.username).join(", ") || "Solo"}.</p>
           </div>}
-          {conflictingDraft != null && <label className="w-full">
-            Unsaved draft from this tab. Copy it to recover your edit.
-            <Textarea className="font-mono" readOnly value={conflictingDraft} />
-          </label>}
+          {conflictingDraft != null && <div className="w-full space-y-2">
+            <label>
+              Recover or discard this unsaved draft to resume editing.
+              <Textarea className="font-mono" readOnly value={conflictingDraft} />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" disabled={replacementUnavailable} onClick={onRecoverConflict}>Recover into shared editor</Button>
+              <Button variant="outline" size="sm" disabled={isProgressLoading || isRetrievingSubmission} onClick={onDiscardConflict}>Discard unsaved draft</Button>
+            </div>
+          </div>}
           {progressStatus && <p role="status">{progressStatus}</p>}
           {!canEditCode && <p className="muted">You can view this room's code. Restoring code requires edit permission.</p>}
         </div>
