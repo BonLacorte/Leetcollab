@@ -25,6 +25,7 @@ type EditorPanelProps = {
   canEditCode: boolean;
   progress: ProblemProgress | null;
   progressStatus: string;
+  conflictingDraft?: string | null;
   isProgressLoading: boolean;
   isRetrievingSubmission: boolean;
   connected: boolean;
@@ -54,6 +55,7 @@ export function EditorPanel({
   canEditCode,
   progress,
   progressStatus,
+  conflictingDraft,
   isProgressLoading,
   isRetrievingSubmission,
   connected,
@@ -93,6 +95,7 @@ export function EditorPanel({
   useEffect(() => {
     if (editorView) editorView.dispatch(setDiagnostics(editorView.state, editorDiagnostics(editorView.state, execution, problemId, code, codeVersion)));
   }, [editorView, execution, problemId, code, codeVersion]);
+  const editorEditable = canEditCode && !isRetrievingSubmission;
   const actionsDisabled = !problemId || !canEditCode || !connected || isProgressLoading || isRetrievingSubmission;
 
   return (
@@ -107,7 +110,7 @@ export function EditorPanel({
             <span className="editor-tooltip" id={`${tooltipId}-reset`} role="tooltip">Reset to default code definition</span>
           </span>
           <span className="editor-tool">
-            <Button aria-label="Restore saved draft to shared editor" aria-describedby={`${tooltipId}-draft`} disabled={actionsDisabled || !progress?.lastSavedAt || progress.draftLanguage !== "java"} onClick={onRestoreDraft} size="icon" variant="secondary">
+            <Button aria-label="Restore saved draft to shared editor" aria-describedby={`${tooltipId}-draft`} disabled={actionsDisabled || (conflictingDraft == null && (!progress?.lastSavedAt || progress.draftLanguage !== "java"))} onClick={onRestoreDraft} size="icon" variant="secondary">
               <FileDown aria-hidden="true" />
             </Button>
             <span className="editor-tooltip" id={`${tooltipId}-draft`} role="tooltip">Restore saved draft to shared editor</span>
@@ -144,15 +147,15 @@ export function EditorPanel({
         <div className="code-editor">
           <CodeMirror
             basicSetup={{ lineNumbers: true, foldGutter: true }}
-            editable={canEditCode}
+            editable={editorEditable}
             extensions={extensions}
             height="100%"
             minHeight="260px"
             onChange={(value) => {
-              if (canEditCode) onCodeChange(value);
+              if (editorEditable) onCodeChange(value);
             }}
             onCreateEditor={setEditorView}
-            readOnly={!canEditCode}
+            readOnly={!editorEditable}
             theme={theme === "dark" ? oneDark : "light"}
             value={code}
           />
@@ -168,6 +171,10 @@ export function EditorPanel({
             <strong>Prior manual completion (unverified)</strong>
             <p className="muted">{formatDateTime(progress.solvedAt)}. With: {progress.solvedWith.map(member => member.username).join(", ") || "Solo"}.</p>
           </div>}
+          {conflictingDraft != null && <label className="w-full">
+            Unsaved draft from this tab. Copy it to recover your edit.
+            <Textarea className="font-mono" readOnly value={conflictingDraft} />
+          </label>}
           {progressStatus && <p role="status">{progressStatus}</p>}
           {!canEditCode && <p className="muted">You can view this room's code. Restoring code requires edit permission.</p>}
         </div>

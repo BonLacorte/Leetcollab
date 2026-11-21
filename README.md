@@ -15,7 +15,7 @@ The previous checkout has a broken npm installation. Repair/reinstall Node.js if
 1. Start Docker Desktop.
 2. From this directory, run `corepack enable` and `pnpm install --frozen-lockfile`.
 3. Run `pnpm supabase:start`; copy the printed local API URL, anonymous key and server-only service-role key.
-4. Copy `apps/web/.env.example` to `apps/web/.env.local` and `apps/realtime/.env.example` to `apps/realtime/.env`, then fill the local API URL and anonymous key in both. Set `SUPABASE_SERVICE_ROLE_KEY` only in the web environment; leave JDoodle disabled.
+4. Copy `apps/web/.env.example` to `apps/web/.env.local` and `apps/realtime/.env.example` to `apps/realtime/.env`, then fill the local API URL and anonymous key in both. Set the server-only `SUPABASE_SERVICE_ROLE_KEY` in the web environment and keep execution disabled for basic setup. For local judge and realtime credit configuration, follow [execution credit](docs/execution-credit.md#migration-and-restart).
 5. Run `pnpm dlx supabase migration up --local` to apply pending migrations. Never reset an existing database.
 6. Run `pnpm dev`.
 7. Open `http://localhost:3000` in two browser sessions, create accounts, create a room, and join it from the second session.

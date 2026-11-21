@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RoomState } from "@leetcollab/contracts";
 import { judgeParticipants, waitForJudgeParticipants } from "../../../../../realtime/src/judge-participants.js";
 import { captureSubmissionParticipants } from "./room-participants";
@@ -14,6 +14,7 @@ const room = (): RoomState => ({ roomId: "abcdefgh", hostUserId: actor,
   members: [actor, peer, late].map(userId => ({ userId, username: userId,
     permissions: { canEditCode: true, canDrawWhiteboard: true, canChangeProblem: false, canChat: true } })),
 });
+beforeEach(() => vi.stubEnv("REALTIME_JUDGE_SHARED_SECRET", "synthetic-capture-secret"));
 afterEach(() => vi.unstubAllEnvs());
 
 it("captures unique live members synchronously; departures retain eligibility and later joins cannot join the snapshot", () => {
@@ -54,7 +55,7 @@ it("uses only the configured authenticated realtime authority, not client-suppli
     roomId: snapshot.roomId, userIds: [actor, peer],
   });
   expect(String(request.mock.calls[0][0])).toBe(`http://127.0.0.1:3201/judge/participants?problemId=${problem}&roomId=abcdefgh`);
-  expect(request.mock.calls[0][1]).toMatchObject({ headers: { Authorization: "Bearer synthetic-token" }, redirect: "error" });
+  expect(request.mock.calls[0][1]).toMatchObject({ headers: { Authorization: "Bearer synthetic-token", "X-Realtime-Judge-Secret": "synthetic-capture-secret" }, redirect: "error" });
 });
 
 it("uses the public socket origin when the optional internal URL is blank", async () => {
@@ -79,6 +80,13 @@ it.each([
 
 it("never sends credentials to a client URL or insecure remote realtime target", async () => {
   vi.stubEnv("REALTIME_INTERNAL_URL", "http://untrusted.example");
+  const request = vi.fn();
+  await expect(captureSubmissionParticipants("synthetic-token", actor, problem, undefined, request)).rejects.toThrow("No execution was started");
+  expect(request).not.toHaveBeenCalled();
+});
+
+it("does not call the realtime authority without the server credential", async () => {
+  vi.stubEnv("REALTIME_JUDGE_SHARED_SECRET", "");
   const request = vi.fn();
   await expect(captureSubmissionParticipants("synthetic-token", actor, problem, undefined, request)).rejects.toThrow("No execution was started");
   expect(request).not.toHaveBeenCalled();

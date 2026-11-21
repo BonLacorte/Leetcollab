@@ -80,7 +80,8 @@ it("keeps a scoped draft private and saves the latest dirty code every ten minut
 
 it("does not save starter code before reading the draft or replace edits made while loading", async () => {
   let finish!: (value: unknown) => void;
-  mocks.read.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  mocks.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  mocks.read.mockResolvedValue({ data: row("older saved draft"), error: null });
   await render();
   await advance();
   expect(mocks.save).not.toHaveBeenCalled();
@@ -182,6 +183,8 @@ it.each(["restoreDraft", "resetCode", "retrieveSubmission"] as const)("keeps the
   expect(mocks.acknowledge).toHaveBeenCalledExactlyOnceWith(problem.id, "visible shared code", replacement);
   expect(latest.status).toContain("Preparing");
   expect(mocks.replace).not.toHaveBeenCalled();
+  await act(async () => latest.editCode("keystroke during replacement"));
+  expect(input.code).toBe("visible shared code");
   await act(async () => reject(new Error("The shared exercise or code changed.")));
   expect(latest.status).toContain("Could not confirm");
   expect(input.code).toBe("visible shared code");
@@ -238,16 +241,37 @@ it("warns about a stale save without replacing the unsaved editor text", async (
   const oldDraft = row("previous draft");
   mocks.read.mockResolvedValue({ data: oldDraft, error: null });
   mocks.save.mockResolvedValue({ data: null, error: null });
-  await render();
+  await render({ userId: "timer-conflict-user" });
   await act(async () => latest.editCode("my unsaved edit"));
   await advance();
   expect(mocks.save).toHaveBeenCalledExactlyOnceWith({
-    p_user_id: "user", p_problem_id: problem.id, p_draft_code: "my unsaved edit",
+    p_user_id: "timer-conflict-user", p_problem_id: problem.id, p_draft_code: "my unsaved edit",
     p_expected_saved_at: oldDraft.last_saved_at,
   });
   expect(latest.status).toContain("This edit was not saved");
   expect(input.code).toBe("my unsaved edit");
   expect(latest.progress?.draftCode).toBe("previous draft");
+  mocks.read.mockResolvedValue({ data: { ...row("newer tab draft"), last_saved_at: "2026-11-18T03:01:00.000Z" }, error: null });
+  await act(async () => latest.restoreDraft());
+  expect(input.code).toBe("newer tab draft");
+  expect(latest.conflictingDraft).toBe("my unsaved edit");
+});
+
+it("preserves a navigation save conflict privately when revisiting the exercise", async () => {
+  mocks.read.mockResolvedValue({ data: row("old draft"), error: null });
+  await render({ userId: "navigation-conflict-user" });
+  await act(async () => latest.editCode("unsaved first-tab edit"));
+  mocks.read.mockResolvedValue({ data: { ...row("newer tab draft"), last_saved_at: "2026-11-18T03:01:00.000Z" }, error: null });
+  mocks.save.mockResolvedValueOnce({ data: null, error: null });
+  const second = { ...problem, id: "problem-b" };
+  await act(async () => change({ problem: second, code: second.starterCode }));
+  expect(latest.conflictingDraft).toBeNull();
+  await act(async () => change({ problem, code: problem.starterCode }));
+  expect(latest.progress?.draftCode).toBe("newer tab draft");
+  expect(latest.conflictingDraft).toBe("unsaved first-tab edit");
+  expect(input.code).toBe(problem.starterCode);
+  await advance();
+  expect(mocks.save).toHaveBeenCalledTimes(1);
 });
 
 it("reports a save failure and retries dirty content at the next interval", async () => {

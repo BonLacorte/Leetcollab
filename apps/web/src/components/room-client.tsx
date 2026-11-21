@@ -319,9 +319,14 @@ export function RoomClient({ roomId }: { roomId: string }) {
 
   async function replaceSharedCode(problemId: string, expectedCode: string, nextCode: string) {
     if (!socket?.connected) throw new Error("Reconnect before replacing shared code.");
-    const response = await socket.timeout(3000).emitWithAck("code:replace", { roomId, problemId, expectedCode, code: nextCode });
-    if (!response.ok) throw new Error(response.error);
-    setCodeVersion(version => version + 1);
+    await new Promise<void>((resolve, reject) => {
+      socket.timeout(3000).emit("code:replace", { roomId, problemId, expectedCode, code: nextCode }, (error, response) => {
+        if (error) return reject(error);
+        if (!response.ok) return reject(new Error(response.error));
+        replaceEditorCode(nextCode, true);
+        resolve();
+      });
+    });
   }
 
   function sendMessage(event: FormEvent) {
@@ -650,6 +655,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
           canEditCode={canEditCode}
           progress={draft.progress}
           progressStatus={draft.status}
+          conflictingDraft={draft.conflictingDraft}
           isProgressLoading={draft.loading || draft.saving}
           isRetrievingSubmission={draft.retrieving}
           connected={socket?.connected ?? false}

@@ -20,11 +20,14 @@ export async function captureSubmissionParticipants(
   token: string, userId: string, problemId: string, expectedRoomId?: string, request: typeof fetch = fetch,
 ): Promise<SubmissionParticipants> {
   try {
+    const secret = process.env.REALTIME_JUDGE_SHARED_SECRET?.trim();
+    if (!secret) throw new Error();
     const url = realtimeUrl("/judge/participants");
     url.searchParams.set("problemId", problemId);
     if (expectedRoomId) url.searchParams.set("roomId", expectedRoomId);
     const response = await request(url, {
-      headers: { Authorization: `Bearer ${token}` }, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(3000),
+      headers: { Authorization: `Bearer ${token}`, "X-Realtime-Judge-Secret": secret },
+      cache: "no-store", redirect: "error", signal: AbortSignal.timeout(3000),
     });
     if (!response.ok) throw new Error();
     const text = await response.text();

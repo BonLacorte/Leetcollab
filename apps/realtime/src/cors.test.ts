@@ -16,7 +16,6 @@ for (const origins of [[staging, production], [staging]]) {
         PORT: "0",
         CORS_ORIGIN: origins.join(", "),
         NODE_ENV: "production",
-        ROOM_RESTORE_FILE: "unused-snapshot.json",
         SUPABASE_URL: "http://127.0.0.1:1",
         SUPABASE_ANON_KEY: "synthetic",
       },

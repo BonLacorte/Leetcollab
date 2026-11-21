@@ -48,7 +48,7 @@ tester-only deployment. Start the web app with `next dev`, so
 and restricted evaluation retain their existing ceilings. The local flag alone
 does not enable any provider or raise the default configured daily limit of 25.
 
-The preview owner restarts only its own web service after environment changes. A new realtime version for server-captured room credit requires the separate state-preserving handoff in [execution credit](execution-credit.md); never drop live rooms during that upgrade.
+The preview owner restarts its web service after environment changes. For the realtime upgrade and shared capture secret, follow the [migration and restart steps](execution-credit.md#migration-and-restart).
 Refresh judge status before the user tests. Expected allowance is
 `50 - previously charged usage`; if it is lower, inspect the actual quota row
 and active callers rather than deleting usage or automatically retrying calls.

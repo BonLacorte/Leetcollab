@@ -1,9 +1,10 @@
 # OnlineCompiler integration and evaluation
 
 This is a server-only integration for the exact service
-[OnlineCompiler.io](https://onlinecompiler.io/docs). It does not activate a hosted
-provider or replace an existing deployment's provider. Credentials, deployment,
-and live evaluation are separate operator actions.
+[OnlineCompiler.io](https://onlinecompiler.io/docs). The production release
+enables normal authenticated Run and Submit through the coordinated
+[rollout](#rollout-and-rollback). Restricted hosted evaluation keeps its own
+settings and fixed expiry.
 
 ## Selection and approval
 
@@ -311,16 +312,35 @@ hosted configuration, deployment or public provider selection was changed.
 
 ## Rollout and rollback
 
-Tracked examples keep `JUDGE_PROVIDER=disabled` and both OnlineCompiler flags false.
-Policy adoption ships eligibility and disclosure code, not an enabled localhost or
-hosted runtime. A separately coordinated release must identify the owned
-authenticated runtime, verify its free dedicated-account configuration and migrations,
-and obtain an exact additional free-call allowance before a normal-composition
-live check with edited synthetic learner source. Retained fixture evidence and
-mocked tests cannot substitute for that release check. No paid requests,
-deployment, public activation or merge is authorized by this implementation.
+1. Use the release revision that passed CI. Confirm the private database backup
+   and isolated restore evidence, the dedicated OnlineCompiler REST account and
+   available allowance, and the known disabled web artifact for rollback. Keep
+   production admission stopped while the schema and realtime service change.
+2. Let in-flight executions settle and confirm there are no reserved submissions
+   or active leases. Apply pending migrations in order, including
+   `202611180001_public_case_plans.sql` and
+   `202611180002_execution_intent_and_credit.sql`. Preserve submissions and
+   consumed usage. Follow the [database checks](backend-setup.md).
+3. Set the same dedicated random `REALTIME_JUDGE_SHARED_SECRET` in both server
+   environments, set realtime's `SUPABASE_SERVICE_ROLE_KEY` for completion refresh,
+   and deploy the release realtime service first. Check `/health` and authenticated
+   room creation and join. The restart clears old in-memory rooms. Point the web
+   server's optional `REALTIME_INTERNAL_URL` at the release realtime HTTPS origin
+   when it differs from `NEXT_PUBLIC_SOCKET_URL`.
+4. For the production web environment serving `https://leetcollab.vercel.app/`,
+   set `JUDGE_PROVIDER=onlinecompiler`, `JUDGE_ACCESS_MODE=normal`,
+   `ONLINECOMPILER_EXECUTION_APPROVED=true`, `ONLINECOMPILER_POLICY_ACCEPTED=true`,
+   `JUDGE_DAILY_LIMIT=25` and `JUDGE_LOCAL_TESTING=false`. Supply the private
+   `ONLINECOMPILER_API_KEY` and keep `JDOODLE_LIMITS_CONFIRMED=false`. Redeploy
+   to apply these settings. Keep expired evaluation artifacts pinned to their
+   original evaluation settings and expiry.
+5. Confirm authenticated judge status shows OnlineCompiler and the personal
+   25-attempt allowance less any consumed usage. Use the [two-user checks](execution-credit.md#user-acceptance-after-the-owner-confirms-readiness)
+   for scoped live acceptance only after confirming the account allowance and
+   the approved smoke-test budget. Record the deployed revision and results.
 
-To stop admission in future artifacts, set `ONLINECOMPILER_EXECUTION_APPROVED=false`
+To roll back, use the known disabled artifact and stop or protect every enabled
+artifact that remains directly reachable. For future artifacts, set `ONLINECOMPILER_EXECUTION_APPROVED=false`
 and `JUDGE_PROVIDER=disabled`; keep `JUDGE_ACCESS_MODE=evaluation` and its expired
 pin on tester-only configurations. Hosting environment edits require a new
 deployment and do not change an already-built artifact. Before enabling, verify
@@ -334,7 +354,7 @@ configuration. Every enabled evaluation artifact therefore closes on its own fix
 expiry and remains closed after reset. For immediate closure before expiry, the
 authorized hosting operator must also stop/protect those enabled artifacts; a
 settings edit alone is not an emergency switch. Configuration-only rollback cannot
-revoke already-running invocations or recall outbound source. Keep drafts,
-submissions and consumed quota.
+revoke already-running invocations or recall outbound source. Keep drafts, submissions and consumed quota. Attempts admitted by a compatible
+rollback revision also count in the same personal period after redeploy.
 Already-sent jobs cannot be cancelled by this switch and provider execution history
 cannot be recalled. There is no automatic fallback, database reset or schema rollback.

@@ -91,6 +91,10 @@ begin
   repeated_submit := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(a,repeated_submit,'completed','accepted',3,3,1,'synthetic',null,null);
 
+  if (select count(*) from public.verified_problem_solves where problem_id=problem and user_id in(a,b))<>2 then
+    raise exception 'Repeating an accepted Submit must preserve the original solve for both recipients';
+  end if;
+
   key := gen_random_uuid();
   begin
     perform public.reserve_judge_execution('shared','onlinecompiler','submit','abcdefgh',array[capped,late],
@@ -118,7 +122,25 @@ begin
   if (quota->>'used')::int<>1 or (quota->>'limit')::int<>25 then
     raise exception 'A shared reservation must charge its actor once toward normal usage';
   end if;
-  for i in 2..25 loop
+  key := gen_random_uuid();
+  result := public.reserve_judge_submission(capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
+  if result->>'result'<>'reserved' then raise exception 'Legacy JDoodle should still reserve'; end if;
+  perform public.complete_judge_submission(capped,(result->>'submissionId')::uuid,'failed','runtime_error',0,0,1,'synthetic',null,null);
+  result := public.reserve_judge_submission(capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
+  if result->>'result'<>'existing' then raise exception 'Legacy JDoodle should still replay'; end if;
+
+  key := gen_random_uuid();
+  result := public.reserve_onlinecompiler_submission(capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
+  if result->>'result'<>'reserved' then raise exception 'Legacy OnlineCompiler should still reserve'; end if;
+  perform public.complete_judge_submission(capped,(result->>'submissionId')::uuid,'completed','accepted',3,3,1,'synthetic',null,null);
+  result := public.reserve_onlinecompiler_submission(capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
+  if result->>'result'<>'existing' then raise exception 'Legacy OnlineCompiler should still replay'; end if;
+  quota := public.get_user_judge_quota_status(capped,starts,ends,25);
+  if (quota->>'used')::int<>3 then
+    raise exception 'Each rollback reservation must count once toward the personal limit after redeploy';
+  end if;
+
+  for i in 4..25 loop
     result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
       capped,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
     if result->>'result'<>'reserved' then raise exception 'Personal execution % should reserve',i; end if;
@@ -156,6 +178,7 @@ begin
     raise exception 'Arbitrary recipient grants must not be exposed outside the completion function';
   end if;
   if has_any_column_privilege('authenticated','public.verified_problem_solves','select')
+    or has_any_column_privilege('service_role','public.verified_problem_solves','select')
     or has_any_column_privilege('authenticated','public.judge_submission_participants','select')
     or has_function_privilege('authenticated','public.judge_refresh_recipients(uuid,uuid)','execute') then
     raise exception 'Client solved readback must omit private provenance and recipient rosters';
@@ -231,5 +254,17 @@ begin
       late,problem,key,'java','class Solution {}',starts+interval '11 days',ends+interval '11 days',25,4,45);
     raise exception 'Legacy executions must not replay as Submit';
   exception when invalid_parameter_value then null; end;
+  delete from auth.users where id=a;
+  if exists(select 1 from public.submissions where user_id=a)
+    or exists(select 1 from public.judge_submission_participants where submission_id=accepted_submit)
+    or not exists(select 1 from public.verified_problem_solves where user_id=b and problem_id=problem and submission_id is null) then
+    raise exception 'Deleting the actor must remove attempt provenance and retain peer credit';
+  end if;
+  perform set_config('request.jwt.claim.sub',b::text,true);
+  set local role authenticated;
+  if public.has_verified_problem_solve(problem) is distinct from true then
+    raise exception 'The peer must still read their solve after the submitting actor is deleted';
+  end if;
+  reset role;
 end $$;
 rollback;

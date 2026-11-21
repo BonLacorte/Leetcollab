@@ -37,7 +37,7 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     cwd: new URL("../../../../../realtime/", import.meta.url),
     env: { ...process.env, PORT: "0", HOST: "127.0.0.1",
       SUPABASE_URL: `http://127.0.0.1:${(databaseBoundary.address() as AddressInfo).port}`, SUPABASE_ANON_KEY: "synthetic",
-      SUPABASE_SERVICE_ROLE_KEY: "synthetic-server-key" },
+      SUPABASE_SERVICE_ROLE_KEY: "synthetic-server-key", REALTIME_JUDGE_SHARED_SECRET: "synthetic-capture-secret" },
     stdio: ["ignore", "pipe", "inherit"],
   });
   const sockets: Socket<ServerToClientEvents, ClientToServerEvents>[] = [];
@@ -61,20 +61,29 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     const partner = await connect(peer);
     expect(await partner.emitWithAck("room:join", { roomId })).toMatchObject({ ok: true });
 
+    const received = new Promise<string>(resolve => partner.once("code:updated", resolve));
+    const senderUpdates: string[] = [];
+    owner.on("code:updated", code => senderUpdates.push(code));
     expect(await owner.emitWithAck("code:replace", { roomId, problemId: problem, expectedCode: "starter", code: "newer" }))
       .toEqual({ ok: true, data: null });
+    expect(await received).toBe("newer");
+    expect(senderUpdates).toEqual([]);
     expect(await owner.emitWithAck("code:replace", { roomId, problemId: problem, expectedCode: "starter", code: "private draft" }))
       .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
     expect(await owner.emitWithAck("code:replace", { roomId, problemId: submission, expectedCode: "newer", code: "old exercise" }))
       .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
 
-    const requestSnapshot = () => fetch(`${base}/judge/participants?problemId=${problem}&roomId=${roomId}`, {
-      headers: { Authorization: `Bearer ${actor}` }, signal: AbortSignal.timeout(3000),
+    const requestSnapshot = (secret?: string, token = actor) => fetch(`${base}/judge/participants?problemId=${problem}&roomId=${roomId}`, {
+      headers: { Authorization: `Bearer ${token}`, ...(secret ? { "X-Realtime-Judge-Secret": secret } : {}) },
+      signal: AbortSignal.timeout(3000),
     });
+    expect((await requestSnapshot()).status).toBe(401);
+    expect((await requestSnapshot("wrong-secret")).status).toBe(401);
+    expect((await requestSnapshot("synthetic-capture-secret", "invalid-user")).status).toBe(401);
     owner.disconnect();
-    expect((await requestSnapshot()).status).toBe(409);
+    expect((await requestSnapshot("synthetic-capture-secret")).status).toBe(409);
     const reconnected = await connect(actor);
-    const pending = requestSnapshot();
+    const pending = requestSnapshot("synthetic-capture-secret");
     expect(await reconnected.emitWithAck("room:join", { roomId })).toMatchObject({ ok: true, data: { code: "newer" } });
     expect(await (await pending).json()).toMatchObject({ roomId, userIds: [actor, peer] });
 

@@ -87,7 +87,8 @@ class RunnerReservationConcurrencyTest(unittest.TestCase):
         original_start = datetime.datetime.fromisoformat(self.start)
         periods = []
         try:
-            for limit in (25, 50):
+            for limit, slug in ((25, "parcel-pair"), (50, "bracket-beacon")):
+                problem = self.query(f"select id from public.problems where slug='{slug}'")
                 with self.subTest(limit=limit):
                     self.start = (original_start + datetime.timedelta(days=limit)).isoformat()
                     self.end = (original_start + datetime.timedelta(days=limit + 1)).isoformat()
@@ -103,7 +104,7 @@ class RunnerReservationConcurrencyTest(unittest.TestCase):
                         return json.loads(self.query(
                             "select public.reserve_judge_execution('user','onlinecompiler',"
                             f"'submit','abcdefgh',array['{self.user}'::uuid,'{peer}'::uuid],"
-                            f"'{self.user}','{self.problem}','{uuid.uuid4()}','java','class Solution {{}}',"
+                            f"'{self.user}','{problem}','{uuid.uuid4()}','java','class Solution {{}}',"
                             f"'{self.start}','{self.end}',{limit},4,45)"))
 
                     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:

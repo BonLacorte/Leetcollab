@@ -1,14 +1,12 @@
 import "dotenv/config";
 import http from "node:http";
-import { readFileSync } from "node:fs";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import { createClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 import { judgeParticipants, waitForJudgeParticipants } from "./judge-participants.js";
-import { restoreRoomStates } from "./room-restore.js";
 import {
   chatSendSchema,
   codeUpdateSchema,
@@ -38,6 +36,8 @@ const origin = (process.env.CORS_ORIGIN ?? "http://localhost:3000").split(",").m
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const judgeSharedSecret = process.env.REALTIME_JUDGE_SHARED_SECRET?.trim();
+const judgeSecretHash = judgeSharedSecret ? createHash("sha256").update(judgeSharedSecret).digest() : null;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("SUPABASE_URL and SUPABASE_ANON_KEY are required.");
@@ -60,16 +60,6 @@ type ProblemExample = Problem["examples"][number];
 const rooms = new Map<string, Room>();
 const activeRoomByUser = new Map<string, string>();
 const socketIdsByUser = new Map<string, Set<string>>();
-if (process.argv[2] === "--restore-local-rooms") {
-  const file = process.argv[3];
-  if (process.env.NODE_ENV !== "development" || !["127.0.0.1", "::1", "localhost"].includes(host) || !file) {
-    throw new Error("Room snapshot restore requires an explicit local development launch and a snapshot file.");
-  }
-  for (const room of restoreRoomStates(readFileSync(file, "utf8"))) {
-    rooms.set(room.roomId, room);
-    for (const member of room.members) activeRoomByUser.set(member.userId, room.roomId);
-  }
-}
 const maxWhiteboardStrokes = 2_000;
 const roomIdAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 const server = http.createServer(app);
@@ -104,6 +94,10 @@ function activeRoomForUser(userId: string): Room | null {
 
 app.get("/judge/participants", async (request, response) => {
   response.set("Cache-Control", "no-store");
+  const secret = request.header("x-realtime-judge-secret");
+  if (!judgeSecretHash || !secret || !timingSafeEqual(createHash("sha256").update(secret).digest(), judgeSecretHash)) {
+    return void response.status(401).json({ error: "Authentication required." });
+  }
   const token = /^Bearer ([^\s]+)$/.exec(request.header("authorization") ?? "")?.[1];
   if (!token) return void response.status(401).json({ error: "Authentication required." });
   const parsed = judgeSubmissionRequestSchema.shape.problemId.safeParse(request.query.problemId);
@@ -512,7 +506,7 @@ io.on("connection", (socket) => {
       return callback(failure("The shared exercise or code changed. Try again."));
     }
     room.code = code;
-    io.to(roomId).emit("code:updated", code);
+    socket.to(roomId).emit("code:updated", code);
     callback(success(null));
   });
 

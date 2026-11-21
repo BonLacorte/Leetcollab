@@ -52,8 +52,12 @@ jobs:
         run: |
           docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/disposable_auth.sql"
           for migration in "$GITHUB_WORKSPACE"/supabase/migrations/*.sql; do
+            if [ "${migration##*/}" = "202611180002_execution_intent_and_credit.sql" ]; then
+              docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/execution_intent_upgrade_seed.sql"
+            fi
             docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$migration"
           done
+          docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/execution_intent_upgrade.sql"
       - name: Exercise shared admission transactions and permissions
         env:
           TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}

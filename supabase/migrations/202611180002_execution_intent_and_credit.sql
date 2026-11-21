@@ -35,16 +35,15 @@ create table public.judge_submission_participants (
 create table public.verified_problem_solves (
   user_id uuid not null references public.profiles(id) on delete cascade,
   problem_id uuid not null references public.problems(id) on delete cascade,
-  submission_id uuid not null references public.submissions(id) on delete cascade,
-  credited_at timestamptz not null default clock_timestamp(),
-  primary key (user_id, problem_id, submission_id)
+  submission_id uuid references public.submissions(id) on delete set null,
+  primary key (user_id, problem_id)
 );
+create index on public.verified_problem_solves(submission_id) where submission_id is not null;
 alter table public.judge_user_quota_periods enable row level security;
 alter table public.judge_submission_participants enable row level security;
 alter table public.verified_problem_solves enable row level security;
 revoke all on public.judge_user_quota_periods, public.judge_submission_participants,
   public.verified_problem_solves from public, anon, authenticated, service_role;
-grant select on public.verified_problem_solves to service_role;
 grant select on public.judge_user_quota_periods to service_role;
 create function public.has_verified_problem_solve(p_problem_id uuid)
 returns boolean language sql stable security definer set search_path=public as $$
@@ -57,14 +56,29 @@ grant execute on function public.has_verified_problem_solve(uuid) to authenticat
 
 -- Historical buttons were indistinguishable. Preserve their already verified
 -- solved evidence, without retroactively granting unknown room partners credit.
-insert into public.verified_problem_solves(user_id,problem_id,submission_id,credited_at)
-select user_id,problem_id,id,coalesce(completed_at,created_at) from public.submissions
+insert into public.verified_problem_solves(user_id,problem_id)
+select distinct user_id,problem_id from public.submissions
 where verification='leetcollab' and judge_state='completed' and verdict='accepted'
   and tests_total > 0 and tests_passed=tests_total;
 insert into public.judge_user_quota_periods(user_id,period_start,period_end,quota_limit,used)
 select s.user_id,q.period_start,q.period_end,greatest(25,q.quota_limit),count(*)::integer
 from public.submissions s join public.judge_quota_periods q on q.period_start=s.quota_period_start
 where s.verification='leetcollab' group by s.user_id,q.period_start,q.period_end,q.quota_limit;
+
+create function public.charge_personal_judge_quota()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+  insert into public.judge_user_quota_periods(user_id,period_start,period_end,quota_limit,used)
+    select new.user_id,period_start,period_end,25,1
+    from public.judge_quota_periods where period_start=new.quota_period_start
+    on conflict(user_id,period_start) do update set used=judge_user_quota_periods.used+1;
+  return new;
+end $$;
+revoke all on function public.charge_personal_judge_quota() from public,anon,authenticated,service_role;
+create trigger charge_personal_judge_quota
+  after insert on public.submissions for each row
+  when (new.verification='leetcollab' and new.judge_state='reserved')
+  execute function public.charge_personal_judge_quota();
 
 create function public.get_user_judge_quota_status(
   p_user_id uuid, p_period_start timestamptz, p_period_end timestamptz, p_quota_limit integer
@@ -181,7 +195,6 @@ begin
       select p_user_id,p_problem_id,p_idempotency_key,p_language,p_source_code,'queued','leetcollab',p_runner,
         c.fixture_version,'reserved',p_period_start,now()+make_interval(secs=>p_reservation_seconds),'user'
       from public.problem_judge_configs c where c.problem_id=p_problem_id returning * into attempt;
-      update public.judge_user_quota_periods set used=used+1 where user_id=p_user_id and period_start=p_period_start;
       update public.judge_quota_periods set used=used+1,active=active+1,updated_at=now() where period_start=p_period_start;
       result := public.get_user_judge_quota_status(p_user_id,p_period_start,p_period_end,p_quota_limit)
         || jsonb_build_object('result','reserved','submissionId',attempt.id);
@@ -190,11 +203,6 @@ begin
   if result->>'result'='reserved' then
     if p_action='submit' and no_snapshot then
       raise exception 'new submit requires captured participants' using errcode='22023';
-    end if;
-    if p_scope='shared' then
-      insert into public.judge_user_quota_periods(user_id,period_start,period_end,quota_limit,used)
-      values(p_user_id,p_period_start,p_period_end,25,1)
-      on conflict(user_id,period_start) do update set used=judge_user_quota_periods.used+1;
     end if;
     update public.submissions set execution_action=p_action where id=(result->>'submissionId')::uuid;
     if p_action='submit' then
@@ -231,7 +239,7 @@ begin
     and attempt.verdict='accepted' and attempt.tests_total>0 and attempt.tests_passed=attempt.tests_total then
     insert into public.verified_problem_solves(user_id,problem_id,submission_id)
       select user_id,attempt.problem_id,attempt.id from public.judge_submission_participants where submission_id=attempt.id
-      on conflict do nothing;
+      order by user_id on conflict do nothing;
   end if;
   if attempt.quota_scope='user' then
     select * into strict personal from public.judge_user_quota_periods
@@ -250,11 +258,6 @@ language sql stable security definer set search_path=public as $$
       on participant.submission_id=s.id and participant.user_id=credit.user_id
     where s.id=p_submission_id and s.user_id=p_actor_id and participant.room_id is not null
       and s.execution_action='submit' and s.quota_scope='user'
-      and not exists (
-        select 1 from public.verified_problem_solves earlier
-          where earlier.user_id=credit.user_id and earlier.problem_id=credit.problem_id
-            and (earlier.credited_at,earlier.submission_id)<(credit.credited_at,credit.submission_id)
-      )
 $$;
 revoke all on function public.judge_refresh_recipients(uuid,uuid) from public,anon,authenticated,service_role;
 grant execute on function public.judge_refresh_recipients(uuid,uuid) to service_role;
