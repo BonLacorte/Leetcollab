@@ -53,14 +53,14 @@ export function usePracticeDraft(options: Options) {
     context.ready = false;
     context.loading = true;
     setState({ scope, progress: null, status: "Loading saved draft…", loading: true, saving: false, retrieving: false });
-    let pendingSave: Promise<void> | null = null;
     const updateCurrent = (value: Partial<typeof state>) => {
       if (active) setState(current => current.scope === scope ? { ...current, ...value } : current);
     };
     async function save(): Promise<void> {
       if (context.draftEdit === null) return;
-      if (pendingSave) { await pendingSave; return save(); }
-      pendingSave = (async () => {
+      const previousSave = pendingDraftWrites.get(persistenceScope);
+      const currentWrite = (async () => {
+        await previousSave;
         await read;
         const savedCode = context.draftEdit;
         if (!context.ready || savedCode === null || savedCode === context.lastSaved) return;
@@ -76,11 +76,9 @@ export function usePracticeDraft(options: Options) {
           updateCurrent({ status: "Could not autosave draft. Your editor content is still here; the next autosave will retry." });
         } finally { updateCurrent({ saving: false }); }
       })();
-      const currentWrite = pendingSave;
       pendingDraftWrites.set(persistenceScope, currentWrite);
       await currentWrite;
       if (pendingDraftWrites.get(persistenceScope) === currentWrite) pendingDraftWrites.delete(persistenceScope);
-      pendingSave = null;
     }
     const previousWrite = pendingDraftWrites.get(persistenceScope);
     const read = (async () => {
@@ -104,14 +102,7 @@ export function usePracticeDraft(options: Options) {
       clearInterval(timer);
       // Normal in-app navigation also saves dirty code. Never flush starter
       // content before the saved draft has been read successfully.
-      const saving = pendingSave;
-      const flush = save();
-      if (saving) {
-        pendingDraftWrites.set(persistenceScope, flush);
-        void flush.then(() => {
-          if (pendingDraftWrites.get(persistenceScope) === flush) pendingDraftWrites.delete(persistenceScope);
-        });
-      }
+      void save();
       active = false;
       context.active = false;
     };

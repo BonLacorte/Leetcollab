@@ -9,19 +9,19 @@ import { POST } from "../app/api/judge/submissions/route";
 import { GET } from "../app/api/judge/status/route";
 import { PracticeResult, type PracticeExecution } from "./room/practice-result";
 
-const mocks = vi.hoisted(() => ({ service: vi.fn(), rows: vi.fn(), token: "synthetic-token" }));
+const mocks = vi.hoisted(() => ({ service: vi.fn(), token: "synthetic-token" }));
 vi.mock("./auth-provider", () => ({ useAuth: () => ({ session: { access_token: mocks.token, user: { id: "owner" } } }) }));
 vi.mock("../lib/server/supabase-admin", () => ({ getSupabaseAdmin: () => ({ auth: {
   getUser: async (token: string) => ({ data: { user: ["synthetic-token", "refreshed-token"].includes(token) ? { id: "owner" } : null }, error: null }),
 } }) }));
 vi.mock("../lib/server/judge/context", () => ({ getJudgeService: (...args: unknown[]) => mocks.service(...args) }));
-vi.mock("../lib/supabase", () => ({ supabase: { from: () => {
-  const query = {
-    select: () => query, eq: () => query, maybeSingle: async () => ({ data: null }),
-    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: mocks.rows(), error: null }).then(resolve),
-  };
-  return query;
-} } }));
+vi.mock("../lib/supabase", () => ({ supabase: {
+  from: () => {
+    const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: null }) };
+    return query;
+  },
+  rpc: async () => ({ data: false, error: null }),
+} }));
 
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer | undefined;
@@ -88,9 +88,10 @@ function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true,
   const send = vi.fn(async (_url: string | URL | Request, _options?: RequestInit) => new Response(JSON.stringify({ output: providerOutput, error: providerError ?? "",
     status: providerError ? "error" : "success", exit_code: providerError ? 1 : 0, signal: null, truncated: false })));
   const service = new JudgeService(repository, new OnlineCompilerProvider({ apiKey: "synthetic-key",
-    policyAccepted: true, executionApproved: configured, fetch: send }));
+    policyAccepted: true, executionApproved: configured, fetch: send }), {
+    captureParticipants: async () => ({ roomId: null, userIds: ["owner"], capturedAt: new Date().toISOString() }),
+  });
   mocks.service.mockReturnValue(service);
-  mocks.rows.mockReturnValue([]);
   const responses: Response[] = [];
   const fetch = vi.fn(async (url: string, options?: RequestInit) => {
     const request = new Request(`https://app.test${url}`, options);
@@ -127,7 +128,6 @@ it.each(["Run", "Submit"])("%s accepts the imported Bracket Beacon solution thro
     compiler: "openjdk-25", code: `${imported}\n\n${harness.replace("class Main", "public class Main")}\n`,
   });
   expect(renderer!.root.findByType("h2").children).toEqual(["Accepted"]);
-  expect(output()).toContain("Not solved");
   expect(output()).not.toContain("isBalanced");
 });
 

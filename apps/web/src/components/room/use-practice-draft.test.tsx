@@ -262,6 +262,36 @@ it("waits for a navigation save before reading that exercise again", async () =>
   expect(latest.progress?.draftCode).toBe("latest A edit");
 });
 
+it("waits for both earlier navigation saves before restoring on a third visit", async () => {
+  const pending: Array<() => void> = [];
+  let stored = row("previous draft");
+  mocks.read.mockImplementation(async () => ({ data: stored, error: null }));
+  mocks.save.mockImplementation(value => new Promise(resolve => pending.push(() => {
+    stored = row(value.draft_code, value.problem_id);
+    resolve({ data: stored, error: null });
+  })));
+  await render();
+  await act(async () => latest.editCode("first autosave"));
+  await advance();
+  const second = { ...problem, id: "problem-b" };
+  await act(async () => latest.editCode("first visit departure"));
+  await act(async () => change({ problem: second, code: second.starterCode }));
+  await act(async () => change({ problem, code: problem.starterCode }));
+  await act(async () => latest.editCode("second visit departure"));
+  await act(async () => change({ problem: second, code: second.starterCode }));
+  await act(async () => pending[0]());
+  expect(pending).toHaveLength(2);
+  const readsBeforeReturn = mocks.read.mock.calls.length;
+  await act(async () => change({ problem, code: problem.starterCode }));
+  await act(async () => pending[1]());
+  expect(pending).toHaveLength(3);
+  expect(mocks.read).toHaveBeenCalledTimes(readsBeforeReturn + 1);
+  expect(latest.loading).toBe(true);
+  await act(async () => pending[2]());
+  expect(latest.progress?.draftCode).toBe("second visit departure");
+  expect(input.code).toBe(problem.starterCode);
+});
+
 it("keeps an intentionally empty saved draft private", async () => {
   mocks.read.mockResolvedValue({ data: row(""), error: null });
   await render();

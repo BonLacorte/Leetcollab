@@ -71,6 +71,13 @@ begin
   if response->>'result' <> 'reserved' or (response->>'used')::integer <> 1 then
     raise exception 'The partner still has a separate allowance: %', response;
   end if;
+
+  response := public.reserve_judge_execution('user', 'onlinecompiler', 'run',null,null,null,
+    tester, problem, gen_random_uuid(), 'java', 'class Solution {}', test_end, test_end+interval '1 day', 50, 1, 45);
+  if response->>'result' <> 'reserved' or (response->>'limit')::integer <> 50
+    or not exists(select 1 from public.judge_quota_periods where period_start=test_end and quota_limit=20 and used=1) then
+    raise exception 'A fresh local period must seed separate personal and shared limits: %', response;
+  end if;
 end;
 $$;
 

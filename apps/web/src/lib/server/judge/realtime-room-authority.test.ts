@@ -14,14 +14,20 @@ const submission = "55555555-5555-4555-8555-555555555555";
 const roomId = "abcdefgh";
 
 it("checks replacements against live room state, waits for rejoin, and refreshes captured sockets only", async () => {
-  const databaseBoundary = createServer((request, response) => {
+  let refreshLookup: unknown;
+  const databaseBoundary = createServer(async (request, response) => {
+    if (request.url === "/rest/v1/rpc/judge_refresh_recipients") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(chunk);
+      refreshLookup = JSON.parse(Buffer.concat(chunks).toString());
+    }
     const user = request.headers.authorization?.slice("Bearer ".length);
     const data = request.url === "/auth/v1/user" && user && [actor, peer, late].includes(user)
       ? { id: user, user_metadata: { username: user } }
       : request.url?.startsWith("/rest/v1/problems?")
         ? { id: problem, slug: "fixture", title: "Fixture", category: "Arrays", difficulty: "Easy", sort_order: 1,
           statement: "", starter_code: "starter", examples: [], constraints: [] }
-        : request.url === "/rest/v1/rpc/judge_refresh_recipients" && user === actor
+        : request.url === "/rest/v1/rpc/judge_refresh_recipients" && user === "synthetic-server-key"
           ? [actor, peer].map(id => ({ user_id: id, room_id: roomId, problem_id: problem }))
           : null;
     response.writeHead(data ? 200 : 404, { "Content-Type": "application/json" }).end(JSON.stringify(data));
@@ -30,7 +36,8 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
   const realtime = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], {
     cwd: new URL("../../../../../realtime/", import.meta.url),
     env: { ...process.env, PORT: "0", HOST: "127.0.0.1", ROOM_RESTORE_FILE: "",
-      SUPABASE_URL: `http://127.0.0.1:${(databaseBoundary.address() as AddressInfo).port}`, SUPABASE_ANON_KEY: "synthetic" },
+      SUPABASE_URL: `http://127.0.0.1:${(databaseBoundary.address() as AddressInfo).port}`, SUPABASE_ANON_KEY: "synthetic",
+      SUPABASE_SERVICE_ROLE_KEY: "synthetic-server-key" },
     stdio: ["ignore", "pipe", "inherit"],
   });
   const sockets: Socket<ServerToClientEvents, ClientToServerEvents>[] = [];
@@ -82,6 +89,7 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
       body: JSON.stringify({ submissionId: submission }), signal: AbortSignal.timeout(3000),
     })).status).toBe(202);
     for (const socket of [reconnected, partner, newcomer]) await socket.emitWithAck("room:current");
+    expect(refreshLookup).toEqual({ p_submission_id: submission, p_actor_id: actor });
     expect(notified.sort()).toEqual([actor, peer]);
   } finally {
     for (const socket of sockets) socket.disconnect();

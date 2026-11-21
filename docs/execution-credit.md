@@ -8,7 +8,8 @@ Already consumed attempts remain charged. The account ledger still tracks
 aggregate usage, serializes reservations and enforces global provider concurrency.
 A confirmed provider account exhaustion disables all users without spending
 their remaining personal attempts. Restricted evaluation keeps its existing
-shared budget, admission checks and 20-run ceiling.
+shared budget, admission checks and 20-run ceiling. Its accepted Submits give
+solved credit to the authenticated tester alone.
 
 ## Credit authority and concurrent membership
 
@@ -34,20 +35,24 @@ A participant who leaves after capture keeps eligibility for that attempt. A
 later joiner does not receive it. A replay cannot replace the original room,
 timestamp or participant set, including after the actor leaves. Reusing a key
 for another action, problem, source, provider or quota scope is refused.
+A matching Run can read a finalized legacy execution without changes to its
+stored identity, quota or credit.
 
 After the real submission completes with an accepted verdict and positive
 matching passed/total counts, the completion transaction grants
 `verified_problem_solves` rows to the captured participants only if its stored
 action is Submit. Runs and unsuccessful Submits never grant or erase credit.
 No peer submission is invented, and private submission source remains private.
-Recipients can read their solved problem IDs under RLS. The originating
-submission IDs and timestamps stay private. Direct client writes and direct
-service-role inserts are forbidden. Reservation and completion RPCs
+Clients call `has_verified_problem_solve(p_problem_id)` for their own boolean
+solved state. Attempt counts, submission IDs, timestamps and recipient rosters
+remain internal. Direct client writes and direct service-role inserts are forbidden. Reservation and completion RPCs
 are restricted to the trusted server role.
 
 The realtime completion endpoint independently checks that a submission belongs
 to the authenticated caller and is an accepted Submit before sending a refresh
-hint to captured recipients still connected to the room. Clients read their protected credit again on that hint, reconnect, window
+hint to captured, newly solved recipients still connected to the room. Set
+`SUPABASE_SERVICE_ROLE_KEY` on the realtime server to enable the internal
+recipient lookup. Clients read their protected credit again on that hint, reconnect, window
 focus or Refresh status. Losing a hint cannot undo durable credit or trigger a
 provider retry. This process-local membership authority requires one realtime
 room owner; a future multi-instance deployment needs shared authoritative room

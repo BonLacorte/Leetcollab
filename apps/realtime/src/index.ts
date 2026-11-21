@@ -37,6 +37,7 @@ const host = process.env.HOST ?? "0.0.0.0";
 const origin = (process.env.CORS_ORIGIN ?? "http://localhost:3000").split(",").map(value => value.trim());
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("SUPABASE_URL and SUPABASE_ANON_KEY are required.");
@@ -45,6 +46,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
+const supabaseAdmin = supabaseServiceRoleKey ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+}) : null;
 const app = express();
 app.use(helmet());
 app.use(cors({ origin, credentials: true }));
@@ -128,10 +132,10 @@ app.post("/judge/refresh", express.json({ limit: "2kb" }), async (request, respo
   try {
     const { data: identity, error: authError } = await supabase.auth.getUser(token);
     if (authError || !identity.user) return void response.status(401).json({ error: "Authentication required." });
-    const client = createClient(supabaseUrl!, supabaseAnonKey!, {
-      auth: { persistSession: false, autoRefreshToken: false }, global: { headers: { Authorization: `Bearer ${token}` } },
+    if (!supabaseAdmin) return void response.status(503).json({ error: "Completion refresh unavailable." });
+    const { data, error } = await supabaseAdmin.rpc("judge_refresh_recipients", {
+      p_submission_id: parsed.data, p_actor_id: identity.user.id,
     });
-    const { data, error } = await client.rpc("judge_refresh_recipients", { p_submission_id: parsed.data });
     if (error) throw error;
     for (const { user_id, room_id, problem_id } of data ?? []) {
       const joined = io.sockets.adapter.rooms.get(room_id);

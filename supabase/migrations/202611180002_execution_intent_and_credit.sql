@@ -37,7 +37,7 @@ create table public.verified_problem_solves (
   user_id uuid not null references public.profiles(id) on delete cascade,
   problem_id uuid not null references public.problems(id) on delete cascade,
   submission_id uuid not null references public.submissions(id) on delete cascade,
-  credited_at timestamptz not null default now(),
+  credited_at timestamptz not null default clock_timestamp(),
   primary key (user_id, problem_id, submission_id)
 );
 alter table public.judge_user_quota_periods enable row level security;
@@ -45,11 +45,16 @@ alter table public.judge_submission_participants enable row level security;
 alter table public.verified_problem_solves enable row level security;
 revoke all on public.judge_user_quota_periods, public.judge_submission_participants,
   public.verified_problem_solves from public, anon, authenticated, service_role;
-grant select (user_id, problem_id) on public.verified_problem_solves to authenticated;
 grant select on public.verified_problem_solves to service_role;
 grant select on public.judge_user_quota_periods to service_role;
-create policy "users read their verified solved credit" on public.verified_problem_solves
-  for select to authenticated using (auth.uid() = user_id);
+create function public.has_verified_problem_solve(p_problem_id uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+  select exists(
+    select 1 from public.verified_problem_solves where user_id=auth.uid() and problem_id=p_problem_id
+  )
+$$;
+revoke all on function public.has_verified_problem_solve(uuid) from public,anon,authenticated,service_role;
+grant execute on function public.has_verified_problem_solve(uuid) to authenticated;
 
 -- Historical buttons were indistinguishable. Preserve their already verified
 -- solved evidence, without retroactively granting unknown room partners credit.
@@ -91,7 +96,7 @@ create function public.reserve_judge_execution(
   p_active_limit integer, p_reservation_seconds integer
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 declare account public.judge_quota_periods; personal public.judge_user_quota_periods;
-  attempt public.submissions; result jsonb; expired_count integer;
+  attempt public.submissions; result jsonb; expired_count integer; active_count integer;
   no_snapshot boolean := p_room_id is null and p_participant_ids is null and p_captured_at is null;
 begin
   if p_scope is null or p_scope not in ('user','shared') or p_runner is null or p_runner not in ('jdoodle','onlinecompiler')
@@ -102,9 +107,34 @@ begin
       or cardinality(p_participant_ids) not between 1 and 256
       or array_position(p_participant_ids,null) is not null
       or (p_room_id is null and p_participant_ids <> array[p_user_id])
+      or (p_scope='shared' and p_room_id is not null)
       or (p_room_id is not null and p_room_id !~ '^[a-z0-9]{8}$')
     )) then
     raise exception 'invalid execution context' using errcode='22023';
+  end if;
+  select * into attempt from public.submissions
+    where user_id=p_user_id and idempotency_key=p_idempotency_key and execution_action='legacy';
+  if found then
+    if p_action <> 'run' or attempt.verification <> 'leetcollab'
+      or attempt.judge_state not in ('completed','failed')
+      or attempt.runner is distinct from p_runner or attempt.problem_id is distinct from p_problem_id
+      or attempt.language is distinct from p_language or attempt.source_code is distinct from p_source_code then
+      raise exception 'idempotency key belongs to another execution' using errcode='22023';
+    end if;
+    if p_scope='shared' then
+      select * into account from public.judge_quota_periods where period_start=p_period_start;
+      result := jsonb_build_object('used',coalesce(account.used,0),
+        'limit',least(coalesce(account.quota_limit,p_quota_limit),p_quota_limit),'active',coalesce(account.active,0),
+        'resetAt',coalesce(account.period_end,p_period_end));
+    else
+      select * into personal from public.judge_user_quota_periods where user_id=p_user_id and period_start=p_period_start;
+      select count(*) into active_count from public.submissions where user_id=p_user_id
+        and quota_scope='user' and quota_period_start=p_period_start and judge_state='reserved' and reservation_expires_at>now();
+      result := jsonb_build_object('used',coalesce(personal.used,0),
+        'limit',least(coalesce(personal.quota_limit,p_quota_limit),p_quota_limit),'active',active_count,
+        'resetAt',coalesce(personal.period_end,p_period_end));
+    end if;
+    return result || jsonb_build_object('result','existing','submissionId',attempt.id);
   end if;
   if p_scope='shared' then
     -- Restricted evaluation retains the existing account budget and admission.
@@ -124,7 +154,7 @@ begin
     -- provider requests. Its used counter remains an aggregate audit ledger;
     -- personal allowance, rather than that old shared ceiling, admits this call.
     insert into public.judge_quota_periods(period_start,period_end,quota_limit)
-      values(p_period_start,p_period_end,p_quota_limit) on conflict do nothing;
+      values(p_period_start,p_period_end,20) on conflict do nothing;
     select * into strict account from public.judge_quota_periods where period_start=p_period_start for update;
     with expired as (
       update public.submissions set judge_state='failed',status='error',verdict='runtime_error',
@@ -213,17 +243,21 @@ begin
   return result;
 end $$;
 
-create function public.judge_refresh_recipients(p_submission_id uuid)
+create function public.judge_refresh_recipients(p_submission_id uuid, p_actor_id uuid)
 returns table(user_id uuid, room_id text, problem_id uuid)
 language sql stable security definer set search_path=public as $$
-  select p.user_id, s.execution_room_id, s.problem_id
-    from public.submissions s join public.judge_submission_participants p on p.submission_id=s.id
-    where s.id=p_submission_id and s.user_id=auth.uid() and s.execution_room_id is not null
-      and s.execution_action='submit' and s.judge_state='completed' and s.verdict='accepted'
-      and s.tests_total>0 and s.tests_passed=s.tests_total
+  select credit.user_id, s.execution_room_id, s.problem_id
+    from public.submissions s join public.verified_problem_solves credit on credit.submission_id=s.id
+    where s.id=p_submission_id and s.user_id=p_actor_id and s.execution_room_id is not null
+      and s.execution_action='submit' and s.quota_scope='user'
+      and not exists (
+        select 1 from public.verified_problem_solves earlier
+          where earlier.user_id=credit.user_id and earlier.problem_id=credit.problem_id
+            and (earlier.credited_at,earlier.submission_id)<(credit.credited_at,credit.submission_id)
+      )
 $$;
-revoke all on function public.judge_refresh_recipients(uuid) from public,anon,authenticated,service_role;
-grant execute on function public.judge_refresh_recipients(uuid) to authenticated;
+revoke all on function public.judge_refresh_recipients(uuid,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.judge_refresh_recipients(uuid,uuid) to service_role;
 
 alter function public.exhaust_judge_quota(timestamptz) rename to exhaust_judge_quota_account_internal;
 revoke all on function public.exhaust_judge_quota_account_internal(timestamptz) from public,anon,authenticated,service_role;

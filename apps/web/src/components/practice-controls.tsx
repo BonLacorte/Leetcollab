@@ -67,15 +67,13 @@ function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, tok
     const generation = ++completionGeneration.current;
     try {
       // Protected credits reference real accepted Submits, including room credit.
-      const { data, error } = await supabase.from("verified_problem_solves")
-        .select("problem_id").eq("user_id", userId).eq("problem_id", problemId);
-      if (error) throw error;
-      const solved = (data ?? []).some(row => row.problem_id === problemId);
-      if (mounted.current && generation === completionGeneration.current) setCompletion(solved ? "solved" : "unsolved");
+      const { data, error } = await supabase.rpc("has_verified_problem_solve", { p_problem_id: problemId });
+      if (error || typeof data !== "boolean") throw error ?? new Error("Invalid completion status.");
+      if (mounted.current && generation === completionGeneration.current) setCompletion(data ? "solved" : "unsolved");
     } catch {
       if (mounted.current && generation === completionGeneration.current) setCompletion("unavailable");
     }
-  }, [problemId, userId]);
+  }, [problemId]);
 
   useEffect(() => {
     const refresh = () => { void refreshCompletion(); };

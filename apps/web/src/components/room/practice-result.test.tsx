@@ -16,7 +16,7 @@ vi.mock("../../lib/supabase", () => ({ supabase: { from: () => {
   const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: null }),
     then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve) };
   return query;
-}, rpc: async () => ({ data: [] }) } }));
+}, rpc: async (name: string) => ({ data: name === "has_verified_problem_solve" ? false : [] }) } }));
 
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root;

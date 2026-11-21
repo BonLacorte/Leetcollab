@@ -311,6 +311,16 @@ describe("JudgeService", () => {
     expect(provider.calls).toBe(0);
   });
 
+  it("refuses a new solo Submit without an authoritative snapshot", async () => {
+    const repository = new MemoryRepository(config());
+    const provider = new OutputProvider();
+    const reserve = vi.spyOn(repository, "reserve");
+    const response = await new JudgeService(repository, provider).submit("user-a", { ...request(), action: "submit" });
+    expect(response).toMatchObject({ status: 503, body: { ok: false, error: { code: "JUDGE_UNAVAILABLE" } } });
+    expect(reserve).not.toHaveBeenCalled();
+    expect(provider.calls).toBe(0);
+  });
+
   it("retains prior local usage and refuses the 51st execution", async () => {
     const repository = new MemoryRepository(config());
     repository.limit = 50;
