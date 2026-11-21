@@ -138,7 +138,7 @@ describe("structured public results", () => {
     `__LEETCOLLAB_CASE_V1__${index}:${Buffer.from(value).toString("base64")}\n`).join("");
   const publicConfig = (): JudgeConfig => ({ ...config(), expectedOutput: ["42", "HIDDEN_EXPECTED"],
     harnessSource: 'class Main { public static void main(String[] args) { System.out.println(Solution.answer()); System.out.println("HIDDEN_EXPECTED"); } }',
-    publicCasePlan: { format: "framed-v1", cases: [
+    publicCasePlan: { cases: [
       { id: "sample:1", fixtureIndex: 0, title: "Public example", input: "value = 7", expected: "42" },
     ] } });
 

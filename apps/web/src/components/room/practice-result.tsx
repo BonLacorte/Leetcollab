@@ -1,7 +1,7 @@
-import type { JudgeSubmissionResponse, JudgeVerdict } from "@leetcollab/contracts";
+import type { JudgePublicCase, JudgeSubmission, JudgeSubmissionResponse, JudgeVerdict } from "@leetcollab/contracts";
 import { CheckCircle2, Circle, XCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { compilerCountLabel, sourceDiagnostics, type PublicCase, type StructuredSubmission } from "./execution-feedback";
+import { compilerCountLabel, sourceDiagnostics } from "./execution-feedback";
 
 export type PracticeExecution = { action: "Run" | "Submit"; sourceCode: string; codeVersion: number } & (
   | { state: "running" }
@@ -15,7 +15,7 @@ const verdictLabels: Record<JudgeVerdict, string> = {
   memory_limit: "Memory Limit Exceeded", output_limit: "Output Limit Exceeded",
 };
 
-function CompilerFeedback({ submission, source }: { submission: StructuredSubmission; source: string }) {
+function CompilerFeedback({ submission, source }: { submission: JudgeSubmission; source: string }) {
   const diagnostics = sourceDiagnostics(submission, source);
   const lines = source.split(/\r\n?|\n/);
   return <div className="compiler-feedback">
@@ -33,7 +33,7 @@ function CompilerFeedback({ submission, source }: { submission: StructuredSubmis
   </div>;
 }
 
-function PublicCaseResults({ cases }: { cases: PublicCase[] }) {
+function PublicCaseResults({ cases }: { cases: JudgePublicCase[] }) {
   return <section className="public-case-results" aria-label="Public testcase results">
     <h3>Public testcases</h3>
     <Tabs defaultValue="case-0" className="public-case-tabs">
@@ -69,7 +69,7 @@ export function PracticeResult({ execution }: { execution: PracticeExecution | n
   </section>;
 
   const response = execution.state === "finished" ? execution.response : null;
-  const submission: StructuredSubmission | null = response?.ok ? response.submission : null;
+  const submission: JudgeSubmission | null = response?.ok ? response.submission : null;
   const title = submission ? verdictLabels[submission.verdict]
     : response && !response.ok && ["INVALID_REQUEST", "UNSAFE_SOURCE"].includes(response.error.code) ? "Submission Rejected"
     : response && !response.ok && response.error.code === "QUOTA_EXHAUSTED" ? "Execution Limit Reached"

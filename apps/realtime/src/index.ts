@@ -10,6 +10,7 @@ import { judgeParticipants, waitForJudgeParticipants } from "./judge-participant
 import {
   chatSendSchema,
   codeUpdateSchema,
+  codeStateRequestSchema,
   codeReplaceSchema,
   createRoomSchema,
   roomIdSchema,
@@ -481,6 +482,18 @@ io.on("connection", (socket) => {
     room.timer = initialTimer();
     broadcastState(room);
     callback(success(room));
+  });
+
+  socket.on("code:current", (payload, callback) => {
+    if (typeof callback !== "function") return;
+    const parsed = codeStateRequestSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid code request."));
+    const { roomId, problemId } = parsed.data;
+    const room = roomForMember(roomId, socket.data.userId);
+    if (!room || !socket.rooms.has(roomId) || (room.problem?.id ?? null) !== problemId) {
+      return callback(failure("The shared room or exercise changed."));
+    }
+    callback(success(room.code));
   });
 
   socket.on("code:update", (payload, callback) => {

@@ -23,6 +23,7 @@ type EditorPanelProps = {
   codeVersion: number;
   execution: PracticeExecution | null;
   canEditCode: boolean;
+  reconcilingCode?: boolean;
   progress: ProblemProgress | null;
   progressStatus: string;
   conflictingDraft?: string | null;
@@ -56,6 +57,7 @@ export function EditorPanel({
   codeVersion,
   execution,
   canEditCode,
+  reconcilingCode,
   progress,
   progressStatus,
   conflictingDraft,
@@ -101,8 +103,8 @@ export function EditorPanel({
   useEffect(() => {
     if (editorView) editorView.dispatch(setDiagnostics(editorView.state, editorDiagnostics(editorView.state, execution, problemId, code, codeVersion)));
   }, [editorView, execution, problemId, code, codeVersion]);
-  const editorEditable = canEditCode && !isRetrievingSubmission && !waitingForDraftWrite && conflictingDraft == null;
-  const replacementUnavailable = !problemId || !canEditCode || !connected || isProgressLoading || isRetrievingSubmission;
+  const editorEditable = canEditCode && !reconcilingCode && !isRetrievingSubmission && !waitingForDraftWrite && conflictingDraft == null;
+  const replacementUnavailable = !problemId || !canEditCode || reconcilingCode || !connected || isProgressLoading || isRetrievingSubmission;
   const actionsDisabled = replacementUnavailable || conflictingDraft != null;
 
   return (
@@ -147,7 +149,7 @@ export function EditorPanel({
       </div>
       <span className="sr-only" role="status">{maximized ? "Code card maximized. Press Escape to restore the workspace." : folded ? "Code card folded." : ""}</span>
       <div className="editor-content" id={`${tooltipId}-content`} hidden={folded}>
-        {problemId && <PracticeControls problemId={problemId} roomId={roomId} code={code} codeVersion={codeVersion} onExecutionChange={value => {
+        {problemId && <PracticeControls problemId={problemId} roomId={roomId} code={code} codeVersion={codeVersion} codePending={reconcilingCode || isRetrievingSubmission} onExecutionChange={value => {
           if (value.state === "running") setViewMode(current => current === "maximized" ? "normal" : current);
           onExecutionChange(value);
         }} />}

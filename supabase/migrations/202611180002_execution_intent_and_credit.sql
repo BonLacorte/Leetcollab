@@ -98,6 +98,46 @@ begin
       where period_start=p_period_start and provider_exhausted) then 'exhausted' else 'available' end);
 end $$;
 
+alter function public.complete_judge_submission(uuid,uuid,text,text,integer,integer,integer,text,text,text)
+  rename to complete_judge_submission_account_internal;
+revoke all on function public.complete_judge_submission_account_internal(uuid,uuid,text,text,integer,integer,integer,text,text,text)
+  from public,anon,authenticated,service_role;
+create function public.expire_prior_judge_reservation(
+  p_user_id uuid,p_idempotency_key uuid,p_runner text,p_problem_id uuid,
+  p_language text,p_source_code text,p_period_start timestamptz
+) returns void language plpgsql security definer set search_path=public as $$
+declare attempt_id uuid;
+begin
+  select id into attempt_id from public.submissions
+    where user_id=p_user_id and idempotency_key=p_idempotency_key
+      and runner=p_runner and problem_id=p_problem_id and language=p_language and source_code=p_source_code
+      and verification='leetcollab' and judge_state='reserved'
+      and quota_period_start<p_period_start and reservation_expires_at<=now();
+  if found then
+    perform public.complete_judge_submission_account_internal(p_user_id,attempt_id,'failed','runtime_error',
+      0,0,0,'The judge reservation expired before completion.',null,null);
+  end if;
+end $$;
+revoke all on function public.expire_prior_judge_reservation(uuid,uuid,text,uuid,text,text,timestamptz)
+  from public,anon,authenticated,service_role;
+
+alter function public.reserve_judge_submission_for_runner(
+  text,uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer
+) rename to reserve_shared_judge_submission;
+
+create function public.reserve_judge_submission_for_runner(
+  p_runner text,p_user_id uuid,p_problem_id uuid,p_idempotency_key uuid,p_language text,p_source_code text,
+  p_period_start timestamptz,p_period_end timestamptz,p_quota_limit integer,p_active_limit integer,p_reservation_seconds integer
+) returns jsonb language plpgsql security definer set search_path=public as $$
+begin
+  perform public.expire_prior_judge_reservation(p_user_id,p_idempotency_key,p_runner,p_problem_id,p_language,p_source_code,p_period_start);
+  return public.reserve_shared_judge_submission(p_runner,p_user_id,p_problem_id,p_idempotency_key,
+    p_language,p_source_code,p_period_start,p_period_end,p_quota_limit,p_active_limit,p_reservation_seconds);
+end $$;
+revoke all on function public.reserve_judge_submission_for_runner(
+  text,uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer
+) from public,anon,authenticated,service_role;
+
 create function public.reserve_judge_execution(
   p_scope text, p_runner text, p_action text, p_room_id text, p_participant_ids uuid[],
   p_user_id uuid, p_problem_id uuid, p_idempotency_key uuid, p_language text, p_source_code text,
@@ -121,6 +161,7 @@ begin
     )) then
     raise exception 'invalid execution context' using errcode='22023';
   end if;
+  perform public.expire_prior_judge_reservation(p_user_id,p_idempotency_key,p_runner,p_problem_id,p_language,p_source_code,p_period_start);
   select * into attempt from public.submissions
     where user_id=p_user_id and idempotency_key=p_idempotency_key and execution_action='legacy';
   if found and attempt.judge_state<>'reserved' then
@@ -140,7 +181,7 @@ begin
     result := result || jsonb_build_object('result','existing','submissionId',attempt.id);
   elsif p_scope='shared' then
     -- Restricted evaluation retains the existing account budget and admission.
-    result := public.reserve_judge_submission_for_runner(p_runner,p_user_id,p_problem_id,p_idempotency_key,
+    result := public.reserve_shared_judge_submission(p_runner,p_user_id,p_problem_id,p_idempotency_key,
       p_language,p_source_code,p_period_start,p_period_end,p_quota_limit,p_active_limit,p_reservation_seconds);
   else
     if p_language <> 'java' or char_length(p_source_code) not between 1 and 32768
@@ -213,10 +254,6 @@ begin
   return result;
 end $$;
 
-alter function public.complete_judge_submission(uuid,uuid,text,text,integer,integer,integer,text,text,text)
-  rename to complete_judge_submission_account_internal;
-revoke all on function public.complete_judge_submission_account_internal(uuid,uuid,text,text,integer,integer,integer,text,text,text)
-  from public,anon,authenticated,service_role;
 create function public.complete_judge_submission(
   p_user_id uuid,p_submission_id uuid,p_judge_state text,p_verdict text,p_tests_passed integer,p_tests_total integer,
   p_duration_ms integer,p_diagnostics text,p_provider_cpu_time text,p_provider_memory text

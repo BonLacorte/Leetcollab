@@ -108,6 +108,8 @@ function formatTimer(timer: RoomTimer, now: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+type SharedCodeState = { roomId: string; problemId: string | null; code: string; pendingEdit: symbol | null };
+
 export function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
   const { session, loading } = useAuth();
@@ -118,7 +120,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
   useEffect(() => { setExecution(null); }, [executionScope]);
   const [code, setCode] = useState("");
   const codeRef = useRef("");
-  const sharedCode = useRef<{ roomId: string; problemId: string | null; code: string; pendingEdit: symbol | null } | null>(null);
+  const sharedCode = useRef<SharedCodeState | null>(null);
+  const [reconcilingCode, setReconcilingCode] = useState(false);
   const [codeVersion, setCodeVersion] = useState(0);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("Connecting to room…");
@@ -209,6 +212,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       const problemId = state.problem?.id ?? null;
       if (sharedCode.current?.roomId !== state.roomId || sharedCode.current.problemId !== problemId) {
         sharedCode.current = { roomId: state.roomId, problemId, code: state.code, pendingEdit: null };
+        setReconcilingCode(false);
       }
       setRoom(state);
       receiveEditorCode(state.code);
@@ -293,7 +297,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const canChat = isHost || currentMember?.permissions.canChat === true;
   const canChangeProblem = isHost || currentMember?.permissions.canChangeProblem === true;
   const draft = usePracticeDraft({ roomId, userId: session?.user.id, problem: room?.problem ?? null, code,
-    canEditCode, connected: socket?.connected ?? false, onCodeChange: updateCode, onCodeReplace: replaceSharedCode });
+    canEditCode: canEditCode && !reconcilingCode, connected: socket?.connected ?? false, onCodeChange: updateCode, onCodeReplace: replaceSharedCode });
   const filteredProblems = problemCatalog.filter((problem) => {
     const matchesDifficulty = difficultyFilter === "All" || problem.difficulty === difficultyFilter;
     const search = problemSearch.trim().toLowerCase();
@@ -318,40 +322,68 @@ export function RoomClient({ roomId }: { roomId: string }) {
     setCode(nextCode);
   }
 
-  function receiveEditorCode(nextCode: string, invalidate = false) {
+  function receiveEditorCode(nextCode: string) {
     const shared = sharedCode.current;
     if (!shared) return;
     shared.code = nextCode;
-    if (!shared.pendingEdit) replaceEditorCode(nextCode, invalidate);
+    if (!shared.pendingEdit) replaceEditorCode(nextCode);
+  }
+
+  function settleEditorWrite(shared: SharedCodeState, edit: symbol, authoritativeCode?: string) {
+    if (sharedCode.current !== shared) return;
+    if (authoritativeCode !== undefined) shared.code = authoritativeCode;
+    if (shared.pendingEdit !== edit) return;
+    shared.pendingEdit = null;
+    replaceEditorCode(shared.code);
+  }
+
+  function reconcileEditorWrite(shared: SharedCodeState, edit: symbol, onConfirmed?: (code: string | null) => void) {
+    if (!socket?.connected || sharedCode.current !== shared || shared.pendingEdit !== edit) {
+      onConfirmed?.(null);
+      return;
+    }
+    setReconcilingCode(true);
+    socket.timeout(3000).emit("code:current", { roomId: shared.roomId, problemId: shared.problemId }, (error, response) => {
+      if (sharedCode.current !== shared || shared.pendingEdit !== edit) return onConfirmed?.(null);
+      if (error || !response.ok) {
+        setStatus("Shared code could not be confirmed. Reconnect before editing or running code.");
+        return onConfirmed?.(null);
+      }
+      settleEditorWrite(shared, edit, response.data);
+      setReconcilingCode(false);
+      onConfirmed?.(response.data);
+    });
   }
 
   function updateCode(nextCode: string) {
-    if (!canEditCode) return;
+    if (!canEditCode || reconcilingCode) return;
     replaceEditorCode(nextCode, true);
     const shared = sharedCode.current;
     if (!socket?.connected || !shared || shared.roomId !== roomId || shared.problemId !== (room?.problem?.id ?? null)) return;
     const edit = Symbol();
     shared.pendingEdit = edit;
     socket.timeout(3000).emit("code:update", { roomId, problemId: shared.problemId, code: nextCode }, (error, response) => {
-      if (sharedCode.current !== shared) return;
-      if (!error && response.ok) shared.code = nextCode;
-      if (shared.pendingEdit !== edit) return;
-      shared.pendingEdit = null;
-      replaceEditorCode(shared.code);
+      if (error) return reconcileEditorWrite(shared, edit);
+      settleEditorWrite(shared, edit, response.ok ? nextCode : undefined);
     });
   }
 
   async function replaceSharedCode(problemId: string, expectedCode: string, nextCode: string) {
     const shared = sharedCode.current;
-    if (!socket?.connected || !shared || shared.roomId !== roomId || shared.problemId !== problemId) {
+    if (!socket?.connected || !shared || reconcilingCode || shared.roomId !== roomId || shared.problemId !== problemId) {
       throw new Error("Reconnect before replacing shared code.");
     }
+    const edit = Symbol();
+    shared.pendingEdit = edit;
     await new Promise<void>((resolve, reject) => {
       socket.timeout(3000).emit("code:replace", { roomId, problemId, expectedCode, code: nextCode }, (error, response) => {
-        if (error) return reject(error);
-        if (!response.ok) return reject(new Error(response.error));
+        if (error) return reconcileEditorWrite(shared, edit, code => {
+          if (code === nextCode) resolve();
+          else reject(error);
+        });
         if (sharedCode.current !== shared) return reject(new Error("The shared exercise changed."));
-        receiveEditorCode(nextCode, true);
+        settleEditorWrite(shared, edit, response.ok ? nextCode : undefined);
+        if (!response.ok) return reject(new Error(response.error));
         resolve();
       });
     });
@@ -681,6 +713,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
           codeVersion={codeVersion}
           execution={execution?.scope === executionScope ? execution.value : null}
           canEditCode={canEditCode}
+          reconcilingCode={reconcilingCode}
           progress={draft.progress}
           progressStatus={draft.status}
           conflictingDraft={draft.conflictingDraft}

@@ -4,8 +4,8 @@ import type {
   JudgeSubmission,
   JudgeVerdict,
   JudgePublicCase,
+  JudgeCompilerDiagnostic,
 } from "@leetcollab/contracts";
-import type { CompilerDiagnostic } from "./diagnostics";
 
 // Internal admission status is stripped before any public response.
 export type AdmissionQuota = JudgeQuota & {
@@ -29,7 +29,6 @@ export type JudgeConfig = {
   expectedOutput: string[];
   fallback: JudgeFallback;
   publicCasePlan?: {
-    format: "framed-v1";
     cases: Array<Omit<JudgePublicCase, "output" | "passed"> & { fixtureIndex: number }>;
   };
 };
@@ -112,7 +111,7 @@ export type ExecutionResult =
       kind: "execution_error";
       verdict: Exclude<JudgeVerdict, "accepted" | "wrong_answer">;
       diagnostics: string;
-      compilerDiagnostics?: CompilerDiagnostic[];
+      compilerDiagnostics?: JudgeCompilerDiagnostic[];
       compilerErrorCount?: number | null;
       compilerDiagnosticsComplete?: boolean;
       durationMs: number;

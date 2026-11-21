@@ -3,11 +3,11 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it } from "vitest";
 import { PracticeResult, type PracticeExecution } from "./practice-result";
-import type { StructuredSubmission } from "./execution-feedback";
+import type { JudgeSubmission } from "@leetcollab/contracts";
 
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 const source = "class Solution {\n  static int answer() {\n    return 12\n  }\n}";
-const submission: StructuredSubmission = {
+const submission: JudgeSubmission = {
   id: "22222222-2222-4222-8222-222222222222", problemId: "11111111-1111-4111-8111-111111111111", language: "java",
   verdict: "compile_error", verification: "leetcollab", testsPassed: 0, testsTotal: 4, durationMs: 10,
   diagnostics: "Generic legacy compiler summary", createdAt: "2026-11-18T03:00:00.000Z",
@@ -17,7 +17,7 @@ const submission: StructuredSubmission = {
 let root: Root;
 let container: HTMLDivElement;
 afterEach(async () => { await act(async () => root?.unmount()); document.body.replaceChildren(); });
-async function render(overrides: Partial<StructuredSubmission> = {}, sourceCode = source) {
+async function render(overrides: Partial<JudgeSubmission> = {}, sourceCode = source) {
   const execution: PracticeExecution = { action: "Run", sourceCode, codeVersion: 1, state: "finished", response: {
     ok: true, quota: { used: 1, limit: 50, remaining: 49, active: 0, resetAt: "2026-11-18T23:55:00.000Z" }, submission: { ...submission, ...overrides },
   } };

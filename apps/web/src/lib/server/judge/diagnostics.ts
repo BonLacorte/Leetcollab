@@ -1,6 +1,5 @@
 import type { JudgeCompilerDiagnostic, JudgeSubmission, JudgeVerdict } from "@leetcollab/contracts";
 
-export type CompilerDiagnostic = JudgeCompilerDiagnostic;
 export type CompilerReport = Required<Pick<JudgeSubmission,
   "compilerDiagnostics" | "compilerErrorCount" | "compilerDiagnosticsComplete">>;
 
@@ -38,7 +37,7 @@ export function hasCompilerLocation(output: string): boolean {
 }
 
 export function compilerReport(output: string): CompilerReport {
-  const diagnostics: CompilerDiagnostic[] = [];
+  const diagnostics: JudgeCompilerDiagnostic[] = [];
   let headers = 0;
   for (const line of output.slice(0, 8192).split(/\r\n?|\n/)) {
     const header = compilerHeader.exec(line);
@@ -61,7 +60,7 @@ export function compilerReport(output: string): CompilerReport {
 }
 
 export function publicCompilerReport(
-  source: string, output: string | null, issues?: CompilerDiagnostic[],
+  source: string, output: string | null, issues?: JudgeCompilerDiagnostic[],
   errorCount: number | null = null, complete = false,
 ): CompilerReport {
   const report = issues === undefined ? compilerReport(output ?? "") : {
@@ -83,7 +82,7 @@ export function publicCompilerReport(
   };
 }
 
-export function compilerSummary(issues: CompilerDiagnostic[]): string {
+export function compilerSummary(issues: JudgeCompilerDiagnostic[]): string {
   return issues.map(issue => `Line ${issue.line}: ${issue.message}`).join("\n") || unknownCompilerMessage;
 }
 

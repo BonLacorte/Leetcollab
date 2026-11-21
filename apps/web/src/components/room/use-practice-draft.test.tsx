@@ -237,15 +237,15 @@ it("discards old exercise reads after switching, and never overwrites a saved dr
   expect(mocks.save).not.toHaveBeenCalled();
 });
 
-it("warns about a stale save without replacing the unsaved editor text", async () => {
+it.each(["timer", "navigation"])("retains a recovered conflict for the next %s save", async trigger => {
   const oldDraft = row("previous draft");
   mocks.read.mockResolvedValue({ data: oldDraft, error: null });
-  mocks.save.mockResolvedValue({ data: null, error: null });
-  await render({ userId: "timer-conflict-user" });
+  mocks.save.mockResolvedValueOnce({ data: null, error: null });
+  await render({ userId: `conflict-${trigger}` });
   await act(async () => latest.editCode("my unsaved edit"));
   await advance();
   expect(mocks.save).toHaveBeenCalledExactlyOnceWith({
-    p_user_id: "timer-conflict-user", p_problem_id: problem.id, p_draft_code: "my unsaved edit",
+    p_user_id: `conflict-${trigger}`, p_problem_id: problem.id, p_draft_code: "my unsaved edit",
     p_expected_saved_at: oldDraft.last_saved_at,
   });
   expect(latest.status).toContain("This edit was not saved");
@@ -261,8 +261,16 @@ it("warns about a stale save without replacing the unsaved editor text", async (
   await act(async () => latest.recoverConflict());
   expect(latest.conflictingDraft).toBeNull();
   expect(latest.progress?.draftCode).toBe("newer tab draft");
-  await advance();
-  expect(mocks.save).toHaveBeenCalledTimes(1);
+  mocks.save.mockResolvedValueOnce({ data: row("my unsaved edit"), error: null });
+  if (trigger === "timer") await advance();
+  else {
+    const second = { ...problem, id: "problem-b" };
+    await act(async () => change({ problem: second, code: second.starterCode }));
+  }
+  expect(mocks.save).toHaveBeenCalledTimes(2);
+  expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({
+    p_draft_code: "my unsaved edit", p_expected_saved_at: "2026-11-18T03:01:00.000Z",
+  }));
 });
 
 it("preserves a navigation save conflict privately when revisiting the exercise", async () => {

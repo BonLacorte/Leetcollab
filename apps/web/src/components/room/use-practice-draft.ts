@@ -93,6 +93,10 @@ export function usePracticeDraft(options: Options) {
           context.lastSavedAt = row.last_saved_at;
           updateCurrent({ progress: progressFromRow(row), status: "Draft autosaved." });
         } catch {
+          if (!active && context.draftEdit !== null) {
+            conflictingDrafts.set(persistenceScope, context.draftEdit);
+            context.draftEdit = null;
+          }
           updateCurrent({ status: "Could not autosave draft. Your editor content is still here; the next autosave will retry." });
         } finally { updateCurrent({ saving: false }); }
       })();
@@ -183,8 +187,7 @@ export function usePracticeDraft(options: Options) {
       return javaDraft(row);
     }, "Saved draft restored into the shared editor.", "No saved Java draft found for this exercise.", () => {
       const savedCode = javaDraft(row);
-      if (context.draftEdit !== null && context.draftEdit !== context.lastSaved && context.draftEdit !== savedCode
-        && context.lastSavedAt !== row?.last_saved_at) {
+      if (context.draftEdit !== null && context.draftEdit !== context.lastSaved && context.draftEdit !== savedCode) {
         conflictingDrafts.set(persistenceScope, context.draftEdit);
       }
       applySavedProgress(row);
@@ -201,6 +204,7 @@ export function usePracticeDraft(options: Options) {
     }, "Unsaved draft recovered into the shared editor.", "", () => {
       conflictingDrafts.delete(persistenceScope);
       applySavedProgress(row);
+      context.draftEdit = conflict;
     });
   }
 

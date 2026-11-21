@@ -291,9 +291,9 @@ export const createRoomSchema = z.object({
 });
 export const roomIdSchema = z.object({ roomId: roomCodeSchema });
 export const setProblemSchema = roomIdSchema.extend({ problemId: z.string().uuid() });
-export const codeUpdateSchema = roomIdSchema.extend({
+export const codeStateRequestSchema = roomIdSchema.extend({ problemId: z.string().uuid().nullable() });
+export const codeUpdateSchema = codeStateRequestSchema.partial({ problemId: true }).extend({
   code: z.string().max(100_000),
-  problemId: z.string().uuid().nullable().optional(),
 });
 export const codeReplaceSchema = codeUpdateSchema.extend({
   problemId: z.string().uuid(),
@@ -322,6 +322,7 @@ export interface ClientToServerEvents {
   "room:timer:start": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "room:timer:pause": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "room:timer:reset": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
+  "code:current": (payload: z.infer<typeof codeStateRequestSchema>, callback: (response: Acknowledgement<string>) => void) => void;
   "code:update": (payload: z.infer<typeof codeUpdateSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "code:replace": (payload: z.infer<typeof codeReplaceSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "chat:send": (payload: z.infer<typeof chatSendSchema>, callback: (response: Acknowledgement<null>) => void) => void;

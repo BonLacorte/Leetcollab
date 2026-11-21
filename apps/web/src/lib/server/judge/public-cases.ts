@@ -29,7 +29,7 @@ export function readPublicCasePlan(
   // Public invocations precede private invocations, preventing private inputs
   // from reaching public output through state left by an earlier hidden case.
   if (cases.some(item => item.fixtureIndex >= cases.length)) return;
-  return { format: "framed-v1", cases };
+  return { cases };
 }
 
 /** Change trusted harness output only. Submitted source is never rewritten. */

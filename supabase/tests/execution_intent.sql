@@ -283,4 +283,54 @@ begin
   end if;
   reset role;
 end $$;
+do $$
+declare
+  actor uuid := gen_random_uuid();
+  problem uuid := (select id from public.problems where slug='parcel-pair');
+  scope text; action text; runner text; key uuid; result jsonb; attempt uuid;
+  old_start timestamptz := '2197-01-01T23:55:00Z'; new_start timestamptz;
+begin
+  insert into auth.users(id,email) values(actor,'expired-retry@example.test');
+  for scope, action, runner in values ('legacy','run','jdoodle'), ('legacy','run','onlinecompiler'),
+    ('user','run','jdoodle'), ('user','submit','onlinecompiler'),
+    ('shared','run','onlinecompiler'), ('shared','submit','onlinecompiler')
+  loop
+    key := gen_random_uuid();
+    new_start := old_start+interval '1 day';
+    if scope='legacy' then
+      result := case runner when 'jdoodle' then
+        public.reserve_judge_submission(actor,problem,key,'java','class Solution {}',old_start,new_start,20,4,45)
+      else
+        public.reserve_onlinecompiler_submission(actor,problem,key,'java','class Solution {}',old_start,new_start,20,4,45)
+      end;
+    else
+      result := public.reserve_judge_execution(scope,runner,action,null,
+        case when action='submit' then array[actor] else null end,
+        actor,problem,key,'java','class Solution {}',old_start,new_start,case scope when 'user' then 25 else 20 end,4,45);
+    end if;
+    if result->>'result' is distinct from 'reserved' then raise exception 'Fixture did not reserve: %', result; end if;
+    attempt := (result->>'submissionId')::uuid;
+    update public.submissions set reservation_expires_at=now()-interval '1 second' where id=attempt;
+
+    if scope='legacy' then
+      result := case runner when 'jdoodle' then
+        public.reserve_judge_submission(actor,problem,key,'java','class Solution {}',new_start,new_start+interval '1 day',20,4,45)
+      else
+        public.reserve_onlinecompiler_submission(actor,problem,key,'java','class Solution {}',new_start,new_start+interval '1 day',20,4,45)
+      end;
+    else
+      result := public.reserve_judge_execution(scope,runner,action,null,null,
+        actor,problem,key,'java','class Solution {}',new_start,new_start+interval '1 day',case scope when 'user' then 25 else 20 end,4,45);
+    end if;
+    if result->>'result' is distinct from 'existing' or (result->>'submissionId')::uuid is distinct from attempt
+      or (result->>'used')::int is distinct from 0
+      or not exists(select 1 from public.submissions where id=attempt and judge_state='failed' and verdict='runtime_error')
+      or not exists(select 1 from public.judge_quota_periods where period_start=old_start and used=1 and active=0)
+      or not exists(select 1 from public.judge_user_quota_periods where user_id=actor and period_start=old_start and used=1)
+      or exists(select 1 from public.verified_problem_solves where user_id=actor) then
+      raise exception 'Expired % % retry must release its original lease without new usage or credit: %', scope, action, result;
+    end if;
+    old_start := new_start+interval '1 day';
+  end loop;
+end $$;
 rollback;

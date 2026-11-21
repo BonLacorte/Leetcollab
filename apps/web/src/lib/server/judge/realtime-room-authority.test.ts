@@ -79,6 +79,10 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     expect(await owner.emitWithAck("code:update", { roomId, problemId: problem, code: "collaborator edit" }))
       .toEqual({ ok: true, data: null });
     expect(await typed).toBe("collaborator edit");
+    expect(await owner.emitWithAck("code:current", { roomId, problemId: problem }))
+      .toEqual({ ok: true, data: "collaborator edit" });
+    expect(await owner.emitWithAck("code:current", { roomId, problemId: submission }))
+      .toMatchObject({ ok: false });
 
     const requestSnapshot = (secret?: string, token = actor) => fetch(`${base}/judge/participants?problemId=${problem}&roomId=${roomId}`, {
       headers: { Authorization: `Bearer ${token}`, ...(secret ? { "X-Realtime-Judge-Secret": secret } : {}) },

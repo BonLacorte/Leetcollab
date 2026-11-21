@@ -1,6 +1,7 @@
 -- Run only in a fresh disposable database after all migrations.
 \set ON_ERROR_STOP on
-set time zone 'Asia/Manila';
+begin;
+set local time zone 'Asia/Manila';
 
 select gen_random_uuid() as tester, gen_random_uuid() as partner,
   date_bin(interval '1 day', now(), timestamptz '2000-01-01 23:55+00') as period_start
@@ -17,7 +18,6 @@ values (:'tester', :'period_start', :'period_start'::timestamptz + interval '1 d
 
 \ir ../local/enable-test-quota.sql
 
-begin;
 select set_config('test.quota_actor', :'tester', true),
        set_config('test.quota_partner', :'partner', true),
        set_config('test.quota_start', :'period_start', true);

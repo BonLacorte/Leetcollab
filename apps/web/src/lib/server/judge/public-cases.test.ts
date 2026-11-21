@@ -14,7 +14,7 @@ const plan = () => ({ format: "framed-v1", fixtureVersion: 1,
 const frame = (index: number, value: string) => `__LEETCOLLAB_CASE_V1__${index}:${Buffer.from(value).toString("base64")}\n`;
 
 it("accepts only explicit reviewed fixture mappings with matching hash/version/expected data", () => {
-  expect(readPublicCasePlan(plan(), 1, harness, ["42"])).toEqual({ format: "framed-v1", cases: [example] });
+  expect(readPublicCasePlan(plan(), 1, harness, ["42"])).toEqual({ cases: [example] });
 });
 
 it.each([
@@ -78,7 +78,7 @@ it.each([
 it("projects only public cases and never copies hidden outputs/indexes into response data", () => {
   const config: JudgeConfig = { problemId: "problem", fixtureVersion: 1, harnessSource: harness,
     expectedOutput: ["42", "HIDDEN_EXPECTED"], fallback: null,
-    publicCasePlan: { format: "framed-v1", cases: [example] } };
+    publicCasePlan: { cases: [example] } };
   expect(publicCaseResults(config, ["41", "HIDDEN_ACTUAL"])).toEqual([
     { id: example.id, title: example.title, input: example.input, expected: "42", output: "41", passed: false },
   ]);

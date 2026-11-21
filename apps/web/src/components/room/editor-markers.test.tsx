@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EditorView } from "@uiw/react-codemirror";
 import { diagnosticCount } from "@codemirror/lint";
 import { EditorPanel } from "./editor-panel";
-import type { StructuredSubmission } from "./execution-feedback";
+import type { JudgeSubmission } from "@leetcollab/contracts";
 
 vi.mock("../theme-provider", () => ({ useTheme: () => ({ theme: "light" }) }));
 vi.mock("../practice-controls", () => ({ PracticeControls: () => <div>Judge controls</div> }));
@@ -15,7 +15,7 @@ Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: 
 
 const code = "class Solution {\n  static int answer() {\n    return 12\n  }\n}";
 const problemId = "11111111-1111-4111-8111-111111111111";
-const submission: StructuredSubmission = { id: "22222222-2222-4222-8222-222222222222", problemId, language: "java", verdict: "compile_error",
+const submission: JudgeSubmission = { id: "22222222-2222-4222-8222-222222222222", problemId, language: "java", verdict: "compile_error",
   verification: "leetcollab", testsPassed: 0, testsTotal: 4, durationMs: 10, diagnostics: "Compile failure", createdAt: "2026-11-18T03:00:00.000Z",
   compilerDiagnostics: [{ line: 3, message: "Expected a semicolon (;)." }], compilerErrorCount: 1, compilerDiagnosticsComplete: true };
 const props: ComponentProps<typeof EditorPanel> = {

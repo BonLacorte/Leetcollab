@@ -19,16 +19,17 @@ type PracticeControlsProps = {
   roomId?: string;
   code: string;
   codeVersion?: number;
+  codePending?: boolean;
   onExecutionChange: (execution: PracticeExecution) => void;
 };
 
-export function PracticeControls({ problemId, roomId, code, codeVersion = 0, onExecutionChange }: PracticeControlsProps) {
+export function PracticeControls({ problemId, roomId, code, codeVersion = 0, codePending, onExecutionChange }: PracticeControlsProps) {
   const { session } = useAuth();
   if (!session) return null;
-  return <SessionPracticeControls key={`${problemId}:${session.user.id}`} problemId={problemId} roomId={roomId} code={code} codeVersion={codeVersion} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
+  return <SessionPracticeControls key={`${problemId}:${session.user.id}`} problemId={problemId} roomId={roomId} code={code} codeVersion={codeVersion} codePending={codePending} token={session.access_token} userId={session.user.id} onExecutionChange={onExecutionChange} />;
 }
 
-function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
+function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, codePending, token, userId, onExecutionChange }: PracticeControlsProps & { token: string; userId: string }) {
   const socket = useSocket();
   const mounted = useRef(false);
   const statusGeneration = useRef(0);
@@ -106,7 +107,7 @@ function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, tok
   }, [quota, busy, refreshStatus]);
 
   async function run(action: "Run" | "Submit") {
-    if (busy || !quota?.available) return;
+    if (busy || codePending || !quota?.available) return;
     statusGeneration.current += 1;
     setQuota(null);
     setBusy(true);
@@ -157,8 +158,8 @@ function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, tok
     <section className="practice-execution" aria-label="Execution">
       <div className="practice-action-row">
         <div className="practice-actions">
-          <Button size="sm" variant="secondary" disabled={busy || !quota?.available} onClick={() => run("Run")} type="button"><Play aria-hidden="true" />{busy ? "Working…" : "Run"}</Button>
-          <Button size="sm" disabled={busy || !quota?.available} onClick={() => run("Submit")} type="button">Submit</Button>
+          <Button size="sm" variant="secondary" disabled={busy || codePending || !quota?.available} onClick={() => run("Run")} type="button"><Play aria-hidden="true" />{busy ? "Working…" : "Run"}</Button>
+          <Button size="sm" disabled={busy || codePending || !quota?.available} onClick={() => run("Submit")} type="button">Submit</Button>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => { void refreshStatus(); void refreshCompletion(); }} type="button"><RotateCw aria-hidden="true" />Refresh status</Button>
         </div>
         <p className={`practice-completion${completion === "solved" ? " is-solved" : ""}`} role="status">
