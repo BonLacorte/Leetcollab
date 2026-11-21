@@ -35,7 +35,7 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
   await once(databaseBoundary, "listening");
   const realtime = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], {
     cwd: new URL("../../../../../realtime/", import.meta.url),
-    env: { ...process.env, PORT: "0", HOST: "127.0.0.1", ROOM_RESTORE_FILE: "",
+    env: { ...process.env, PORT: "0", HOST: "127.0.0.1",
       SUPABASE_URL: `http://127.0.0.1:${(databaseBoundary.address() as AddressInfo).port}`, SUPABASE_ANON_KEY: "synthetic",
       SUPABASE_SERVICE_ROLE_KEY: "synthetic-server-key" },
     stdio: ["ignore", "pipe", "inherit"],

@@ -19,7 +19,6 @@ export type QuotaPeriod = {
 
 export type SubmissionParticipants = {
   roomId: string | null;
-  capturedAt: string;
   userIds: string[];
 };
 

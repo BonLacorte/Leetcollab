@@ -102,7 +102,7 @@ class RunnerReservationConcurrencyTest(unittest.TestCase):
                         barrier.wait()
                         return json.loads(self.query(
                             "select public.reserve_judge_execution('user','onlinecompiler',"
-                            f"'submit','abcdefgh',array['{self.user}'::uuid,'{peer}'::uuid],now(),"
+                            f"'submit','abcdefgh',array['{self.user}'::uuid,'{peer}'::uuid],"
                             f"'{self.user}','{self.problem}','{uuid.uuid4()}','java','class Solution {{}}',"
                             f"'{self.start}','{self.end}',{limit},4,45)"))
 

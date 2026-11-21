@@ -89,7 +89,7 @@ function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true,
     status: providerError ? "error" : "success", exit_code: providerError ? 1 : 0, signal: null, truncated: false })));
   const service = new JudgeService(repository, new OnlineCompilerProvider({ apiKey: "synthetic-key",
     policyAccepted: true, executionApproved: configured, fetch: send }), {
-    captureParticipants: async () => ({ roomId: null, userIds: ["owner"], capturedAt: new Date().toISOString() }),
+    captureParticipants: async () => ({ roomId: null, userIds: ["owner"] }),
   });
   mocks.service.mockReturnValue(service);
   const responses: Response[] = [];
@@ -177,7 +177,6 @@ it.each(["Run", "Submit"])("%s still rejects forbidden imports before quota rese
   expect(repository.reserve).not.toHaveBeenCalled();
   expect(repository.complete).not.toHaveBeenCalled();
   expect(send).not.toHaveBeenCalled();
-  expect(output()).toContain("Not solved");
   expect(renderer!.root.findByType("h2").children).toEqual(["Submission Rejected"]);
   expect(output()).toContain("File and network APIs are not supported.");
 });
@@ -187,7 +186,6 @@ it.each(["Run", "Submit"])("%s keeps server fixture comparison authoritative for
   await click(label, imported);
   expect(responses[0].status).toBe(200);
   expect(await responses[0].json()).toMatchObject({ ok: true, submission: { verdict: "wrong_answer", testsPassed: 2, testsTotal: 4 } });
-  expect(output()).toContain("Not solved");
   expect(renderer!.root.findByType("h2").children).toEqual(["Wrong Answer"]);
 });
 

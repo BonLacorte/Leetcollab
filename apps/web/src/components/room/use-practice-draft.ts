@@ -32,7 +32,7 @@ export function usePracticeDraft(options: Options) {
   // Each scope owns its pending reads/writes. Cleanup can flush the old scope
   // without accidentally saving the next exercise's code under the old ID.
   const context = useMemo(() => ({
-    ...options, revision: 0, ready: false, lastSaved: null as string | null, draftEdit: null as string | null,
+    ...options, revision: 0, ready: false, lastSaved: null as string | null, lastSavedAt: null as string | null, draftEdit: null as string | null,
     retrieving: false, active: false, loading: true,
   }), [scope]); // The remaining fields track current values below, without restarting the timer.
   useLayoutEffect(() => {
@@ -66,12 +66,18 @@ export function usePracticeDraft(options: Options) {
         if (!context.ready || savedCode === null || savedCode === context.lastSaved) return;
         updateCurrent({ saving: true, status: "Saving draft…" });
         try {
-          const { data, error } = await supabase.from("user_problem_progress").upsert({
-            user_id: userId, problem_id: problemId, draft_code: savedCode, draft_language: "java", last_saved_at: new Date().toISOString(),
-          }, { onConflict: "user_id,problem_id" }).select(progressSelect).single();
-          if (error || !data) throw error ?? new Error("Missing saved draft");
+          const { data, error } = await supabase.rpc("save_practice_draft", {
+            p_user_id: userId, p_problem_id: problemId, p_draft_code: savedCode, p_expected_saved_at: context.lastSavedAt,
+          });
+          if (error) throw error;
+          if (!data) {
+            updateCurrent({ status: "Your saved draft changed in another tab. This edit was not saved. Copy your editor text before leaving." });
+            return;
+          }
+          const row = data as ProgressRow;
           context.lastSaved = savedCode;
-          updateCurrent({ progress: progressFromRow(data as ProgressRow), status: "Draft autosaved." });
+          context.lastSavedAt = row.last_saved_at;
+          updateCurrent({ progress: progressFromRow(row), status: "Draft autosaved." });
         } catch {
           updateCurrent({ status: "Could not autosave draft. Your editor content is still here; the next autosave will retry." });
         } finally { updateCurrent({ saving: false }); }
@@ -91,6 +97,7 @@ export function usePracticeDraft(options: Options) {
         const row = data as ProgressRow | null;
         const hasDraft = Boolean(row?.last_saved_at && row.draft_language === "java" && typeof row.draft_code === "string");
         context.lastSaved = hasDraft ? row!.draft_code : null;
+        context.lastSavedAt = row?.last_saved_at ?? null;
         context.ready = true;
         updateCurrent({ progress: row ? progressFromRow(row) : null, status: "Autosaves every 10 minutes when code changes." });
       } catch {

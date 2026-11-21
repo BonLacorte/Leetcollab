@@ -17,7 +17,7 @@ it("binds normal quota and execution intent to the authenticated actor while pee
   expect(rpc).toHaveBeenCalledWith("get_user_judge_quota_status", expect.objectContaining({ p_user_id: userId, p_quota_limit: 25 }));
   await repo.reserve({ userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
     period, quotaLimit: 25, activeLimit: 4, reservationSeconds: 45, runner: "onlinecompiler", action: "submit",
-    participants: { roomId: "abcdefgh", capturedAt: period.start, userIds: [userId, problemId] } });
+    participants: { roomId: "abcdefgh", userIds: [userId, problemId] } });
   expect(rpc).toHaveBeenLastCalledWith("reserve_judge_execution", expect.objectContaining({
     p_scope: "user", p_user_id: userId, p_action: "submit", p_runner: "onlinecompiler", p_participant_ids: [userId, problemId],
   }));

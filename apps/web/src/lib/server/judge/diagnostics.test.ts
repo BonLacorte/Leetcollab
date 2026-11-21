@@ -27,6 +27,12 @@ it.each(["", "\n8 warnings", "\n0 errors", "\n1 errors\nadditional text"])("neve
   expect(compilerReport(issue + suffix)).toMatchObject({ compilerErrorCount: null, compilerDiagnosticsComplete: false });
 });
 
+it.each(["1 warning", "2 warnings"])("keeps the reported error total before %s", warnings => {
+  expect(compilerReport(`${issue}\r\n1 error\r\n${warnings}\r\n`)).toMatchObject({
+    compilerErrorCount: 1, compilerDiagnosticsComplete: true,
+  });
+});
+
 it("bounds available diagnostics while retaining an explicit larger reported total", () => {
   const report = compilerReport(Array(12).fill(issue).join("\n") + "\n12 errors");
   expect(report.compilerDiagnostics).toHaveLength(8);

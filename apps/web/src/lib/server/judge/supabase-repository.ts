@@ -113,7 +113,6 @@ export class SupabaseJudgeRepository implements JudgeRepository {
         p_runner: input.runner ?? "jdoodle", p_action: input.action ?? "run",
         p_room_id: input.participants?.roomId ?? null,
         p_participant_ids: input.participants?.userIds ?? null,
-        p_captured_at: input.participants?.capturedAt ?? null,
       } : {}),
       p_user_id: input.userId,
       p_problem_id: input.problemId,

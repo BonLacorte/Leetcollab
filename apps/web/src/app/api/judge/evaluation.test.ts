@@ -74,23 +74,8 @@ it("denies the tester's wrong problem on both endpoints", async () => {
   expect(db.rpc).not.toHaveBeenCalled();
   expect(network).not.toHaveBeenCalled();
 });
-it("records only the evaluation actor even when realtime confirms a peer in the room", async () => {
-  vi.stubEnv("REALTIME_INTERNAL_URL", "http://127.0.0.1:3001");
-  const fetched = network.getMockImplementation()!;
+it("records only the evaluation actor without consulting realtime", async () => {
   const roomId = "abcdefgh";
-  network.mockImplementation(async (url, options) => new URL(String(url)).pathname === "/judge/participants"
-    ? new Response(JSON.stringify({ problemId: problem, roomId, userIds: [A, B], capturedAt: "2026-11-17T10:01:00Z" }))
-    : fetched(url, options));
-  const from = db.from.getMockImplementation()!;
-  db.from.mockImplementation(table => {
-    const query = from(table);
-    if (table === "submissions") {
-      const maybeSingle = query.maybeSingle;
-      query.maybeSingle = vi.fn(async () => query.select.mock.calls.some(([fields]: [string]) => fields === "id")
-        ? { data: null, error: null } : maybeSingle());
-    }
-    return query;
-  });
   const response = await POST(new Request("https://app.test/api/judge/submissions", {
     method: "POST", headers: { authorization: `Bearer ${A}` },
     body: JSON.stringify({ ...payload, action: "submit", roomId }),
@@ -99,8 +84,8 @@ it("records only the evaluation actor even when realtime confirms a peer in the 
   expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({
     p_action: "submit", p_scope: "shared", p_room_id: null, p_participant_ids: [A],
   }));
-  expect(network).toHaveBeenCalledTimes(2);
-  expect(network.mock.calls.some(([url]) => new URL(String(url)).pathname === "/judge/refresh")).toBe(false);
+  expect(network).toHaveBeenCalledTimes(1);
+  expect(network.mock.calls[0][0]).toMatch(/^https:\/\/api\.onlinecompiler\.io\//);
 });
 
 it("allows only A's pinned problem, using the exact shared cap and synthetic transport", async () => {

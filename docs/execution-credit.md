@@ -19,7 +19,7 @@ user IDs, participant lists and verdicts cannot grant credit. Room clients send
 the expected room ID with Submit so the server can verify the current room and
 exercise before spending an attempt.
 
-Immediately before reserving a Submit, the web server forwards the verified
+Immediately before reserving a normal Submit, the web server forwards the verified
 bearer token to its configured realtime authority at `/judge/participants`.
 That service authenticates the token independently and synchronously captures
 the actor's room, selected problem and unique authenticated users with joined
@@ -32,8 +32,8 @@ neither looks up nor stores participants.
 
 The captured membership is stored transactionally with the first reservation.
 A participant who leaves after capture keeps eligibility for that attempt. A
-later joiner does not receive it. A replay cannot replace the original room,
-timestamp or participant set, including after the actor leaves. Reusing a key
+later joiner does not receive it. A replay cannot replace the original room
+or participant set, including after the actor leaves. Reusing a key
 for another action, problem, source, provider or quota scope is refused.
 A matching Run can read a finalized legacy execution without changes to its
 stored identity, quota or credit.
@@ -98,10 +98,11 @@ local integration, not authorization for hosted changes or deployment.
    the existing policy/approval flags. Use `next dev` and an HTTP loopback
    Supabase URL. Do not put a credential in public configuration. No provider
    submission is needed to apply or check this configuration.
-6. Replace only the owner's realtime process using its existing port and
-   environment, plus `ROOM_RESTORE_FILE=/absolute/private/rooms.json`.
-   Startup validates the full file and restores room identity, exact code,
-   members, chat, timer and whiteboard. Reconnected authenticated sockets become
+6. For an explicit local handoff, launch realtime from `apps/realtime` using
+   `NODE_ENV=development HOST=127.0.0.1 pnpm exec tsx src/index.ts --restore-local-rooms /absolute/private/rooms.json`.
+   Keep the same port and credentials. The command validates the full file
+   and restores room identity, exact code, members, chat, timer and whiteboard.
+   Regular startup has no restore configuration. Reconnected authenticated sockets become
    eligible only after joining; restored disconnected members alone do not
    earn credit. Compare every restored room acknowledgement to the snapshot
    before allowing edits again. Keep the original file for recovery, but do

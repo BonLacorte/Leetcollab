@@ -13,9 +13,7 @@ alter table public.judge_quota_periods drop constraint judge_quota_periods_quota
 alter table public.judge_quota_periods add column provider_exhausted boolean not null default false;
 alter table public.submissions
   add column execution_action text not null default 'legacy' check (execution_action in ('legacy','run','submit')),
-  add column quota_scope text not null default 'shared' check (quota_scope in ('shared','user')),
-  add column execution_room_id text,
-  add column participants_captured_at timestamptz;
+  add column quota_scope text not null default 'shared' check (quota_scope in ('shared','user'));
 -- Old server callers can execute, but cannot implicitly manufacture Submit credit.
 alter table public.submissions alter column execution_action set default 'run';
 
@@ -31,6 +29,7 @@ create table public.judge_user_quota_periods (
 create table public.judge_submission_participants (
   submission_id uuid not null references public.submissions(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
+  room_id text check (room_id ~ '^[a-z0-9]{8}$'),
   primary key (submission_id, user_id)
 );
 create table public.verified_problem_solves (
@@ -90,20 +89,20 @@ begin
 end $$;
 
 create function public.reserve_judge_execution(
-  p_scope text, p_runner text, p_action text, p_room_id text, p_participant_ids uuid[], p_captured_at timestamptz,
+  p_scope text, p_runner text, p_action text, p_room_id text, p_participant_ids uuid[],
   p_user_id uuid, p_problem_id uuid, p_idempotency_key uuid, p_language text, p_source_code text,
   p_period_start timestamptz, p_period_end timestamptz, p_quota_limit integer,
   p_active_limit integer, p_reservation_seconds integer
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 declare account public.judge_quota_periods; personal public.judge_user_quota_periods;
   attempt public.submissions; result jsonb; expired_count integer; active_count integer;
-  no_snapshot boolean := p_room_id is null and p_participant_ids is null and p_captured_at is null;
+  no_snapshot boolean := p_room_id is null and p_participant_ids is null;
 begin
   if p_scope is null or p_scope not in ('user','shared') or p_runner is null or p_runner not in ('jdoodle','onlinecompiler')
     or p_action is null or p_action not in ('run','submit')
     or (not no_snapshot and (
       p_action <> 'submit' or
-      p_captured_at is null or p_participant_ids is null or not (p_user_id=any(p_participant_ids))
+      p_participant_ids is null or not (p_user_id=any(p_participant_ids))
       or cardinality(p_participant_ids) not between 1 and 256
       or array_position(p_participant_ids,null) is not null
       or (p_room_id is null and p_participant_ids <> array[p_user_id])
@@ -197,11 +196,10 @@ begin
       values(p_user_id,p_period_start,p_period_end,25,1)
       on conflict(user_id,period_start) do update set used=judge_user_quota_periods.used+1;
     end if;
-    update public.submissions set execution_action=p_action,execution_room_id=p_room_id,
-      participants_captured_at=p_captured_at where id=(result->>'submissionId')::uuid;
+    update public.submissions set execution_action=p_action where id=(result->>'submissionId')::uuid;
     if p_action='submit' then
-      insert into public.judge_submission_participants(submission_id,user_id)
-        select (result->>'submissionId')::uuid,unnest(p_participant_ids) on conflict do nothing;
+      insert into public.judge_submission_participants(submission_id,user_id,room_id)
+        select (result->>'submissionId')::uuid,unnest(p_participant_ids),p_room_id on conflict do nothing;
     end if;
   elsif result->>'result' in ('existing','in_progress') then
     select * into strict attempt from public.submissions where id=(result->>'submissionId')::uuid;
@@ -246,9 +244,11 @@ end $$;
 create function public.judge_refresh_recipients(p_submission_id uuid, p_actor_id uuid)
 returns table(user_id uuid, room_id text, problem_id uuid)
 language sql stable security definer set search_path=public as $$
-  select credit.user_id, s.execution_room_id, s.problem_id
+  select credit.user_id, participant.room_id, s.problem_id
     from public.submissions s join public.verified_problem_solves credit on credit.submission_id=s.id
-    where s.id=p_submission_id and s.user_id=p_actor_id and s.execution_room_id is not null
+    join public.judge_submission_participants participant
+      on participant.submission_id=s.id and participant.user_id=credit.user_id
+    where s.id=p_submission_id and s.user_id=p_actor_id and participant.room_id is not null
       and s.execution_action='submit' and s.quota_scope='user'
       and not exists (
         select 1 from public.verified_problem_solves earlier
@@ -273,9 +273,35 @@ revoke all on function public.exhaust_judge_quota(timestamptz) from public,anon,
 grant execute on function public.exhaust_judge_quota(timestamptz) to service_role;
 
 revoke all on function public.get_user_judge_quota_status(uuid,timestamptz,timestamptz,integer),
-  public.reserve_judge_execution(text,text,text,text,uuid[],timestamptz,uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer),
+  public.reserve_judge_execution(text,text,text,text,uuid[],uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer),
   public.complete_judge_submission(uuid,uuid,text,text,integer,integer,integer,text,text,text) from public,anon,authenticated;
 grant execute on function public.get_user_judge_quota_status(uuid,timestamptz,timestamptz,integer),
-  public.reserve_judge_execution(text,text,text,text,uuid[],timestamptz,uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer),
+  public.reserve_judge_execution(text,text,text,text,uuid[],uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer),
   public.complete_judge_submission(uuid,uuid,text,text,integer,integer,integer,text,text,text) to service_role;
+create function public.save_practice_draft(
+  p_user_id uuid, p_problem_id uuid, p_draft_code text, p_expected_saved_at timestamptz
+) returns jsonb language plpgsql security invoker set search_path=public as $$
+declare saved public.user_problem_progress;
+begin
+  if auth.uid() is distinct from p_user_id or p_user_id is null then
+    raise exception 'draft owner authentication required' using errcode='42501';
+  end if;
+  if p_expected_saved_at is null then
+    insert into public.user_problem_progress(user_id,problem_id,draft_code,draft_language,last_saved_at)
+      values(p_user_id,p_problem_id,p_draft_code,'java',clock_timestamp())
+      on conflict(user_id,problem_id) do update set
+        draft_code=excluded.draft_code,draft_language='java',last_saved_at=clock_timestamp()
+      where user_problem_progress.last_saved_at is null
+      returning * into saved;
+  else
+    update public.user_problem_progress set draft_code=p_draft_code,draft_language='java',
+      last_saved_at=greatest(clock_timestamp(),p_expected_saved_at+interval '1 microsecond')
+      where user_id=p_user_id and problem_id=p_problem_id and last_saved_at=p_expected_saved_at
+      returning * into saved;
+  end if;
+  if not found then return null; end if;
+  return to_jsonb(saved);
+end $$;
+revoke all on function public.save_practice_draft(uuid,uuid,text,timestamptz) from public,anon,authenticated,service_role;
+grant execute on function public.save_practice_draft(uuid,uuid,text,timestamptz) to authenticated;
 commit;

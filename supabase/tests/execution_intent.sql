@@ -6,7 +6,7 @@ declare
   a uuid := gen_random_uuid(); b uuid := gen_random_uuid(); late uuid := gen_random_uuid();
   capped uuid := gen_random_uuid(); fresh uuid := gen_random_uuid(); identity uuid;
   problem uuid; key uuid := gen_random_uuid(); accepted_submit uuid; repeated_submit uuid;
-  result jsonb; quota jsonb; attempt uuid; credits integer;
+  result jsonb; quota jsonb; attempt uuid; credits integer; draft_saved_at timestamptz;
   starts timestamptz := '2196-01-01T23:55:00Z'; ends timestamptz := '2196-01-02T23:55:00Z';
 begin
   foreach identity in array array[a,b,late,capped,fresh] loop
@@ -14,23 +14,22 @@ begin
       jsonb_build_object('username','intent_'||left(identity::text,20)));
   end loop;
   select id into strict problem from public.problems where slug='parcel-pair';
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
     a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
   attempt := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(a,attempt,'completed','accepted',3,3,1,'synthetic',null,null);
   if exists(select 1 from public.verified_problem_solves where user_id=a)
-    or exists(select 1 from public.judge_submission_participants where submission_id=attempt)
-    or exists(select 1 from public.submissions where id=attempt and participants_captured_at is not null) then
+    or exists(select 1 from public.judge_submission_participants where submission_id=attempt) then
     raise exception 'Accepted Run must not store a snapshot or grant solved credit';
   end if;
   begin
-    perform public.reserve_judge_execution('user','onlinecompiler','submit',null,array[a],now(),
+    perform public.reserve_judge_execution('user','onlinecompiler','submit',null,array[a],
       a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
     raise exception 'A Run key was upgraded to Submit';
   exception when invalid_parameter_value then null; end;
 
   key := gen_random_uuid();
-  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b],
     a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
   accepted_submit := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(a,accepted_submit,'completed','accepted',3,3,1,'synthetic',null,null);
@@ -46,40 +45,40 @@ begin
   end if;
 
   -- A later snapshot cannot grow an already captured recipient set on replay.
-  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b,late],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b,late],
     a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
   if result->>'result'<>'existing' then raise exception 'Expected an idempotent existing submission'; end if;
   perform public.complete_judge_submission(a,accepted_submit,'completed','accepted',3,3,1,'synthetic',null,null);
   if exists(select 1 from public.verified_problem_solves where user_id=late) then
     raise exception 'Replay must not credit later joiners';
   end if;
-  result := public.reserve_judge_execution('user','onlinecompiler','submit',null,null,null,
+  result := public.reserve_judge_execution('user','onlinecompiler','submit',null,null,
     a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
   if result->>'result'<>'existing' or (result->>'used')::int<>2
-    or (select execution_room_id from public.submissions where id=accepted_submit)<>'abcdefgh'
+    or exists(select 1 from public.judge_submission_participants where submission_id=accepted_submit and room_id is distinct from 'abcdefgh')
     or (select count(*) from public.judge_submission_participants where submission_id=accepted_submit)<>2 then
     raise exception 'Replay after leaving must retain the original snapshot without charging';
   end if;
   begin
-    perform public.reserve_judge_execution('user','onlinecompiler','submit',null,array[a],now(),
+    perform public.reserve_judge_execution('user','onlinecompiler','submit',null,array[a],
       a,problem,key,'java','class Solution { /* changed */ }',starts,ends,25,4,45);
     raise exception 'Changed code must not reuse the execution key';
   exception when invalid_parameter_value then null; end;
 
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
     a,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
   perform public.complete_judge_submission(a,(result->>'submissionId')::uuid,'completed','accepted',3,3,1,'synthetic',null,null);
   if (select count(*) from public.verified_problem_solves where user_id=a)<>1 then
     raise exception 'Accepted Run must preserve prior Submit credit without creating another';
   end if;
-  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b,late],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b,late],
     a,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
   attempt := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(a,attempt,'completed','wrong_answer',2,3,1,'synthetic',null,null);
   if exists(select 1 from public.verified_problem_solves where submission_id=attempt) then
     raise exception 'Wrong answer must not grant credit';
   end if;
-  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b,late],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b,late],
     a,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
   attempt := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(a,attempt,'completed','accepted',0,0,1,'synthetic',null,null);
@@ -87,23 +86,23 @@ begin
     raise exception 'Zero tests must not grant credit';
   end if;
 
-  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b],now(),
+  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b],
     a,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
   repeated_submit := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(a,repeated_submit,'completed','accepted',3,3,1,'synthetic',null,null);
 
   key := gen_random_uuid();
   begin
-    perform public.reserve_judge_execution('shared','onlinecompiler','submit','abcdefgh',array[capped,late],now(),
+    perform public.reserve_judge_execution('shared','onlinecompiler','submit','abcdefgh',array[capped,late],
       capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
     raise exception 'Restricted evaluation must reject a peer snapshot';
   exception when invalid_parameter_value then null; end;
   begin
-    perform public.reserve_judge_execution('shared','onlinecompiler','submit',null,null,null,
+    perform public.reserve_judge_execution('shared','onlinecompiler','submit',null,null,
       capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
     raise exception 'A new Submit must not reserve without a snapshot';
   exception when invalid_parameter_value then null; end;
-  result := public.reserve_judge_execution('shared','onlinecompiler','submit',null,array[capped],now(),
+  result := public.reserve_judge_execution('shared','onlinecompiler','submit',null,array[capped],
     capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
   if result->>'result'<>'reserved' then raise exception 'Shared Submit should reserve with a fresh snapshot'; end if;
   attempt := (result->>'submissionId')::uuid;
@@ -112,7 +111,7 @@ begin
     or exists(select 1 from public.verified_problem_solves where user_id=late) then
     raise exception 'Restricted evaluation must grant credit only to the actor';
   end if;
-  result := public.reserve_judge_execution('shared','onlinecompiler','submit',null,null,null,
+  result := public.reserve_judge_execution('shared','onlinecompiler','submit',null,null,
     capped,problem,key,'java','class Solution {}',starts,ends,20,4,45);
   if result->>'result'<>'existing' then raise exception 'Shared Submit should replay without a fresh snapshot'; end if;
   quota := public.get_user_judge_quota_status(capped,starts,ends,25);
@@ -120,25 +119,25 @@ begin
     raise exception 'A shared reservation must charge its actor once toward normal usage';
   end if;
   for i in 2..25 loop
-    result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
+    result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
       capped,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
     if result->>'result'<>'reserved' then raise exception 'Personal execution % should reserve',i; end if;
     perform public.complete_judge_submission(capped,(result->>'submissionId')::uuid,'completed','accepted',3,3,1,'synthetic',null,null);
   end loop;
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
     capped,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,4,45);
   if result->>'result'<>'exhausted' or (result->>'used')::int<>25 then
     raise exception 'Personal execution 26 must be refused';
   end if;
   -- Aggregate account usage is now greater than 25; a different user still has
   -- their own full allowance, while the global provider concurrency stays bound.
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
     fresh,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,1,45);
   if result->>'result'<>'reserved' or (result->>'used')::int<>1 then
     raise exception 'One user must not spend another user allowance';
   end if;
   attempt := (result->>'submissionId')::uuid;
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
     b,problem,gen_random_uuid(),'java','class Solution {}',starts,ends,25,1,45);
   if result->>'result'<>'busy' or (result->>'used')::int<>0 then
     raise exception 'Global concurrency must refuse peers without charging them';
@@ -151,7 +150,7 @@ begin
   end if;
 
   if has_function_privilege('authenticated',
-    'public.reserve_judge_execution(text,text,text,text,uuid[],timestamptz,uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer)','execute')
+    'public.reserve_judge_execution(text,text,text,text,uuid[],uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer)','execute')
     or has_table_privilege('authenticated','public.verified_problem_solves','insert')
     or has_table_privilege('service_role','public.verified_problem_solves','insert') then
     raise exception 'Arbitrary recipient grants must not be exposed outside the completion function';
@@ -169,11 +168,37 @@ begin
     raise exception 'Refresh must target captured first-time solvers for the original actor only';
   end if;
   reset role;
+  perform set_config('request.jwt.claim.sub',a::text,true);
+  set local role authenticated;
+  select to_jsonb(s) into result from public.submissions s where s.id=accepted_submit;
+  if result is null or result ? 'execution_room_id' or result ? 'participants_captured_at' then
+    raise exception 'An actor can read their own submission without capture provenance';
+  end if;
+  reset role;
   perform set_config('request.jwt.claim.sub',b::text,true);
   set local role authenticated;
   if public.has_verified_problem_solve(problem) is distinct from true then
     raise exception 'A captured peer must be able to read their boolean solved state';
   end if;
+  result := public.save_practice_draft(b,problem,'shared baseline',null);
+  draft_saved_at := (result->>'last_saved_at')::timestamptz;
+  if draft_saved_at is null then raise exception 'An owner must be able to save a first draft'; end if;
+  if public.save_practice_draft(b,problem,'stale first save',null) is not null then
+    raise exception 'A stale first save must not overwrite an existing draft';
+  end if;
+  result := public.save_practice_draft(b,problem,'newer tab edit',draft_saved_at);
+  if (result->>'last_saved_at')::timestamptz<=draft_saved_at then
+    raise exception 'A successful save must advance the draft version';
+  end if;
+  if public.save_practice_draft(b,problem,'older tab edit',draft_saved_at) is not null
+    or (select draft_code from public.user_problem_progress where user_id=b and problem_id=problem)
+      is distinct from 'newer tab edit' then
+    raise exception 'A stale tab must not overwrite newer persisted code';
+  end if;
+  begin
+    perform public.save_practice_draft(a,problem,'wrong owner',null);
+    raise exception 'A draft save cannot target a different user';
+  exception when insufficient_privilege then null; end;
   perform set_config('request.jwt.claim.sub',late::text,true);
   if public.has_verified_problem_solve(problem) is distinct from false then
     raise exception 'A late joiner must remain unsolved despite others receiving credit';
@@ -186,7 +211,7 @@ begin
   attempt := (result->>'submissionId')::uuid;
   update public.submissions set execution_action='legacy' where id=attempt;
   perform public.complete_judge_submission(late,attempt,'completed','accepted',3,3,1,'synthetic',null,null);
-  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,null,
+  result := public.reserve_judge_execution('user','onlinecompiler','run',null,null,
     late,problem,key,'java','class Solution {}',starts+interval '11 days',ends+interval '11 days',25,4,45);
   if result->>'result'<>'existing' or (result->>'submissionId')::uuid<>attempt
     or (result->>'used')::int<>0 or (result->>'limit')::int<>25
@@ -196,13 +221,13 @@ begin
     or exists(select 1 from public.verified_problem_solves where submission_id=attempt) then
     raise exception 'A legacy retry must read the original outcome without changing state';
   end if;
-  result := public.reserve_judge_execution('shared','onlinecompiler','run',null,null,null,
+  result := public.reserve_judge_execution('shared','onlinecompiler','run',null,null,
     late,problem,key,'java','class Solution {}',starts+interval '10 days',ends+interval '10 days',20,4,45);
   if result->>'result'<>'existing' or (result->>'used')::int<>1 then
     raise exception 'Evaluation retries must replay legacy attempts without charging';
   end if;
   begin
-    perform public.reserve_judge_execution('user','onlinecompiler','submit',null,array[late],now(),
+    perform public.reserve_judge_execution('user','onlinecompiler','submit',null,array[late],
       late,problem,key,'java','class Solution {}',starts+interval '11 days',ends+interval '11 days',25,4,45);
     raise exception 'Legacy executions must not replay as Submit';
   exception when invalid_parameter_value then null; end;

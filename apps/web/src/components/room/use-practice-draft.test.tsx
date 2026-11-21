@@ -6,16 +6,16 @@ import type { Problem } from "@leetcollab/contracts";
 import { usePracticeDraft } from "./use-practice-draft";
 
 const mocks = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn(), submitted: vi.fn(), acknowledge: vi.fn(), query: vi.fn(), replace: vi.fn() }));
-vi.mock("../../lib/supabase", () => ({ supabase: { from: (table: string) => {
-  let payload: unknown;
+vi.mock("../../lib/supabase", () => ({ supabase: { rpc: (name: string, payload: unknown) => {
+  if (name !== "save_practice_draft") throw new Error(`Unexpected RPC ${name}`);
+  return mocks.save(payload);
+}, from: (table: string) => {
   const query = {
     select: (fields: string) => { mocks.query(table, "select", fields); return query; },
     eq: (field: string, value: string) => { mocks.query(table, field, value); return query; },
     order: (field: string, value: unknown) => { mocks.query(table, "order", field, value); return query; },
     limit: (value: number) => { mocks.query(table, "limit", value); return query; },
-    upsert: (value: unknown) => { payload = value; return query; },
     maybeSingle: () => table === "submissions" ? mocks.submitted() : mocks.read(),
-    single: () => mocks.save(payload),
   };
   return query;
 } } }));
@@ -54,7 +54,7 @@ beforeEach(() => {
   mocks.read.mockResolvedValue({ data: null, error: null });
   mocks.submitted.mockResolvedValue({ data: null, error: null });
   mocks.acknowledge.mockResolvedValue(undefined);
-  mocks.save.mockImplementation(async value => ({ data: row(value.draft_code, value.problem_id), error: null }));
+  mocks.save.mockImplementation(async value => ({ data: row(value.p_draft_code, value.p_problem_id), error: null }));
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.replaceChildren(); vi.useRealTimers(); });
 
@@ -73,7 +73,7 @@ it("keeps a scoped draft private and saves the latest dirty code every ten minut
   expect(mocks.save).not.toHaveBeenCalled();
   await act(async () => change({ code: "remote code after my edit" }));
   await advance(1);
-  expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ user_id: "user", problem_id: problem.id, draft_language: "java", draft_code: "latest edit" }));
+  expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ p_user_id: "user", p_problem_id: problem.id, p_draft_code: "latest edit", p_expected_saved_at: row("").last_saved_at }));
   await advance();
   expect(mocks.save).toHaveBeenCalledTimes(1);
 });
@@ -131,7 +131,7 @@ it.each(["timer", "navigation"])("saves the last authorized edit after permissio
   expect(mocks.submitted).not.toHaveBeenCalled();
   if (trigger === "timer") await advance();
   else { await act(async () => root!.unmount()); root = undefined; }
-  expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ draft_code: "authorized edit" }));
+  expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ p_draft_code: "authorized edit" }));
 });
 
 it("resets to the current starter and retrieves only this user's latest actual Java submission", async () => {
@@ -200,7 +200,7 @@ it.each([false, true])("flushes captured edits after a pending read only if it s
   expect(mocks.save).not.toHaveBeenCalled();
   await act(async () => finish(failure ? { error: new Error("offline") } : { data: row("previous draft"), error: null }));
   if (failure) expect(mocks.save).not.toHaveBeenCalled();
-  else expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ problem_id: problem.id, draft_code: "captured during read" }));
+  else expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ p_problem_id: problem.id, p_draft_code: "captured during read" }));
   expect(input.code).toBe(problem.starterCode);
 });
 
@@ -209,11 +209,11 @@ it("flushes dirty code under the old exercise and cancels its timer when switchi
   await act(async () => latest.editCode("exercise A edit"));
   const second = { ...problem, id: "problem-b", starterCode: "class Solution { /* B */ }" };
   await act(async () => change({ problem: second, code: second.starterCode }));
-  expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ problem_id: problem.id, draft_code: "exercise A edit" }));
+  expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ p_problem_id: problem.id, p_draft_code: "exercise A edit" }));
   await act(async () => latest.editCode("exercise B edit"));
   await advance();
   expect(mocks.save).toHaveBeenCalledTimes(2);
-  expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({ problem_id: second.id, draft_code: "exercise B edit" }));
+  expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({ p_problem_id: second.id, p_draft_code: "exercise B edit" }));
   await act(async () => root!.unmount()); root = undefined;
   await advance(1_200_000);
   expect(mocks.save).toHaveBeenCalledTimes(2);
@@ -232,6 +232,22 @@ it("discards old exercise reads after switching, and never overwrites a saved dr
   await act(async () => latest.editCode("new unsaved code"));
   await advance();
   expect(mocks.save).not.toHaveBeenCalled();
+});
+
+it("warns about a stale save without replacing the unsaved editor text", async () => {
+  const oldDraft = row("previous draft");
+  mocks.read.mockResolvedValue({ data: oldDraft, error: null });
+  mocks.save.mockResolvedValue({ data: null, error: null });
+  await render();
+  await act(async () => latest.editCode("my unsaved edit"));
+  await advance();
+  expect(mocks.save).toHaveBeenCalledExactlyOnceWith({
+    p_user_id: "user", p_problem_id: problem.id, p_draft_code: "my unsaved edit",
+    p_expected_saved_at: oldDraft.last_saved_at,
+  });
+  expect(latest.status).toContain("This edit was not saved");
+  expect(input.code).toBe("my unsaved edit");
+  expect(latest.progress?.draftCode).toBe("previous draft");
 });
 
 it("reports a save failure and retries dirty content at the next interval", async () => {
@@ -267,7 +283,7 @@ it("waits for both earlier navigation saves before restoring on a third visit", 
   let stored = row("previous draft");
   mocks.read.mockImplementation(async () => ({ data: stored, error: null }));
   mocks.save.mockImplementation(value => new Promise(resolve => pending.push(() => {
-    stored = row(value.draft_code, value.problem_id);
+    stored = row(value.p_draft_code, value.p_problem_id);
     resolve({ data: stored, error: null });
   })));
   await render();

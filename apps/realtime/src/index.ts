@@ -60,8 +60,12 @@ type ProblemExample = Problem["examples"][number];
 const rooms = new Map<string, Room>();
 const activeRoomByUser = new Map<string, string>();
 const socketIdsByUser = new Map<string, Set<string>>();
-if (process.env.ROOM_RESTORE_FILE) {
-  for (const room of restoreRoomStates(readFileSync(process.env.ROOM_RESTORE_FILE, "utf8"))) {
+if (process.argv[2] === "--restore-local-rooms") {
+  const file = process.argv[3];
+  if (process.env.NODE_ENV !== "development" || !["127.0.0.1", "::1", "localhost"].includes(host) || !file) {
+    throw new Error("Room snapshot restore requires an explicit local development launch and a snapshot file.");
+  }
+  for (const room of restoreRoomStates(readFileSync(file, "utf8"))) {
     rooms.set(room.roomId, room);
     for (const member of room.members) activeRoomByUser.set(member.userId, room.roomId);
   }

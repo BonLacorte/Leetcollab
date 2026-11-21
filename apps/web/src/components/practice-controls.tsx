@@ -116,7 +116,7 @@ function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, tok
       const response = await fetch("/api/judge/submissions", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId, action: action === "Submit" ? "submit" : "run", ...(action === "Submit" && roomId ? { roomId } : {}), sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ problemId, action: action === "Submit" ? "submit" : "run", ...(action === "Submit" && roomId && quota.quotaScope !== "shared" ? { roomId } : {}), sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
       });
       const result = judgeSubmissionResponseSchema.parse(await response.json());
       if (result.ok && result.submission.problemId !== problemId) throw new Error("Submission belongs to another exercise.");
@@ -166,7 +166,7 @@ function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, tok
           {completion === "solved" ? "Solved - LeetCollab verified" : completion === "unavailable" ? "Completion status unavailable. Refresh status to try again." : completion === "loading" ? "Loading completion status…" : "Not solved"}
         </p>
       </div>
-      <p className="practice-help">Run tests your code. An accepted Submit marks the problem solved for you and the room members present when you submit.</p>
+      <p className="practice-help">Run tests your code. An accepted Submit marks the problem solved for you{quota?.quotaScope === "user" ? " and the room members present when you submit" : ""}.</p>
       <div className={`practice-quota${quota?.unavailableReason === "quota_exhausted" ? " is-exhausted" : statusError ? " is-error" : ""}`} role="status">
         {quota ? <>
           <p><strong>{quota.remaining} of {quota.limit}</strong> executions remaining{quota.quotaScope === "shared" ? " in the shared allowance" : quota.quotaScope === "user" ? " in your allowance" : ""}</p>

@@ -228,11 +228,12 @@ export class JudgeService {
     let participants: SubmissionParticipants | null = null;
     if (action === "submit") {
       const hasExisting = () => this.repository.hasSubmissionKey(userId, request.idempotencyKey);
-      if (!await hasExisting()) {
+      if (this.evaluation) {
+        participants = { roomId: null, userIds: [userId] };
+      } else if (!await hasExisting()) {
         if (!this.captureParticipants) return errorResponse("JUDGE_UNAVAILABLE", "Room participation could not be verified. No execution was started.");
         try {
-          const snapshot = await this.captureParticipants(request.roomId);
-          participants = this.evaluation ? { ...snapshot, roomId: null, userIds: [userId] } : snapshot;
+          participants = await this.captureParticipants(request.roomId);
         } catch (error) {
           if (!await hasExisting()) throw error;
         }

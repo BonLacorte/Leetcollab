@@ -177,7 +177,7 @@ describe("structured public results", () => {
       return { ...stored, applied: false };
     });
     const service = new JudgeService(repository, provider, { notifyCompletion, captureParticipants: async () => ({
-      roomId: "abcdefgh", userIds: ["user-a", "user-b"], capturedAt: now.toISOString(),
+      roomId: "abcdefgh", userIds: ["user-a", "user-b"],
     }) });
     const response = await service.submit("user-a", { ...request(), action: "submit" });
     expect(response.status).toBe(503);
@@ -199,7 +199,7 @@ describe("structured public results", () => {
   it("replays a completed Submit when participant capture is unavailable", async () => {
     const repository = new MemoryRepository(publicConfig());
     const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
-    const captureParticipants = vi.fn(async () => ({ roomId: null, userIds: ["user-a"], capturedAt: now.toISOString() }));
+    const captureParticipants = vi.fn(async () => ({ roomId: null, userIds: ["user-a"] }));
     const service = new JudgeService(repository, provider, { now: () => now, captureParticipants });
     const submit = { ...request(), action: "submit" as const };
     const initial = await service.submit("user-a", submit);
@@ -214,7 +214,7 @@ describe("structured public results", () => {
   it("replays when the original completes while a retry is trying to capture participants", async () => {
     const repository = new MemoryRepository(publicConfig());
     const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
-    const routineCapture = async () => ({ roomId: null, userIds: ["user-a"], capturedAt: now.toISOString() });
+    const routineCapture = async () => ({ roomId: null, userIds: ["user-a"] });
     const original = new JudgeService(repository, provider, { captureParticipants: routineCapture });
     const submit = { ...request(), action: "submit" as const };
     const retry = new JudgeService(repository, provider, {
@@ -243,7 +243,7 @@ describe("structured public results", () => {
   it.each(['"time limit"', '"memory limit"', "PRIVATE_ECHO".repeat(400).length])("preserves JDoodle compiler reports for echo case %s", async fragment => {
     const echo = typeof fragment === "number" ? "x".repeat(fragment) : fragment;
     const send = vi.fn(async () => new Response(JSON.stringify({
-      statusCode: 200, output: `Main.java:1: error: ';' expected\n${echo}\n1 error\n`,
+      statusCode: 200, output: `Main.java:1: error: ';' expected\n${echo}\n1 error\n1 warning\n`,
     })));
     const provider = new JdoodleProvider({
       clientId: "synthetic", clientSecret: "synthetic", javaVersionIndex: "0", limitsConfirmed: true, fetch: send,
@@ -270,7 +270,7 @@ describe("structured public results", () => {
     const repository = new MemoryRepository(publicConfig());
     const provider = new OnlineCompilerProvider({ apiKey: "synthetic", executionApproved: true, policyAccepted: true,
       fetch: async () => new Response(JSON.stringify({ output: "", status: "error", exit_code: 1, signal: null, truncated: false,
-        error: "Main.java:2: error: ';' expected\nPRIVATE_ECHO\nMain.java:2: error: ';' expected\nPRIVATE_ECHO\nMain.java:99: error: cannot find symbol\nHIDDEN_INPUT\n3 errors\n",
+        error: "Main.java:2: error: ';' expected\nPRIVATE_ECHO\nMain.java:2: error: ';' expected\nPRIVATE_ECHO\nMain.java:99: error: cannot find symbol\nHIDDEN_INPUT\n3 errors\n2 warnings\n",
       })) });
     const result = await new JudgeService(repository, provider, { now: () => now }).submit("user-a", {
       ...request(), sourceCode: "\n\nclass Solution {\n  public static int answer() { return 42; }\n}",
@@ -288,13 +288,13 @@ describe("JudgeService", () => {
   it.each(["run", "submit"] as const)("persists authenticated %s intent and captures room credit only for Submit", async action => {
     const repository = new MemoryRepository(config());
     const reserve = vi.spyOn(repository, "reserve");
-    const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a", "user-b"], capturedAt: now.toISOString() }));
+    const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a", "user-b"] }));
     const notifyCompletion = vi.fn(async () => { throw new Error("Hint lost after durable completion"); });
     const service = new JudgeService(repository, new OutputProvider(), { now: () => now, captureParticipants, notifyCompletion });
     const result = await service.submit("user-a", { ...request(), action, roomId: "abcdefgh" });
     expect(result.status).toBe(200);
     expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-a", action,
-      participants: action === "submit" ? { roomId: "abcdefgh", userIds: ["user-a", "user-b"], capturedAt: now.toISOString() } : null,
+      participants: action === "submit" ? { roomId: "abcdefgh", userIds: ["user-a", "user-b"] } : null,
     }));
     if (action === "submit") expect(captureParticipants).toHaveBeenCalledExactlyOnceWith("abcdefgh");
     else expect(captureParticipants).not.toHaveBeenCalled();

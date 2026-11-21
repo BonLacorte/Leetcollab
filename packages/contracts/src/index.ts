@@ -105,7 +105,6 @@ export type JudgeSubmissionRequest = z.infer<typeof judgeSubmissionRequestSchema
 export const judgeParticipantSnapshotSchema = z.object({
   problemId: z.string().uuid(),
   roomId: roomCodeSchema.nullable(),
-  capturedAt: z.string().datetime(),
   userIds: z.array(z.string().uuid()).min(1).max(256),
 });
 

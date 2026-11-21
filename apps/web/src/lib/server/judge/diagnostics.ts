@@ -50,7 +50,7 @@ export function compilerReport(output: string): CompilerReport {
   }
   // Only an explicit terminal javac summary is a reported total. A count of
   // matched headers is never substituted for the compiler's actual total.
-  const summary = /(?:^|\n)([1-9]\d*) errors?\s*$/.exec(output.replace(/\r\n?/g, "\n"));
+  const summary = /(?:^|\n)([1-9]\d*) errors?(?:\n[1-9]\d* warnings?)?\s*$/.exec(output.replace(/\r\n?/g, "\n"));
   const count = summary ? Number(summary[1]) : null;
   const reported = count !== null && Number.isSafeInteger(count) && count >= headers ? count : null;
   return {

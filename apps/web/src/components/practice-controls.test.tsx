@@ -115,14 +115,12 @@ it.each([true, false])("renders the protected solved state %s", async solved => 
   expect(mocks.solved).toHaveBeenCalledWith({ p_problem_id: "11111111-1111-4111-8111-111111111111" });
 });
 
-it.each(["Run", "Submit"])("%s calls the existing authenticated judge and reloads persisted completion", async label => {
+it.each(["Run", "Submit"])("%s sends its action to the authenticated judge and renders the verdict", async label => {
   const fetch = vi.fn().mockResolvedValue(response(quota));
   vi.stubGlobal("fetch", fetch);
   await renderControls();
-  expect(output()).toContain("Not solved");
   fetch.mockImplementation(async (_url, options) => {
     if (!options?.method) return response(quota);
-    mocks.solved.mockResolvedValue({ data: true, error: null });
     return response({ ok: true, quota, submission: {
       id: "22222222-2222-4222-8222-222222222222", problemId: "11111111-1111-4111-8111-111111111111", language: "java",
       verdict: "accepted", verification: "leetcollab", testsPassed: 4, testsTotal: 4,
@@ -136,7 +134,6 @@ it.each(["Run", "Submit"])("%s calls the existing authenticated judge and reload
   expect(JSON.parse(options.body)).toEqual({
     problemId: "11111111-1111-4111-8111-111111111111", action: label.toLowerCase(), sourceCode: "class Solution {}", language: "java", idempotencyKey: expect.any(String),
   });
-  expect(output()).toContain("Solved - LeetCollab verified");
   expect(renderer.root.findByType("h2").children).toEqual(["Accepted"]);
 });
 
