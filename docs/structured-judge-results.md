@@ -1,17 +1,9 @@
 # Structured judge results
 
 Successful submission responses retain the existing verdict, aggregate check
-counts and sanitized `diagnostics` string. Optional `JudgeSubmission` fields add:
-
-```ts
-compilerDiagnostics?: { line: number; message: string }[];
-compilerErrorCount?: number | null;
-compilerDiagnosticsComplete?: boolean;
-publicCases?: {
-  id: string; title: string; input: string; expected: string;
-  output: string | null; passed: boolean;
-}[];
-```
+counts and sanitized `diagnostics` string. The optional compiler and public-case
+fields are defined by `judgeSubmissionSchema` in the
+[shared contracts](../packages/contracts/src/index.ts).
 
 Compiler locations use the original submitted source's 1-based line numbers.
 Messages come from the existing server-written category allowlist. Raw source
@@ -30,9 +22,8 @@ not persisted. Idempotent replays do not reconstruct missing totals or annotate
 unverified source; they return an empty structured diagnostic list and unknown
 total. The legacy sanitized diagnostic string remains available.
 
-Apply `202611180001_public_case_plans.sql` to the local database before starting
-this server version. This is an implementation prerequisite, not permission to
-apply it to a hosted database. The migration records explicit associations
+The [release migrations](execution-credit.md#migration-and-restart) are required
+before enabling this version. The public-case migration records associations
 between published examples and private fixture invocations, bound to the
 reviewed harness's SHA-256 and fixture version. Unknown or modified fixture
 plans expose no per-case details. The private table's existing permissions stay
@@ -61,8 +52,8 @@ their aggregate judging path without exposing raw output. Idempotent replays
 omit per-case observations because they were not retained; the UI should show
 the aggregate result and an honest detail-unavailable state.
 
-The contract does not authorize extra provider calls or local execution of user
-submissions. Each new submission still uses one existing provider request.
-The user's live acceptance test should verify compiler markers/excerpts/counts,
-then a correct solution and a wrong answer with public Input/Output/Expected.
-Only the user performs those live checks in the authorized local preview.
+Structured results use the same provider request as the verdict. In an authorized
+live acceptance check, verify compiler markers, excerpts and counts, then public
+Input, Output and Expected for a correct solution and a wrong answer. See the
+[rollout sequence](onlinecompiler-integration.md#rollout-and-rollback) for hosted
+activation and smoke-test requirements.

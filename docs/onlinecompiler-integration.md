@@ -162,20 +162,16 @@ The provider's structured status, exit code and signal distinguish execution err
 and limits. An anchored Java compiler location identifies a compile failure;
 other unsuccessful exits remain runtime errors. Persisted error diagnostics are
 generated locally to avoid retaining source echoes or raw provider errors. Recognized
-Java error categories and locations are retained only for lines inside the submitted
-solution, mapped back to editor lines after source trimming. Unknown messages use a
-generic compilation explanation. Result displays these safe diagnostics; raw harness
-source, paths, symbols and runtime values are never displayed. Older idempotent
-results are filtered again before returning diagnostics to the client. A 429
+Java error categories and locations follow the
+[structured result contract](structured-judge-results.md). A 429
 can mean account allowance, rate, or capacity, so it remains unavailable and never
 blindly exhausts all shared application quota. Provider wall time is not labeled
 as CPU time. See the [run-code reference](https://onlinecompiler.io/docs/run-code).
 
 Successful provider output still passes through LeetCollab's existing fixture
 comparison and private completion RPC. HTTP 200 is not an accepted solution.
-Run and Submit save actor-owned submissions. Only an accepted Submit grants new
-verified solved credit, including its server-captured eligible room participants;
-see [execution credit](execution-credit.md). Draft persistence is independent.
+See [execution credit](execution-credit.md) for submission ownership and solved
+credit. Draft persistence is independent.
 
 ## Persistence and quota
 
@@ -186,17 +182,10 @@ and rejects reusing an idempotency key with another provider. Only the trusted
 service role can call the fixed-runner reservation RPCs; internal helpers cannot
 be called by application roles.
 
-Normal access uses a personal application cap of 25 attempts/day, resetting at
-23:55 UTC, across JDoodle and OnlineCompiler. Explicit authorized local testing
-can use 50/user; restricted evaluation keeps its pinned shared cap of at most 20.
-Apply `202611180002_execution_intent_and_credit.sql` before enabling those normal
-semantics, following its [migration and restart steps](execution-credit.md#migration-and-restart).
-The global account ledger still bounds concurrent provider requests. This is an
-application limit, not OnlineCompiler's monthly reset or an upgrade to 100,000
-application attempts. Existing consumed usage is preserved. Failed or ambiguous
-attempts retain their charge and cannot be replayed into another execution.
-A dedicated account/key without conflicting callers and reconciled provider
-usage remain evaluation prerequisites.
+Follow the [execution credit migration and restart steps](execution-credit.md#migration-and-restart)
+before enabling normal access. Application quotas are independent of
+OnlineCompiler's monthly allowance. Reconcile provider usage separately for
+[restricted evaluation](#restricted-hosted-evaluation).
 
 ## Accepted normal-user policy
 
@@ -326,7 +315,9 @@ hosted configuration, deployment or public provider selection was changed.
    and deploy the release realtime service first. Check `/health` and authenticated
    room creation and join. The restart clears old in-memory rooms. Set
    `NEXT_PUBLIC_SOCKET_URL` to the release realtime HTTPS origin for both room
-   connections and the web server's judge requests.
+   connections and the web server's judge requests. Configure realtime
+   `CORS_ORIGIN` for the production frontend using the
+   [realtime environment settings](backend-setup.md#staging-setup).
 4. For the production web environment serving `https://leetcollab.vercel.app/`,
    set `JUDGE_PROVIDER=onlinecompiler`, `JUDGE_ACCESS_MODE=normal`,
    `ONLINECOMPILER_EXECUTION_APPROVED=true`, `ONLINECOMPILER_POLICY_ACCEPTED=true`,

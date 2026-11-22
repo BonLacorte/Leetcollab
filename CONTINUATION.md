@@ -51,9 +51,9 @@ Scoped two-user E2E checklist:
   Edit code and chat in both directions; exercise whiteboard and shared timer.
 - [ ] Revoke and restore B's edit/chat/draw/problem permissions. Verify server denial
   under B's own token as well as UI behavior, including host-only controls.
-- [ ] Save distinct personal drafts and grades; reload and explicitly load each
-  draft. Loading broadcasts to the shared editor. Verify independent review dates
-  and user-token denial of the other's private records and private fixtures.
+- [ ] Use the [draft controls](README.md#practice) to verify autosave and explicit
+  restore for distinct personal drafts. Save separate grades. Verify independent
+  review dates and user-token denial of the other's private records and private fixtures.
   Grades must not mark a problem solved.
 - [ ] Disconnect/reconnect B, refresh the token and try a same-user second tab.
   Check convergence, membership and duplicate events; record concurrent/offline

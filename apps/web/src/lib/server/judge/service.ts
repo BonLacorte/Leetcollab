@@ -38,7 +38,8 @@ export type JudgeServiceOptions = {
 };
 
 function quotaPeriod(now: Date): QuotaPeriod {
-  // JDoodle's shared daily credit allowance resets at 23:55 UTC.
+  // Match the database's 23:55 UTC boundary. Personal admission selects its
+  // period under the database lock because status and Submit capture can cross reset.
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 55));
   if (now < start) start.setUTCDate(start.getUTCDate() - 1);
   const end = new Date(start);
