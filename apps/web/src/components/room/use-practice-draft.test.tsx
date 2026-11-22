@@ -460,3 +460,25 @@ it("resumes autosave after Restore finds no draft following an initial read fail
     p_draft_code: "private text typed offline", p_expected_saved_at: null,
   }));
 });
+
+it.each(["timer", "navigation"])("does not let a failed Restore overwrite a newer draft on %s", async trigger => {
+  mocks.read.mockResolvedValueOnce({ data: null, error: new Error("Offline") });
+  await render({ userId: `failed-restore-${trigger}` });
+  await act(async () => latest.editCode("private text typed offline"));
+  const newer = { ...row("draft from another tab"), last_saved_at: "2026-11-18T03:05:00.000Z" };
+  mocks.read.mockResolvedValue({ data: newer, error: null });
+  mocks.acknowledge.mockRejectedValueOnce(new Error("Replacement acknowledgement timed out"));
+  await act(async () => latest.restoreDraft());
+  expect(latest.status).toContain("Could not confirm");
+  expect(input.code).toBe("private text typed offline");
+
+  if (trigger === "timer") {
+    await advance();
+    expect(mocks.save).not.toHaveBeenCalled();
+  }
+  await act(async () => change({ problem: { ...problem, id: "problem-b" }, code: problem.starterCode }));
+  await act(async () => change({ problem, code: problem.starterCode }));
+  expect(mocks.save).not.toHaveBeenCalled();
+  expect(latest.progress?.lastSavedAt).toBe(newer.last_saved_at);
+  expect(latest.conflictingDraft).toBe("private text typed offline");
+});

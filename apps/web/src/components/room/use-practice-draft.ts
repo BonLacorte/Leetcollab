@@ -187,7 +187,7 @@ export function usePracticeDraft(options: Options) {
       await pendingDraftWrites.get(persistenceScope);
       if (conflictingDrafts.has(persistenceScope)) throw new Error("Resolve the unsaved draft first.");
       row = await readProgress(userId, problemId, true);
-      if (context.active && !context.ready) applySavedProgress(row);
+      if (context.active && !context.ready && row?.last_saved_at == null) applySavedProgress(row);
       return javaDraft(row);
     }, "Saved draft restored into the shared editor.", "No saved Java draft found for this exercise.", () => {
       const savedCode = javaDraft(row);

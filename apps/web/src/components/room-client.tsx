@@ -125,7 +125,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [code, setCode] = useState("");
   const codeRef = useRef("");
   const sharedCode = useRef<SharedCodeState | null>(null);
-  const interruptedEdit = useRef<{ roomId: string; userId: string | undefined; message: string } | null>(null);
+  const interruptedEdit = useRef<{ roomId: string; problemId: string | null; userId: string | undefined; message: string } | null>(null);
   const [pendingCodeWrite, setPendingCodeWrite] = useState(false);
   const [codeSync, setCodeSync] = useState<"checking" | "failed" | null>(null);
   const reconcilingCode = codeSync !== null;
@@ -218,22 +218,27 @@ export function RoomClient({ roomId }: { roomId: string }) {
     const clearSharedCode = () => {
       const shared = sharedCode.current;
       const edit = shared?.pendingEdit;
-      if (shared && edit?.syncMessage) interruptedEdit.current = { roomId: shared.roomId, userId, message: edit.syncMessage };
+      if (shared && edit?.syncMessage) {
+        interruptedEdit.current = { roomId: shared.roomId, problemId: shared.problemId, userId, message: edit.syncMessage };
+      }
       edit?.cancelReplacement?.();
       sharedCode.current = null;
     };
     const handleState = (state: RoomState) => {
       const problemId = state.problem?.id ?? null;
-      if (sharedCode.current?.roomId !== state.roomId || sharedCode.current.problemId !== problemId) {
+      const previous = sharedCode.current;
+      if (previous?.roomId !== state.roomId || previous.problemId !== problemId) {
         clearSharedCode();
         sharedCode.current = { roomId: state.roomId, problemId, pendingEdit: null };
         setPendingCodeWrite(false);
         setCodeSync(null);
       }
       setRoom(state);
-      receiveEditorCode(state.code);
+      receiveEditorCode(state.code, previous === null);
       const notice = interruptedEdit.current;
-      if (notice && (notice.roomId !== state.roomId || notice.userId !== userId)) interruptedEdit.current = null;
+      if (notice && (notice.roomId !== state.roomId || notice.problemId !== problemId || notice.userId !== userId)) {
+        interruptedEdit.current = null;
+      }
       setStatus(interruptedEdit.current?.message ?? "");
     };
     const handleCode = (nextCode: string, replacement?: true) => receiveEditorCode(nextCode, replacement);
@@ -342,11 +347,11 @@ export function RoomClient({ roomId }: { roomId: string }) {
     setCode(nextCode);
   }
 
-  function receiveEditorCode(nextCode: string, replacement = false) {
+  function receiveEditorCode(nextCode: string, invalidate = false) {
     const shared = sharedCode.current;
     if (!shared) return;
-    if (!shared.pendingEdit) replaceEditorCode(nextCode, replacement);
-    else if (replacement) setCodeVersion(version => version + 1);
+    if (!shared.pendingEdit) replaceEditorCode(nextCode, invalidate);
+    else if (invalidate) setCodeVersion(version => version + 1);
   }
 
   function beginEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite) {

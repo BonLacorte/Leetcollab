@@ -231,9 +231,15 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   expect(container.textContent).toContain("Could not confirm the shared code edit.");
   expect(run.disabled).toBe(false);
   expect(submit.disabled).toBe(false);
+
+  await type("edit just before changing exercises");
+  const nextProblem = { ...mocks.room.problem!, id: "44444444-4444-4444-8444-444444444444" };
+  await act(async () => state({ ...mocks.room, problem: nextProblem, code: "next exercise code" }));
+  expect(editor.value).toBe("next exercise code");
+  expect(container.textContent).not.toContain("Could not confirm the shared code edit.");
 });
 
-it.each(["acknowledged", "resynced after timeout", "resynced after retry", "received from a peer", "received from a peer during a local reset"])("requires replacement evidence when an identical reset is %s", async confirmation => {
+it.each(["acknowledged", "resynced after timeout", "resynced after retry", "received from a peer", "received from a peer during a local reset", "missed while disconnected"])("handles compiler markers when an identical reset is %s", async confirmation => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
   Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: () => new DOMRect() });
@@ -258,6 +264,18 @@ it.each(["acknowledged", "resynced after timeout", "resynced after retry", "rece
   await act(async () => run.click());
   expect(container.querySelector(".cm-lintRange-error")).not.toBeNull();
 
+  if (confirmation === "missed while disconnected") {
+    const disconnect = mocks.socket.on.mock.calls.find(([event]) => event === "disconnect")![1] as () => void;
+    const connect = mocks.socket.on.mock.calls.find(([event]) => event === "connect")![1] as () => void;
+    await act(async () => { mocks.socket.connected = false; disconnect(); });
+    expect(run.disabled).toBe(true);
+    await act(async () => { mocks.socket.connected = true; connect(); });
+    expect(container.querySelector(".cm-content")?.textContent).toBe(mocks.room.code);
+    expect(container.querySelector(".cm-lintRange-error")).toBeNull();
+    expect(container.querySelector(".result-panel")?.textContent).toContain("Missing closing brace.");
+    expect(run.disabled).toBe(false);
+    return;
+  }
   const receive = mocks.socket.on.mock.calls.find(([event]) => event === "code:updated")![1] as (code: string, replacement: true) => void;
   if (confirmation === "received from a peer") {
     await act(async () => receive(mocks.room.code, true));
