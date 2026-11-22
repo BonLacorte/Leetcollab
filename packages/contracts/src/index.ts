@@ -104,7 +104,7 @@ export type JudgeSubmissionRequest = z.infer<typeof judgeSubmissionRequestSchema
 
 export const judgeParticipantSnapshotSchema = z.object({
   problemId: z.string().uuid(),
-  roomId: roomCodeSchema.nullable(),
+  roomId: roomCodeSchema,
   userIds: z.array(z.string().uuid()).min(1).max(256),
 });
 
@@ -292,7 +292,7 @@ export const createRoomSchema = z.object({
 export const roomIdSchema = z.object({ roomId: roomCodeSchema });
 export const setProblemSchema = roomIdSchema.extend({ problemId: z.string().uuid() });
 export const codeStateRequestSchema = roomIdSchema.extend({ problemId: z.string().uuid().nullable() });
-export const codeUpdateSchema = codeStateRequestSchema.partial({ problemId: true }).extend({
+export const codeUpdateSchema = codeStateRequestSchema.extend({
   code: z.string().max(100_000),
 });
 export const codeReplaceSchema = codeUpdateSchema.extend({

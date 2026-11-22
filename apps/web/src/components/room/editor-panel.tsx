@@ -121,7 +121,7 @@ export function EditorPanel({
             <span className="editor-tooltip" id={`${tooltipId}-reset`} role="tooltip">Reset to default code definition</span>
           </span>
           <span className="editor-tool">
-            <Button aria-label="Restore saved draft to shared editor" aria-describedby={`${tooltipId}-draft`} disabled={actionsDisabled || !progress?.lastSavedAt || progress.draftLanguage !== "java"} onClick={onRestoreDraft} size="icon" variant="secondary">
+            <Button aria-label="Restore saved draft to shared editor" aria-describedby={`${tooltipId}-draft`} disabled={actionsDisabled} onClick={onRestoreDraft} size="icon" variant="secondary">
               <FileDown aria-hidden="true" />
             </Button>
             <span className="editor-tooltip" id={`${tooltipId}-draft`} role="tooltip">Restore saved draft to shared editor</span>

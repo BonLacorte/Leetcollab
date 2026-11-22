@@ -170,6 +170,7 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   expect(run.disabled).toBe(true);
   await act(async () => confirmCode("accepted without acknowledgement"));
   expect(editor.value).toBe("accepted without acknowledgement");
+  expect(container.textContent).toContain("Edit permission changed.");
   expect(run.disabled).toBe(false);
   expect(submit.disabled).toBe(false);
 
@@ -210,6 +211,7 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   expect(run.disabled).toBe(true);
   await act(async () => confirmCode("peer's confirmed code"));
   expect(editor.value).toBe("peer's confirmed code");
+  expect(container.textContent).toContain("Could not confirm the shared code edit.");
   expect(editor.readOnly).toBe(false);
   expect(run.disabled).toBe(false);
   expect(submit.disabled).toBe(false);

@@ -109,7 +109,7 @@ function formatTimer(timer: RoomTimer, now: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-type PendingCodeWrite = { cancelReplacement?: () => void };
+type PendingCodeWrite = { cancelReplacement?: () => void; syncMessage?: string };
 type SharedCodeState = { roomId: string; problemId: string | null; pendingEdit: PendingCodeWrite | null };
 
 export function RoomClient({ roomId }: { roomId: string }) {
@@ -343,6 +343,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   function beginEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite) {
     shared.pendingEdit = edit;
     setPendingCodeWrite(true);
+    setStatus("");
   }
 
   function settleEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite, authoritativeCode: string, invalidate = false) {
@@ -363,6 +364,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       }
       settleEditorWrite(shared, edit, response.data);
       setCodeSync(null);
+      if (edit.syncMessage) setStatus(edit.syncMessage);
     });
   }
 
@@ -379,7 +381,12 @@ export function RoomClient({ roomId }: { roomId: string }) {
     beginEditorWrite(shared, edit);
     replaceEditorCode(nextCode, true);
     socket.timeout(3000).emit("code:update", { roomId, problemId: shared.problemId, code: nextCode }, (error, response) => {
-      if (error || !response.ok) return reconcileEditorWrite(shared, edit);
+      if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
+      const syncMessage = error ? "Could not confirm the shared code edit." : response.ok ? null : response.error;
+      if (syncMessage !== null) {
+        edit.syncMessage = syncMessage;
+        return reconcileEditorWrite(shared, edit);
+      }
       settleEditorWrite(shared, edit, nextCode);
     });
   }

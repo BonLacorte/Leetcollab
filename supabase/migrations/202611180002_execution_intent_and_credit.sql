@@ -214,6 +214,9 @@ begin
       if p_action='submit' and no_snapshot then
         raise exception 'new submit requires captured participants' using errcode='22023';
       end if;
+      if p_action='submit' and p_scope='user' and p_room_id is null then
+        raise exception 'new personal submit requires a room' using errcode='22023';
+      end if;
       insert into public.submissions(user_id,problem_id,idempotency_key,language,source_code,status,verification,runner,
         fixture_version,judge_state,quota_period_start,reservation_expires_at,quota_scope,execution_action)
       select p_user_id,p_problem_id,p_idempotency_key,p_language,p_source_code,'queued','leetcollab',p_runner,

@@ -35,7 +35,7 @@ does not persist these Maps; personal saved drafts and grades live in Supabase.
 | Location | Environment names and boundary |
 | --- | --- |
 | Web public build configuration | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SOCKET_URL`. Use the hosted Supabase URL/key and Render public HTTPS origin. Rebuild when these values change. |
-| Web server runtime | `SUPABASE_SERVICE_ROLE_KEY`; optional `SUPABASE_URL` override must select the same project. Set `REALTIME_JUDGE_SHARED_SECRET` to match realtime and use `REALTIME_INTERNAL_URL` if the server uses a different HTTPS origin. |
+| Web server runtime | `SUPABASE_SERVICE_ROLE_KEY`; optional `SUPABASE_URL` override must select the same project. Set `REALTIME_JUDGE_SHARED_SECRET` to match realtime. Server judge requests use the same `NEXT_PUBLIC_SOCKET_URL` as room connections. |
 | Realtime runtime | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN` set to an exact frontend origin or a comma-separated allowlist. Render supplies `PORT`. Use the same server-only `REALTIME_JUDGE_SHARED_SECRET` as web for Submit capture and solved-state refresh. Set `SUPABASE_SERVICE_ROLE_KEY` for immediate solved-state hints. |
 | Production judge, web server only | Use the OnlineCompiler settings in the [rollout sequence](onlinecompiler-integration.md#rollout-and-rollback). Normal authenticated access uses `JUDGE_DAILY_LIMIT=25` and `JUDGE_LOCAL_TESTING=false`. |
 
@@ -93,7 +93,7 @@ References: [Supabase Google setup](https://supabase.com/docs/guides/auth/social
 
 ## Judge integration
 
-Both judge endpoints require `Authorization: Bearer <Supabase access token>`. The server verifies the token through Supabase Auth. `POST /api/judge/submissions` accepts `{ problemId, action: "run" | "submit", language: "java", sourceCode, idempotencyKey, roomId? }`. Room clients supply the expected `roomId` on Submit. Use one UUID per click and reuse it for retries. Success returns `{ ok: true, submission, quota }`. Failures return `{ ok: false, error, quota?, fallback? }`. `GET /api/judge/status?problemId=<uuid>` returns availability, selected provider, quota, reset time and eligible fallback.
+Both judge endpoints require `Authorization: Bearer <Supabase access token>`. The server verifies the token through Supabase Auth. `POST /api/judge/submissions` accepts `{ problemId, action: "run" | "submit", language: "java", sourceCode, idempotencyKey, roomId? }`. New normal Submits require the expected `roomId`, including one-member rooms. Restricted evaluation remains actor-only. Use one UUID per click and reuse it for retries. Success returns `{ ok: true, submission, quota }`. Failures return `{ ok: false, error, quota?, fallback? }`. `GET /api/judge/status?problemId=<uuid>` returns availability, selected provider, quota, reset time and eligible fallback.
 
 After authentication, submission ingestion accepts at most 256 KiB of raw UTF-8 JSON, counted before full parsing regardless of `Content-Length`. An oversized body, malformed UTF-8/JSON, or malformed or oversized declared length returns HTTP 400 with `INVALID_REQUEST` before judge admission. This transport bound is separate from source and assembled-program limits.
 

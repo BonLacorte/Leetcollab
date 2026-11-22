@@ -27,7 +27,7 @@ export type JudgeServiceOptions = {
   quotaLimit?: number;
   // Server composition permits this only in development with a loopback database.
   localTesting?: boolean;
-  captureParticipants?: (roomId?: string) => Promise<SubmissionParticipants>;
+  captureParticipants?: (roomId: string) => Promise<SubmissionParticipants>;
   notifyCompletion?: (submissionId: string) => Promise<void>;
   activeLimit?: number;
   reservationSeconds?: number;
@@ -131,7 +131,7 @@ export class JudgeService {
   private readonly now: () => Date;
   private readonly renderPolicyId?: string;
   private readonly evaluation?: JudgeEvaluation;
-  private readonly captureParticipants?: (roomId?: string) => Promise<SubmissionParticipants>;
+  private readonly captureParticipants?: (roomId: string) => Promise<SubmissionParticipants>;
   private readonly notifyCompletion?: (submissionId: string) => Promise<void>;
 
   constructor(
@@ -231,6 +231,7 @@ export class JudgeService {
       if (this.evaluation) {
         participants = { roomId: null, userIds: [userId] };
       } else if (!await hasExisting()) {
+        if (!request.roomId) return errorResponse("INVALID_REQUEST", "Join the room for this exercise before submitting.");
         if (!this.captureParticipants) return errorResponse("JUDGE_UNAVAILABLE", "Room participation could not be verified. No execution was started.");
         try {
           participants = await this.captureParticipants(request.roomId);

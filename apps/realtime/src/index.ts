@@ -13,6 +13,7 @@ import {
   codeStateRequestSchema,
   codeReplaceSchema,
   createRoomSchema,
+  roomCodeSchema,
   roomIdSchema,
   setMemberPermissionsSchema,
   setProblemSchema,
@@ -104,7 +105,7 @@ app.get("/judge/participants", async (request, response) => {
   const token = judgeActorToken(request);
   if (!token) return void response.status(401).json({ error: "Authentication required." });
   const parsed = judgeSubmissionRequestSchema.shape.problemId.safeParse(request.query.problemId);
-  const expectedRoom = judgeSubmissionRequestSchema.shape.roomId.safeParse(request.query.roomId);
+  const expectedRoom = roomCodeSchema.safeParse(request.query.roomId);
   if (!parsed.success || !expectedRoom.success) return void response.status(400).json({ error: "Invalid participation request." });
   try {
     const { data, error } = await supabase.auth.getUser(token);
@@ -507,7 +508,7 @@ io.on("connection", (socket) => {
     if (!room || !socket.rooms.has(roomId) || !memberCan(room, socket.data.userId, "canEditCode")) {
       return acknowledge?.(failure("You must be connected with edit permission to update shared code."));
     }
-    if (problemId !== undefined && (room.problem?.id ?? null) !== problemId) {
+    if ((room.problem?.id ?? null) !== problemId) {
       return acknowledge?.(failure("The shared exercise changed."));
     }
     room.code = code;

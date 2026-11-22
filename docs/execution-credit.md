@@ -15,9 +15,9 @@ solved credit to the authenticated tester alone.
 
 `POST /api/judge/submissions` accepts `action: "run" | "submit"`. Missing action
 defaults to Run for older clients. The bearer session supplies the actor; client
-user IDs, participant lists and verdicts cannot grant credit. Room clients send
-the expected room ID with Submit so the server can verify the current room and
-exercise before spending an attempt.
+user IDs, participant lists and verdicts cannot grant credit. Each new normal
+Submit requires the expected room ID so the server can verify the current room
+and exercise before spending an attempt. Restricted evaluation remains actor-only.
 
 Immediately before reserving a normal Submit, the web server forwards the verified
 bearer token to its configured realtime authority at `/judge/participants`.
@@ -27,7 +27,7 @@ the actor's room, selected problem and unique authenticated users with joined
 live sockets. Stale disconnected members, users in other rooms and users in a
 room showing another problem are excluded. A room Submit waits briefly for
 confirmed membership and returns reconnect feedback if the room or exercise
-cannot be verified. A solo Submit receives personal eligibility. A failed
+cannot be verified. To Submit alone, use a one-member room. A failed
 authority lookup refuses Submit before reservation or any provider request. Run
 neither looks up nor stores participants.
 
@@ -80,6 +80,10 @@ manual history and verified credit remain in Supabase. Follow
 [local execution testing](local-execution-testing.md) for the separate 50-attempt
 opt-in. Normal hosted access uses 25 per user, and any higher historical usage
 stays charged.
+
+Reload any room tab opened before this release to edit again. Realtime now
+requires the current exercise ID on every code edit, with explicit `null` for
+rooms without a selected exercise.
 
 ## User acceptance after the owner confirms readiness
 

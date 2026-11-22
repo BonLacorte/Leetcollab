@@ -89,7 +89,7 @@ function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true,
     status: providerError ? "error" : "success", exit_code: providerError ? 1 : 0, signal: null, truncated: false })));
   const service = new JudgeService(repository, new OnlineCompilerProvider({ apiKey: "synthetic-key",
     policyAccepted: true, executionApproved: configured, fetch: send }), {
-    captureParticipants: async () => ({ roomId: null, userIds: ["owner"] }),
+    captureParticipants: async () => ({ roomId: "abcdefgh", userIds: ["owner"] }),
   });
   mocks.service.mockReturnValue(service);
   const responses: Response[] = [];
@@ -106,7 +106,7 @@ function setup(providerOutput = "true\nfalse\ntrue\nfalse\n", configured = true,
 async function click(label: string, source: string) {
   function Harness() {
     const [execution, setExecution] = useState<PracticeExecution | null>(null);
-    return <><PracticeControls problemId={problemId} code={source} onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
+    return <><PracticeControls problemId={problemId} roomId="abcdefgh" code={source} onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
   }
   await act(async () => { renderer = create(<Harness />); });
   const button = renderer!.root.findAllByType("button").find(node => node.children.includes(label))!;
@@ -137,7 +137,7 @@ it.each(["Run", "Submit"])("%s finishes across same-user token refresh and reloa
   send.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   function Harness() {
     const [execution, setExecution] = useState<PracticeExecution | null>(null);
-    return <><PracticeControls problemId={problemId} code={imported} onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
+    return <><PracticeControls problemId={problemId} roomId="abcdefgh" code={imported} onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
   }
   await act(async () => { renderer = create(<Harness />); });
   const button = renderer!.root.findAllByType("button").find(node => node.children.includes(label))!;

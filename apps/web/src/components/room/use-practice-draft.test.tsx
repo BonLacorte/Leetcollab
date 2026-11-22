@@ -64,7 +64,7 @@ it("keeps a scoped draft private and saves the latest dirty code every ten minut
   mocks.read.mockResolvedValue({ data: row("saved Java"), error: null });
   await render();
   expect(input.code).toBe(problem.starterCode);
-  expect(latest.progress?.draftCode).toBe("saved Java");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:00:00.000Z");
   expect(mocks.replace).not.toHaveBeenCalled();
   expect(mocks.query).toHaveBeenCalledWith("user_problem_progress", "user_id", "user");
   expect(mocks.query).toHaveBeenCalledWith("user_problem_progress", "problem_id", problem.id);
@@ -244,7 +244,7 @@ it("discards old exercise reads after switching, and never overwrites a saved dr
   mocks.read.mockResolvedValue({ data: row("saved elsewhere"), error: null });
   await act(async () => change({ problem: second, code: second.starterCode }));
   expect(latest.conflictingDraft).toBe("new unsaved code");
-  expect(latest.progress?.draftCode).toBe("saved elsewhere");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:00:00.000Z");
 });
 
 it.each(["timer", "navigation"])("retains a recovered conflict for the next %s save", async trigger => {
@@ -260,7 +260,7 @@ it.each(["timer", "navigation"])("retains a recovered conflict for the next %s s
   });
   expect(latest.status).toContain("This edit was not saved");
   expect(input.code).toBe("my unsaved edit");
-  expect(latest.progress?.draftCode).toBe("previous draft");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:00:00.000Z");
   mocks.read.mockResolvedValue({ data: { ...row("newer tab draft"), last_saved_at: "2026-11-18T03:01:00.000Z" }, error: null });
   await act(async () => latest.restoreDraft());
   expect(input.code).toBe("my unsaved edit");
@@ -270,7 +270,7 @@ it.each(["timer", "navigation"])("retains a recovered conflict for the next %s s
   expect(latest.conflictingDraft).toBe("my unsaved edit");
   await act(async () => latest.recoverConflict());
   expect(latest.conflictingDraft).toBeNull();
-  expect(latest.progress?.draftCode).toBe("newer tab draft");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:01:00.000Z");
   mocks.save.mockResolvedValueOnce({ data: savedVersion(row("my unsaved edit")), error: null });
   if (trigger === "timer") await advance();
   else {
@@ -293,7 +293,7 @@ it("preserves a navigation save conflict privately when revisiting the exercise"
   await act(async () => change({ problem: second, code: second.starterCode }));
   expect(latest.conflictingDraft).toBeNull();
   await act(async () => change({ problem, code: problem.starterCode }));
-  expect(latest.progress?.draftCode).toBe("newer tab draft");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:01:00.000Z");
   expect(latest.conflictingDraft).toBe("unsaved first-tab edit");
   expect(input.code).toBe(problem.starterCode);
   await act(async () => {
@@ -382,7 +382,7 @@ it("waits for a navigation save before reading that exercise again", async () =>
   mocks.read.mockResolvedValue({ data: row("latest A edit"), error: null });
   await act(async () => finish({ data: savedVersion(row("latest A edit")), error: null }));
   expect(input.code).toBe(problem.starterCode);
-  expect(latest.progress?.draftCode).toBe("latest A edit");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:00:00.000Z");
 });
 
 it("waits for earlier saves before enabling edits on a revisit", async () => {
@@ -408,7 +408,7 @@ it("waits for earlier saves before enabling edits on a revisit", async () => {
   expect(latest.waitingForDraftWrite).toBe(true);
   await act(async () => pending[1]());
   expect(latest.waitingForDraftWrite).toBe(false);
-  expect(latest.progress?.draftCode).toBe("first visit departure");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:00:00.000Z");
   await act(async () => latest.editCode("edit after previous save"));
   expect(input.code).toBe("edit after previous save");
   await advance();
@@ -419,10 +419,18 @@ it("keeps an intentionally empty saved draft private", async () => {
   mocks.read.mockResolvedValue({ data: row(""), error: null });
   await render();
   expect(input.code).toBe(problem.starterCode);
-  expect(latest.progress?.draftCode).toBe("");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:00:00.000Z");
   expect(mocks.replace).not.toHaveBeenCalled();
   await act(async () => latest.restoreDraft());
   expect(input.code).toBe("");
   await advance();
   expect(mocks.save).not.toHaveBeenCalled();
+});
+
+it("restores the first Java draft saved in another tab after this room loaded", async () => {
+  await render();
+  expect(latest.progress).toBeNull();
+  mocks.read.mockResolvedValue({ data: row("saved in another tab"), error: null });
+  await act(async () => latest.restoreDraft());
+  expect(input.code).toBe("saved in another tab");
 });

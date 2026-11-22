@@ -30,6 +30,11 @@ begin
   exception when invalid_parameter_value then null; end;
 
   key := gen_random_uuid();
+  begin
+    perform public.reserve_judge_execution('user','onlinecompiler','submit',null,array[a],
+      a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
+    raise exception 'A new personal Submit must require a room';
+  exception when invalid_parameter_value then null; end;
   insert into auth.users(id,email) values(deleted_peer,'deleted-peer@example.test');
   delete from auth.users where id=deleted_peer;
   result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b,deleted_peer],
@@ -339,7 +344,8 @@ begin
         public.reserve_onlinecompiler_submission(actor,problem,key,'java','class Solution {}',old_start,new_start,20,4,45)
       end;
     else
-      result := public.reserve_judge_execution(scope,runner,action,null,
+      result := public.reserve_judge_execution(scope,runner,action,
+        case when scope='user' and action='submit' then 'abcdefgh' else null end,
         case when action='submit' then array[actor] else null end,
         actor,problem,key,'java','class Solution {}',old_start,new_start,case scope when 'user' then 25 else 20 end,4,45);
     end if;

@@ -180,7 +180,7 @@ describe("structured public results", () => {
     const service = new JudgeService(repository, provider, { notifyCompletion, captureParticipants: async () => ({
       roomId: "abcdefgh", userIds: ["user-a", "user-b"],
     }) });
-    const response = await service.submit("user-a", { ...request(), action: "submit" });
+    const response = await service.submit("user-a", { ...request(), action: "submit", roomId: "abcdefgh" });
     expect(response.status).toBe(503);
     expect(response.body).toMatchObject({ ok: false, error: { code: "JUDGE_UNAVAILABLE" }, quota: { used: 1 } });
     expect(response.body).not.toHaveProperty("submission");
@@ -200,12 +200,12 @@ describe("structured public results", () => {
   it("replays a completed Submit when participant capture is unavailable", async () => {
     const repository = new MemoryRepository(publicConfig());
     const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
-    const captureParticipants = vi.fn(async () => ({ roomId: null, userIds: ["user-a"] }));
+    const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a"] }));
     const service = new JudgeService(repository, provider, { now: () => now, captureParticipants });
-    const submit = { ...request(), action: "submit" as const };
+    const submit = { ...request(), action: "submit" as const, roomId: "abcdefgh" };
     const initial = await service.submit("user-a", submit);
     captureParticipants.mockRejectedValue(new Error("Snapshot unavailable"));
-    const replay = await service.submit("user-a", submit);
+    const replay = await service.submit("user-a", { ...submit, roomId: undefined });
     expect(replay.body).toMatchObject({ ok: true, quota: { used: 1 }, submission: { verdict: "accepted" } });
     if (initial.body.ok && replay.body.ok) expect(replay.body.submission.id).toBe(initial.body.submission.id);
     expect(captureParticipants).toHaveBeenCalledTimes(1);
@@ -215,9 +215,9 @@ describe("structured public results", () => {
   it("replays when the original completes while a retry is trying to capture participants", async () => {
     const repository = new MemoryRepository(publicConfig());
     const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
-    const routineCapture = async () => ({ roomId: null, userIds: ["user-a"] });
+    const routineCapture = async () => ({ roomId: "abcdefgh", userIds: ["user-a"] });
     const original = new JudgeService(repository, provider, { captureParticipants: routineCapture });
-    const submit = { ...request(), action: "submit" as const };
+    const submit = { ...request(), action: "submit" as const, roomId: "abcdefgh" };
     const retry = new JudgeService(repository, provider, {
       captureParticipants: async () => {
         expect((await original.submit("user-a", submit)).body).toMatchObject({ ok: true });
@@ -307,7 +307,7 @@ describe("JudgeService", () => {
     const reserve = vi.spyOn(repository, "reserve");
     const provider = new OutputProvider();
     const service = new JudgeService(repository, provider, { captureParticipants: async () => { throw new Error("Snapshot unavailable"); } });
-    await expect(service.submit("user-a", { ...request(), action: "submit" })).rejects.toThrow("Snapshot unavailable");
+    await expect(service.submit("user-a", { ...request(), action: "submit", roomId: "abcdefgh" })).rejects.toThrow("Snapshot unavailable");
     expect(reserve).not.toHaveBeenCalled();
     expect(provider.calls).toBe(0);
   });
@@ -333,12 +333,14 @@ describe("JudgeService", () => {
       { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" }, 25);
   });
 
-  it("refuses a new solo Submit without an authoritative snapshot", async () => {
+  it("refuses a new normal Submit without a room ID", async () => {
     const repository = new MemoryRepository(config());
     const provider = new OutputProvider();
     const reserve = vi.spyOn(repository, "reserve");
-    const response = await new JudgeService(repository, provider).submit("user-a", { ...request(), action: "submit" });
-    expect(response).toMatchObject({ status: 503, body: { ok: false, error: { code: "JUDGE_UNAVAILABLE" } } });
+    const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a"] }));
+    const response = await new JudgeService(repository, provider, { captureParticipants }).submit("user-a", { ...request(), action: "submit" });
+    expect(response).toMatchObject({ status: 400, body: { ok: false, error: { code: "INVALID_REQUEST" } } });
+    expect(captureParticipants).not.toHaveBeenCalled();
     expect(reserve).not.toHaveBeenCalled();
     expect(provider.calls).toBe(0);
   });

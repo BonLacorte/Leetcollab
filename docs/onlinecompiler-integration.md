@@ -324,9 +324,9 @@ hosted configuration, deployment or public provider selection was changed.
 3. Set the same dedicated random `REALTIME_JUDGE_SHARED_SECRET` in both server
    environments, set realtime's `SUPABASE_SERVICE_ROLE_KEY` for completion refresh,
    and deploy the release realtime service first. Check `/health` and authenticated
-   room creation and join. The restart clears old in-memory rooms. Point the web
-   server's optional `REALTIME_INTERNAL_URL` at the release realtime HTTPS origin
-   when it differs from `NEXT_PUBLIC_SOCKET_URL`.
+   room creation and join. The restart clears old in-memory rooms. Set
+   `NEXT_PUBLIC_SOCKET_URL` to the release realtime HTTPS origin for both room
+   connections and the web server's judge requests.
 4. For the production web environment serving `https://leetcollab.vercel.app/`,
    set `JUDGE_PROVIDER=onlinecompiler`, `JUDGE_ACCESS_MODE=normal`,
    `ONLINECOMPILER_EXECUTION_APPROVED=true`, `ONLINECOMPILER_POLICY_ACCEPTED=true`,

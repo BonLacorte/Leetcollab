@@ -13,7 +13,7 @@ beforeEach(() => { vi.resetAllMocks(); mocks.getUser.mockResolvedValue({ data: {
 describe("authenticated judge HTTP boundary", () => {
   it("returns reconnect feedback for an unconfirmed room Submit", async () => {
     const roomId = "abcdefgh";
-    mocks.submit.mockRejectedValue(new RoomParticipationUnavailable(roomId));
+    mocks.submit.mockRejectedValue(new RoomParticipationUnavailable());
     const response = await POST(request({ ...payload, roomId, action: "submit" }));
     expect(mocks.submit).toHaveBeenCalledWith("owner", expect.objectContaining({ action: "submit", roomId }));
     expect(response.status).toBe(503);

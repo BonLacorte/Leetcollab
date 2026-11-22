@@ -74,6 +74,10 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     expect(await owner.emitWithAck("code:replace", { roomId, problemId: submission, expectedCode: "starter", code: "old exercise" }))
       .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
 
+    const legacyUpdate = { roomId, code: "old tab code" } as Parameters<ClientToServerEvents["code:update"]>[0];
+    expect(await owner.emitWithAck("code:update", legacyUpdate)).toMatchObject({ ok: false });
+    expect(await owner.emitWithAck("code:update", { roomId, problemId: null, code: "late empty room edit" }))
+      .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
     expect(await owner.emitWithAck("code:update", { roomId, problemId: submission, code: "old exercise" }))
       .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
     const typed = new Promise<[string, true | undefined]>(resolve =>
@@ -86,13 +90,15 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     expect(await owner.emitWithAck("code:current", { roomId, problemId: submission }))
       .toMatchObject({ ok: false });
 
-    const requestSnapshot = (secret?: string, token = actor) => fetch(`${base}/judge/participants?problemId=${problem}&roomId=${roomId}`, {
+    const requestSnapshot = (secret?: string, token = actor, expectedRoom = roomId) => fetch(
+      `${base}/judge/participants?problemId=${problem}${expectedRoom ? `&roomId=${expectedRoom}` : ""}`, {
       headers: { Authorization: `Bearer ${token}`, ...(secret ? { "X-Realtime-Judge-Secret": secret } : {}) },
       signal: AbortSignal.timeout(3000),
     });
     expect((await requestSnapshot()).status).toBe(401);
     expect((await requestSnapshot("wrong-secret")).status).toBe(401);
     expect((await requestSnapshot("synthetic-capture-secret", "invalid-user")).status).toBe(401);
+    expect((await requestSnapshot("synthetic-capture-secret", actor, "")).status).toBe(400);
     owner.disconnect();
     expect((await requestSnapshot("synthetic-capture-secret")).status).toBe(409);
     const reconnected = await connect(actor);
