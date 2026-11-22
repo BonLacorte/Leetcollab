@@ -105,7 +105,7 @@ revoke all on function public.complete_judge_submission_account_internal(uuid,uu
   from public,anon,authenticated,service_role;
 create function public.expire_prior_judge_reservation(
   p_user_id uuid,p_idempotency_key uuid,p_runner text,p_problem_id uuid,
-  p_language text,p_source_code text,p_period_start timestamptz
+  p_language text,p_source_code text,p_period_start timestamptz,p_admitted_at timestamptz
 ) returns void language plpgsql security definer set search_path=public as $$
 declare attempt_id uuid;
 begin
@@ -113,13 +113,13 @@ begin
     where user_id=p_user_id and idempotency_key=p_idempotency_key
       and runner=p_runner and problem_id=p_problem_id and language=p_language and source_code=p_source_code
       and verification='leetcollab' and judge_state='reserved'
-      and quota_period_start<p_period_start and reservation_expires_at<=now();
+      and quota_period_start<p_period_start and reservation_expires_at<=p_admitted_at;
   if found then
     perform public.complete_judge_submission_account_internal(p_user_id,attempt_id,'failed','runtime_error',
       0,0,0,'The judge reservation expired before completion.',null,null);
   end if;
 end $$;
-revoke all on function public.expire_prior_judge_reservation(uuid,uuid,text,uuid,text,text,timestamptz)
+revoke all on function public.expire_prior_judge_reservation(uuid,uuid,text,uuid,text,text,timestamptz,timestamptz)
   from public,anon,authenticated,service_role;
 
 create function public.reserve_judge_execution_internal(
@@ -130,6 +130,7 @@ create function public.reserve_judge_execution_internal(
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 declare account public.judge_quota_periods; personal public.judge_user_quota_periods;
   attempt public.submissions; result jsonb; outcome text; expired_count integer; active_count integer;
+  admitted_at timestamptz;
   no_snapshot boolean := p_room_id is null and p_participant_ids is null;
 begin
   if p_scope is null or p_scope not in ('user','shared') or p_runner is null or p_runner not in ('jdoodle','onlinecompiler')
@@ -145,7 +146,13 @@ begin
     raise exception 'invalid execution context' using errcode='22023';
   end if;
   perform pg_advisory_xact_lock(hashtextextended('leetcollab:judge:admission', 0));
-  perform public.expire_prior_judge_reservation(p_user_id,p_idempotency_key,p_runner,p_problem_id,p_language,p_source_code,p_period_start);
+  admitted_at := case when p_scope='user' then clock_timestamp() else now() end;
+  if p_scope='user' then
+    p_period_start := date_bin(interval '24 hours',admitted_at,timestamptz '2000-01-01 23:55+00');
+    p_period_end := p_period_start+interval '24 hours';
+  end if;
+  perform public.expire_prior_judge_reservation(p_user_id,p_idempotency_key,p_runner,p_problem_id,p_language,p_source_code,
+    p_period_start,admitted_at);
   if p_action <> 'legacy' then
     select * into attempt from public.submissions
       where user_id=p_user_id and idempotency_key=p_idempotency_key
@@ -160,7 +167,7 @@ begin
     else
       select * into personal from public.judge_user_quota_periods where user_id=p_user_id and period_start=p_period_start;
       select count(*) into active_count from public.submissions where user_id=p_user_id
-        and quota_scope='user' and quota_period_start=p_period_start and judge_state='reserved' and reservation_expires_at>now();
+        and quota_scope='user' and quota_period_start=p_period_start and judge_state='reserved' and reservation_expires_at>admitted_at;
       result := jsonb_build_object('used',coalesce(personal.used,0),
         'limit',least(coalesce(personal.quota_limit,p_quota_limit),p_quota_limit),'active',active_count,
         'resetAt',coalesce(personal.period_end,p_period_end));
@@ -182,7 +189,7 @@ begin
       insert into public.judge_quota_periods(period_start,period_end,quota_limit)
         values(p_period_start,p_period_end,p_quota_limit)
         on conflict(period_start) do update set
-          quota_limit=least(judge_quota_periods.quota_limit,excluded.quota_limit),updated_at=now();
+          quota_limit=least(judge_quota_periods.quota_limit,excluded.quota_limit),updated_at=admitted_at;
     else
       insert into public.judge_quota_periods(period_start,period_end,quota_limit)
         values(p_period_start,p_period_end,20) on conflict do nothing;
@@ -190,11 +197,11 @@ begin
     select * into strict account from public.judge_quota_periods where period_start=p_period_start for update;
     with expired as (
       update public.submissions set judge_state='failed',status='error',verdict='runtime_error',
-        diagnostics='The judge reservation expired before completion.',completed_at=now()
-      where quota_period_start=p_period_start and judge_state='reserved' and reservation_expires_at<=now() returning 1
+        diagnostics='The judge reservation expired before completion.',completed_at=admitted_at
+      where quota_period_start=p_period_start and judge_state='reserved' and reservation_expires_at<=admitted_at returning 1
     ) select count(*) into expired_count from expired;
     if expired_count > 0 then
-      update public.judge_quota_periods set active=greatest(0,active-expired_count),updated_at=now()
+      update public.judge_quota_periods set active=greatest(0,active-expired_count),updated_at=admitted_at
         where period_start=p_period_start returning * into account;
     end if;
     if p_scope='user' then
@@ -208,7 +215,7 @@ begin
       or (p_scope='user' and (result->>'used')::integer >= (result->>'limit')::integer) then
       outcome := 'exhausted';
     elsif (select count(*) from public.submissions
-      where judge_state='reserved' and quota_period_start is not null and reservation_expires_at>now()) >= p_active_limit then
+      where judge_state='reserved' and quota_period_start is not null and reservation_expires_at>admitted_at) >= p_active_limit then
       outcome := 'busy';
     else
       if p_action='submit' and no_snapshot then
@@ -220,9 +227,9 @@ begin
       insert into public.submissions(user_id,problem_id,idempotency_key,language,source_code,status,verification,runner,
         fixture_version,judge_state,quota_period_start,reservation_expires_at,quota_scope,execution_action)
       select p_user_id,p_problem_id,p_idempotency_key,p_language,p_source_code,'queued','leetcollab',p_runner,
-        c.fixture_version,'reserved',p_period_start,now()+make_interval(secs=>p_reservation_seconds),p_scope,p_action
+        c.fixture_version,'reserved',p_period_start,admitted_at+make_interval(secs=>p_reservation_seconds),p_scope,p_action
       from public.problem_judge_configs c where c.problem_id=p_problem_id returning * into attempt;
-      update public.judge_quota_periods set used=used+1,active=active+1,updated_at=now()
+      update public.judge_quota_periods set used=used+1,active=active+1,updated_at=admitted_at
         where period_start=p_period_start returning * into account;
       if p_scope='user' then
         result := public.get_user_judge_quota_status(p_user_id,p_period_start,p_period_end,p_quota_limit);

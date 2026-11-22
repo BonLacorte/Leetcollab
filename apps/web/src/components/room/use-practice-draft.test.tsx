@@ -192,10 +192,10 @@ it.each(["restoreDraft", "resetCode", "retrieveSubmission"] as const)("keeps the
   expect(input.code).toBe("visible shared code");
 });
 
-it.each([false, true])("flushes captured edits after a pending read only if it succeeds (failure=%s)", async failure => {
+it.each(["empty", "versioned", "failed"])("protects captured edits across navigation when a pending read is %s", async outcome => {
   let finish!: (value: unknown) => void;
   mocks.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  await render({ userId: `pending-read-${failure}` });
+  await render({ userId: `pending-read-${outcome}` });
   await act(async () => latest.editCode("captured during read"));
   const second = { ...problem, id: "problem-b" };
   await act(async () => change({ problem: second, code: second.starterCode }));
@@ -203,13 +203,29 @@ it.each([false, true])("flushes captured edits after a pending read only if it s
   await act(async () => change({ problem, code: problem.starterCode }));
   expect(mocks.read).toHaveBeenCalledTimes(readsBeforeReturn);
   expect(mocks.save).not.toHaveBeenCalled();
-  await act(async () => finish(failure ? { error: new Error("offline") } : { data: row("previous draft"), error: null }));
-  if (failure) {
+  await act(async () => finish(outcome === "failed"
+    ? { error: new Error("offline") }
+    : { data: outcome === "versioned" ? row("draft saved by another tab") : null, error: null }));
+  if (outcome === "empty") {
+    expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      p_problem_id: problem.id, p_draft_code: "captured during read", p_expected_saved_at: null,
+    }));
+  } else {
     expect(mocks.save).not.toHaveBeenCalled();
     expect(latest.conflictingDraft).toBe("captured during read");
   }
-  else expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ p_problem_id: problem.id, p_draft_code: "captured during read" }));
   expect(input.code).toBe(problem.starterCode);
+});
+
+it("keeps edits made during the initial read in private recovery when another tab has saved", async () => {
+  let finish!: (value: unknown) => void;
+  mocks.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await render({ userId: "pending-read-timer" });
+  await act(async () => latest.editCode("local edit"));
+  await act(async () => finish({ data: row("draft saved by another tab"), error: null }));
+  expect(latest.conflictingDraft).toBe("local edit");
+  await advance();
+  expect(mocks.save).not.toHaveBeenCalled();
 });
 
 it("flushes dirty code under the old exercise and cancels its timer when switching or unmounting", async () => {
@@ -458,6 +474,22 @@ it("resumes autosave after Restore finds no draft following an initial read fail
   await advance();
   expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     p_draft_code: "private text typed offline", p_expected_saved_at: null,
+  }));
+});
+
+it.each(["javascript", "java"])("adopts a fresh %s draft version through Restore when no edit is pending", async draft_language => {
+  mocks.read.mockResolvedValueOnce({ data: null, error: new Error("Offline") });
+  await render({ userId: `clean-restore-${draft_language}` });
+  const saved = { ...row("draft from another tab"), draft_language };
+  mocks.read.mockResolvedValue({ data: saved, error: null });
+  if (draft_language === "java") mocks.acknowledge.mockRejectedValueOnce(new Error("Replacement acknowledgement timed out"));
+  await act(async () => latest.restoreDraft());
+  expect(latest.status).toContain(draft_language === "java" ? "Could not confirm" : "No saved Java draft");
+  expect(input.code).toBe(problem.starterCode);
+  await act(async () => latest.editCode("new Java edit"));
+  await advance();
+  expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    p_draft_code: "new Java edit", p_expected_saved_at: saved.last_saved_at,
   }));
 });
 

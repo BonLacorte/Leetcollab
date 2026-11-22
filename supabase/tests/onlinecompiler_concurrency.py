@@ -82,48 +82,47 @@ class RunnerReservationConcurrencyTest(unittest.TestCase):
 
     def test_personal_last_slot_races_preserve_peer_allowance_and_submit_credit(self):
         peer = str(uuid.uuid4())
+        local_actor = str(uuid.uuid4())
         self.query(f"insert into auth.users(id,email,raw_user_meta_data) values "
-                   f"('{peer}','{peer}@example.test','{{}}')")
-        original_start = datetime.datetime.fromisoformat(self.start)
-        periods = []
+                   f"('{peer}','{peer}@example.test','{{}}'),"
+                   f"('{local_actor}','{local_actor}@example.test','{{}}')")
+        start = self.query("select (date_trunc('day', (clock_timestamp() at time zone 'UTC') + interval '5 minutes')"
+                           " - interval '5 minutes') at time zone 'UTC'")
+        end = (datetime.datetime.fromisoformat(start) + datetime.timedelta(days=1)).isoformat()
         try:
-            for limit, slug in ((25, "parcel-pair"), (50, "bracket-beacon")):
+            for actor, limit, slug in ((self.user, 25, "parcel-pair"), (local_actor, 50, "bracket-beacon")):
                 problem = self.query(f"select id from public.problems where slug='{slug}'")
                 with self.subTest(limit=limit):
-                    self.start = (original_start + datetime.timedelta(days=limit)).isoformat()
-                    self.end = (original_start + datetime.timedelta(days=limit + 1)).isoformat()
-                    periods.append(self.start)
                     # Synthetic disposable fixture: exactly one personal slot remains.
                     self.query("insert into public.judge_user_quota_periods "
                                "(user_id,period_start,period_end,quota_limit,used) values "
-                               f"('{self.user}','{self.start}','{self.end}',{limit},{limit - 1})")
+                               f"('{actor}','{start}','{end}',{limit},{limit - 1})")
                     barrier = threading.Barrier(6)
 
                     def reserve(_):
                         barrier.wait()
                         return json.loads(self.query(
                             "select public.reserve_judge_execution('user','onlinecompiler',"
-                            f"'submit','abcdefgh',array['{self.user}'::uuid,'{peer}'::uuid],"
-                            f"'{self.user}','{problem}','{uuid.uuid4()}','java','class Solution {{}}',"
-                            f"'{self.start}','{self.end}',{limit},4,45)"))
+                            f"'submit','abcdefgh',array['{actor}'::uuid,'{peer}'::uuid],"
+                            f"'{actor}','{problem}','{uuid.uuid4()}','java','class Solution {{}}',"
+                            f"'{start}','{end}',{limit},4,45)"))
 
                     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
                         results = list(pool.map(reserve, range(6)))
                     self.assertEqual(sorted(r['result'] for r in results), ['exhausted'] * 5 + ['reserved'])
                     winner = next(r for r in results if r['result'] == 'reserved')
                     self.assertEqual(winner['used'], limit)
-                    self.query(f"select public.complete_judge_submission('{self.user}',"
+                    self.query(f"select public.complete_judge_submission('{actor}',"
                                f"'{winner['submissionId']}','completed','accepted',3,3,1,'synthetic',null,null)")
                     self.assertEqual(self.query("select count(*) from public.verified_problem_solves "
                                                 f"where submission_id='{winner['submissionId']}'"), '2')
                     quota = json.loads(self.query(f"select public.get_user_judge_quota_status('{peer}',"
-                                                 f"'{self.start}','{self.end}',{limit})"))
+                                                 f"'{start}','{end}',{limit})"))
                     self.assertEqual(quota['used'], 0)
                     self.assertEqual(self.query(f"select count(*) from public.submissions where user_id='{peer}'"), '0')
         finally:
-            self.query(f"delete from auth.users where id='{peer}'")
-            for period in periods:
-                self.query(f"delete from public.judge_quota_periods where period_start='{period}'")
+            self.query(f"delete from auth.users where id in ('{peer}','{local_actor}','{self.user}')")
+            self.query(f"delete from public.judge_quota_periods where period_start='{start}'")
 
     def test_evaluation_two_remaining_slots_preserve_baseline_under_races(self):
         # Independent oracle: used 7 + TWO approved slots = 9, concurrency one.

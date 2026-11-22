@@ -333,6 +333,24 @@ describe("JudgeService", () => {
       { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" }, 25);
   });
 
+  it.each(["run", "submit"] as const)("records provider exhaustion in the period admitted for %s", async action => {
+    const repository = new MemoryRepository(config());
+    const admittedPeriod = { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" };
+    const reserve = repository.reserve.bind(repository);
+    vi.spyOn(repository, "reserve").mockImplementation(input => reserve({ ...input, period: admittedPeriod }));
+    const exhaust = vi.spyOn(repository, "exhaust");
+    const provider: ExecutionProvider = { configured: true, execute: async () => {
+      throw new ProviderFailure("quota_exhausted", "Synthetic exhaustion");
+    } };
+    const service = new JudgeService(repository, provider, {
+      now: () => new Date("2026-11-10T23:54:59Z"),
+      captureParticipants: async () => ({ roomId: "abcdefgh", userIds: ["user-a"] }),
+    });
+    const result = await service.submit("user-a", { ...request(), action, roomId: "abcdefgh" });
+    expect(result.body).toMatchObject({ ok: false, error: { code: "QUOTA_EXHAUSTED" } });
+    expect(exhaust).toHaveBeenCalledExactlyOnceWith(admittedPeriod, 25);
+  });
+
   it("refuses a new normal Submit without a room ID", async () => {
     const repository = new MemoryRepository(config());
     const provider = new OutputProvider();

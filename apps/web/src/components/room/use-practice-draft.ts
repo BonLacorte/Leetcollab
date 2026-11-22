@@ -31,6 +31,10 @@ function javaDraft(row: ProgressRow | null): string | null {
   return row?.last_saved_at && row.draft_language === "java" ? row.draft_code ?? null : null;
 }
 
+function canAdoptDraftBaseline(row: ProgressRow | null, hasPendingEdit: boolean) {
+  return !hasPendingEdit || row?.last_saved_at == null;
+}
+
 type Options = {
   roomId: string; userId?: string; problem: Problem | null; code: string;
   canEditCode: boolean; connected: boolean; onCodeChange: (code: string) => void;
@@ -117,9 +121,13 @@ export function usePracticeDraft(options: Options) {
         await previousWrite;
         if (!active && context.draftEdit === null) return;
         const row = await readProgress(userId, problemId);
+        const needsRecovery = !canAdoptDraftBaseline(row, context.draftEdit !== null);
+        if (needsRecovery) retainDraft();
         context.lastSavedAt = row?.last_saved_at ?? null;
         context.ready = true;
-        updateCurrent({ progress: row ? progressFromRow(row) : null, status: "Autosaves every 10 minutes when code changes." });
+        updateCurrent({ progress: row ? progressFromRow(row) : null, status: needsRecovery
+          ? "A saved draft already exists. Recover or discard the edit you made while loading."
+          : "Autosaves every 10 minutes when code changes." });
       } catch {
         updateCurrent({ status: "Could not load your saved draft. Autosave is paused to protect it. Reopen the room to retry." });
       } finally {
@@ -153,21 +161,24 @@ export function usePracticeDraft(options: Options) {
     const { code: expectedCode, revision } = context;
     context.retrieving = true;
     update({ retrieving: true, status: "Preparing shared code replacement…" });
+    function reportStatus(message: string) {
+      update({ status: context.ready ? message : `${message} Autosave is paused to protect your saved draft.` });
+    }
     try {
       const nextCode = await load();
       if (!context.active) return;
       if (nextCode === null) {
-        update({ status: missing });
+        reportStatus(missing);
       } else if (!context.canEditCode || !context.connected || revision !== context.revision) {
-        update({ status: "Code was not loaded because the shared editor or your edit permission changed. Try again." });
+        reportStatus("Code was not loaded because the shared editor or your edit permission changed. Try again.");
       } else {
         await context.onCodeReplace(problemId, expectedCode, nextCode);
         if (!context.active) return;
         onReplaced?.();
-        update({ status });
+        reportStatus(status);
       }
     } catch {
-      update({ status: "Could not confirm the shared code replacement. Check the editor and try again." });
+      reportStatus("Could not confirm the shared code replacement. Check the editor and try again.");
     } finally {
       context.retrieving = false;
       update({ retrieving: false });
@@ -187,7 +198,7 @@ export function usePracticeDraft(options: Options) {
       await pendingDraftWrites.get(persistenceScope);
       if (conflictingDrafts.has(persistenceScope)) throw new Error("Resolve the unsaved draft first.");
       row = await readProgress(userId, problemId, true);
-      if (context.active && !context.ready && row?.last_saved_at == null) applySavedProgress(row);
+      if (context.active && !context.ready && canAdoptDraftBaseline(row, context.draftEdit !== null)) applySavedProgress(row);
       return javaDraft(row);
     }, "Saved draft restored into the shared editor.", "No saved Java draft found for this exercise.", () => {
       const savedCode = javaDraft(row);
@@ -243,7 +254,7 @@ export function usePracticeDraft(options: Options) {
     return replaceCode(async () => {
       const { data, error } = await supabase.from("submissions").select("source_code")
         .eq("user_id", userId).eq("problem_id", problemId).eq("language", "java").eq("verification", "leetcollab")
-        .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle();
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (error) throw error;
       return typeof data?.source_code === "string" && data.source_code ? data.source_code : null;
     }, "Last submitted Java code restored into the shared editor.", "No submitted Java code found for this exercise.");
