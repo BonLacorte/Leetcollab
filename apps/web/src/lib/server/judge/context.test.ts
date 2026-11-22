@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const repository = vi.hoisted(() => ({ reserve: vi.fn(), complete: vi.fn() }));
+const repository = vi.hoisted(() => ({ reserve: vi.fn(), complete: vi.fn(), getQuota: vi.fn() }));
 
 vi.mock("../supabase-admin", () => ({ getSupabaseAdmin: () => ({}) }));
 vi.mock("./supabase-repository", () => ({
@@ -10,13 +10,16 @@ vi.mock("./supabase-repository", () => ({
       harnessSource: "class Main { public static void main(String[] args) { System.out.println(Solution.answer()); } }",
       expectedOutput: ["42"],
     }; }
-    async getQuota() { return { used: 0, remaining: 20, active: 0, limit: 20, resetAt: "2026-11-15T23:55:00Z" }; }
+    getQuota = repository.getQuota;
     reserve = repository.reserve;
     complete = repository.complete;
   },
 }));
 
 beforeEach(() => {
+  repository.getQuota.mockReset().mockResolvedValue({
+    used: 0, remaining: 20, active: 0, limit: 20, resetAt: "2026-11-15T23:55:00Z",
+  });
   repository.reserve.mockReset().mockResolvedValue({
     result: "reserved", submissionId: "22222222-2222-4222-8222-222222222222",
     quota: { used: 1, remaining: 19, active: 1, limit: 20, resetAt: "2026-11-15T23:55:00Z" },
@@ -25,6 +28,35 @@ beforeEach(() => {
     submission: { ...completion, id: completion.submissionId, verification: "leetcollab" },
     quota: { used: 1, remaining: 19, active: 0, limit: 20, resetAt: "2026-11-15T23:55:00Z" },
   }));
+});
+
+it.each([
+  ["local development", "development", "true", "http://127.0.0.1:55421", undefined, 50],
+  ["localhost", "development", "true", "http://localhost:55421", undefined, 50],
+  ["IPv6 loopback", "development", "true", "http://[::1]:55421", undefined, 50],
+  ["production", "production", "true", "http://127.0.0.1:55421", undefined, 25],
+  ["no opt in", "development", undefined, "http://127.0.0.1:55421", undefined, 25],
+  ["remote database", "development", "true", "https://project.supabase.co", undefined, 25],
+  ["lookalike hostname", "development", "true", "http://localhost.example.com", undefined, 25],
+  ["invalid database URL", "development", "true", "invalid", undefined, 25],
+  ["remote server URL overrides public loopback", "development", "true", "http://localhost:55421", "https://project.supabase.co", 25],
+] as const)("uses the 50 ceiling only for opted-in %s", async (_label, nodeEnv, flag, publicUrl, serverUrl, limit) => {
+  vi.stubEnv("NODE_ENV", nodeEnv);
+  vi.stubEnv("JUDGE_LOCAL_TESTING", flag);
+  vi.stubEnv("JUDGE_DAILY_LIMIT", "100");
+  vi.stubEnv("JUDGE_ACCESS_MODE", "normal");
+  vi.stubEnv("JUDGE_PROVIDER", "onlinecompiler");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", publicUrl);
+  vi.stubEnv("SUPABASE_URL", serverUrl);
+  vi.stubEnv("ONLINECOMPILER_API_KEY", "synthetic-rest-key");
+  vi.stubEnv("ONLINECOMPILER_POLICY_ACCEPTED", "true");
+  vi.stubEnv("ONLINECOMPILER_EXECUTION_APPROVED", "true");
+  const network = vi.fn(() => { throw new Error("Network forbidden"); });
+  vi.stubGlobal("fetch", network);
+  const { getJudgeService } = await import("./context");
+  await getJudgeService().status("problem");
+  expect(repository.getQuota).toHaveBeenCalledWith(expect.anything(), limit, undefined);
+  expect(network).not.toHaveBeenCalled();
 });
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
@@ -107,6 +139,7 @@ it("preserves explicit JDoodle rollback and legacy deployments without a selecto
 });
 
 const editedRequest = {
+  action: "run" as const,
   problemId: "11111111-1111-4111-8111-111111111111", language: "java" as const,
   sourceCode: "class Solution { public static int answer() { int edited = 6 * 7; return edited; } }",
   idempotencyKey: "33333333-3333-4333-8333-333333333333",
@@ -119,6 +152,10 @@ it.each([
   ["false execution authorization", "true", "false", "synthetic-rest-key"],
   ["missing key", "true", "true", undefined],
 ] as const)("normal composition rejects %s despite the legacy limits flag", async (_label, policy, approval, key) => {
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("SUPABASE_URL", "http://127.0.0.1:55421");
+  vi.stubEnv("JUDGE_LOCAL_TESTING", "true");
+  vi.stubEnv("JUDGE_DAILY_LIMIT", "50");
   vi.stubEnv("JUDGE_PROVIDER", "onlinecompiler");
   vi.stubEnv("ONLINECOMPILER_API_KEY", key);
   vi.stubEnv("ONLINECOMPILER_POLICY_ACCEPTED", policy);

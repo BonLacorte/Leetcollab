@@ -1,4 +1,5 @@
 import { ProviderFailure, type ExecutionProvider, type ExecutionResult } from "./types";
+import { compilerReport } from "./diagnostics";
 
 export type OnlineCompilerOptions = {
   apiKey?: string;
@@ -111,16 +112,16 @@ function resultFromBody(body: string, durationMs: number): ExecutionResult {
   if (exit !== 0) {
     // Java source mode uses exit 1 for both compilation and runtime errors. Only a
     // compiler location at the start of a diagnostic line identifies compilation.
-    const compiler = signal === null && exit === 1
-      ? /(?:^|\n)(?:\/[^\r\n]*\/)?(?:Main|code)\.java:(\d+)(?::\d+)?:\s*error:/m.exec(payload.error)
-      : null;
+    const report = compilerReport(payload.error);
+    const compiler = signal === null && exit === 1 && report.compilerDiagnostics.length > 0;
     return {
       kind: "execution_error",
       verdict: compiler ? "compile_error" : "runtime_error",
       // Never persist compiler source echoes or arbitrary provider diagnostic text.
       diagnostics: compiler
-        ? `Java compilation failed at line ${Number(compiler[1])}. Correct the source and try again.`
+        ? `Java compilation failed at line ${report.compilerDiagnostics[0].line}. Correct the source and try again.`
         : `The Java program exited unsuccessfully (exit code ${exit}).`,
+      ...(compiler ? report : {}),
       ...common,
     };
   }

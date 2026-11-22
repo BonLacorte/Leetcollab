@@ -2,7 +2,10 @@ import type {
   JudgeFallback,
   JudgeQuota,
   JudgeSubmission,
+  JudgeSubmissionRequest,
   JudgeVerdict,
+  JudgePublicCase,
+  JudgeCompilerDiagnostic,
 } from "@leetcollab/contracts";
 
 // Internal admission status is stripped before any public response.
@@ -15,12 +18,20 @@ export type QuotaPeriod = {
   end: string;
 };
 
+export type SubmissionParticipants = {
+  roomId: string | null;
+  userIds: string[];
+};
+
 export type JudgeConfig = {
   problemId: string;
   fixtureVersion: number;
   harnessSource: string;
   expectedOutput: string[];
   fallback: JudgeFallback;
+  publicCasePlan?: {
+    cases: Array<Omit<JudgePublicCase, "output" | "passed"> & { fixtureIndex: number }>;
+  };
 };
 
 export type StoredSubmission = JudgeSubmission & {
@@ -74,6 +85,8 @@ export interface JudgeRepository {
     problemId: string;
     idempotencyKey: string;
     sourceCode: string;
+    action: JudgeSubmissionRequest["action"];
+    participants?: SubmissionParticipants | null;
     period: QuotaPeriod;
     quotaLimit: number;
     activeLimit: number;
@@ -81,9 +94,10 @@ export interface JudgeRepository {
     runner?: "onlinecompiler";
     render?: { policyId: string; provenance: RenderProvenance };
   }): Promise<Reservation>;
+  hasSubmissionKey(userId: string, key: string): Promise<boolean>;
   getSubmission(userId: string, submissionId: string): Promise<StoredSubmission | null>;
-  complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota }>;
-  exhaust(periodStart: string): Promise<JudgeQuota>;
+  complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota; applied: boolean }>;
+  exhaust(period: QuotaPeriod, limit: number): Promise<JudgeQuota>;
 }
 
 export type ExecutionResult =
@@ -98,6 +112,9 @@ export type ExecutionResult =
       kind: "execution_error";
       verdict: Exclude<JudgeVerdict, "accepted" | "wrong_answer">;
       diagnostics: string;
+      compilerDiagnostics?: JudgeCompilerDiagnostic[];
+      compilerErrorCount?: number | null;
+      compilerDiagnosticsComplete?: boolean;
       durationMs: number;
       cpuTime: string | null;
       memory: string | null;

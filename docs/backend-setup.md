@@ -35,15 +35,18 @@ does not persist these Maps; personal saved drafts and grades live in Supabase.
 | Location | Environment names and boundary |
 | --- | --- |
 | Web public build configuration | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SOCKET_URL`. Use the hosted Supabase URL/key and Render public HTTPS origin. Rebuild when these values change. |
-| Web server runtime | `SUPABASE_SERVICE_ROLE_KEY`; optional `SUPABASE_URL` override must select the same project. The service-role key is required even for disabled-judge status paths that instantiate the admin client. |
-| Realtime runtime | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN` set to the exact frontend origin. Render supplies `PORT`. Realtime needs no service-role key. |
-| Deferred judge, web server only | `JDOODLE_CLIENT_ID`, `JDOODLE_CLIENT_SECRET`, `JDOODLE_JAVA_VERSION_INDEX`, `JDOODLE_LIMITS_CONFIRMED`; tuning: `JUDGE_DAILY_LIMIT`, `JUDGE_MAX_CONCURRENCY`, `JUDGE_RESERVATION_SECONDS`, `JUDGE_REQUEST_TIMEOUT_MS`. Keep `JDOODLE_LIMITS_CONFIRMED=false` and execution disabled. |
+| Web server runtime | `SUPABASE_SERVICE_ROLE_KEY`; optional `SUPABASE_URL` override must select the same project. Set `REALTIME_JUDGE_SHARED_SECRET` to match realtime. Server judge requests use the same `NEXT_PUBLIC_SOCKET_URL` as room connections. |
+| Realtime runtime | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN` set to an exact frontend origin or a comma-separated allowlist. Render supplies `PORT`. Use the same server-only `REALTIME_JUDGE_SHARED_SECRET` as web for Submit capture and solved-state refresh. Set `SUPABASE_SERVICE_ROLE_KEY` for immediate solved-state hints. |
+| Production judge, web server only | Use the OnlineCompiler settings in the [rollout sequence](onlinecompiler-integration.md#rollout-and-rollback). |
 
 The anonymous key is public by design and relies on RLS. Never prefix service-role
 or provider credentials with `NEXT_PUBLIC_`, expose them in browser assets/network,
 or commit values. Keep the Google client secret in Supabase provider configuration.
 The tracked app `.env.example` files list local defaults; loopback addresses cannot
 serve hosted apps.
+
+For a realtime service shared by production and staging, set
+`CORS_ORIGIN=https://leetcollab-staging.vercel.app,https://leetcollab.vercel.app`.
 
 Choose a stable staging frontend HTTPS origin. Match it in realtime `CORS_ORIGIN`,
 Google JavaScript origins and Supabase Site URL/redirect allowlists. Configure
@@ -90,13 +93,15 @@ References: [Supabase Google setup](https://supabase.com/docs/guides/auth/social
 
 ## Judge integration
 
-Both judge endpoints require `Authorization: Bearer <Supabase access token>`. The server verifies the token through Supabase Auth. `POST /api/judge/submissions` accepts `{ problemId, language: "java", sourceCode, idempotencyKey }`; use one UUID per click and reuse it for retries. Success returns `{ ok: true, submission, quota }`. Failures return `{ ok: false, error, quota?, fallback? }`. `GET /api/judge/status?problemId=<uuid>` returns availability, selected provider, quota, reset time and eligible fallback.
+Both judge endpoints require `Authorization: Bearer <Supabase access token>`. The server verifies the token through Supabase Auth. See the [judge schemas](../packages/contracts/src/index.ts) for request and response fields. In `POST /api/judge/submissions`, an omitted `action` defaults to `run`. New normal Submits require the expected `roomId`, including one-member rooms. Use one UUID per click and reuse it when replaying the same request. `GET /api/judge/status?problemId=<uuid>` returns availability, provider, quota scope, reset time and eligible fallback.
 
 After authentication, submission ingestion accepts at most 256 KiB of raw UTF-8 JSON, counted before full parsing regardless of `Content-Length`. An oversized body, malformed UTF-8/JSON, or malformed or oversized declared length returns HTTP 400 with `INVALID_REQUEST` before judge admission. This transport bound is separate from source and assembled-program limits.
 
-Fixtures, quota mutation and trusted verdict writes are server-only. Personal submissions are private. Read `user_problem_progress` under RLS and call `record_problem_grade(p_problem_id, p_grade)` with `again`, `hard`, `good`, or `easy`. Review attempts are persisted independently per user. Historical client-authored submissions are `legacy_unverified`. Room completion is derived from private, persisted submissions with `verification = leetcollab`, `judge_state = completed`, `verdict = accepted`, and matching positive passed/total test counts. Client-authored progress and personal grades never provide completion evidence. Existing manual completion fields remain historical unverified data; no backfill promotes them to verified. See [Practice](../README.md#practice) for Run, Submit and personal review grade behavior.
+Fixtures, quota mutation and trusted verdict writes are server-only. Personal submissions are private. Read `user_problem_progress` under RLS and call `record_problem_grade(p_problem_id, p_grade)` with `again`, `hard`, `good`, or `easy`. Review attempts persist independently per user. Draft writes use `save_practice_draft` with the timestamp of the draft version the caller read, or a null baseline for an unsaved draft. A stale baseline returns null without overwriting the saved draft. Historical client-authored submissions are `legacy_unverified`. Client-authored progress and personal grades never provide completion evidence.
 
-Quota is shared by the application account and reserved atomically before any provider request. Lowering the configured daily limit preserves consumed usage, even when it exceeds the new limit; remaining credits then stay at zero until reset. JDoodle documents a reset at 23:55 UTC. Reservations are never refunded after an ambiguous provider failure, since a request might have consumed a credit. Use a dedicated provider credential for this application, with no other callers, to keep this accounting authoritative. Never automatically retry provider calls. Exhaustion disables execution and exposes the reset time. Original exercises wait for reset. A source destination may be configured only after it is verified to judge the same exercise; external results are never LeetCollab verified. External-result recording is retired: the retained table and RPC are inaccessible to application roles, including service_role; fallback is a link only.
+A source destination may be configured only after it is verified to judge the same exercise. Fallback provides a link to the external judge. Results there are unverified. The retired external-result recording table and RPC are inaccessible to application roles, including `service_role`.
+
+See [execution intent and room credit](execution-credit.md) for captured membership, quota and persistence rules, and [structured judge results](structured-judge-results.md) for response details.
 
 ## Provider capability gate
 
@@ -106,9 +111,9 @@ For bounded tester-only hosted admission, use the [restricted evaluation configu
 
 For OnlineCompiler eligibility, accepted provider limitations, learner disclosure and coordinated activation requirements, see the [accepted normal-user policy](onlinecompiler-integration.md#accepted-normal-user-policy) and [rollout and rollback](onlinecompiler-integration.md#rollout-and-rollback).
 
-Live execution is disabled by default, even with credentials. JDoodle REST documents no caller-configurable numeric compilation/runtime/memory/output ceilings. Broker deadlines, output caps and source restrictions are not sandbox enforcement. The operator must obtain concrete provider confirmation of finite compilation, runtime, memory, output and process limits, per-run filesystem isolation, no network access and the selected Java version/entry-point behavior before setting `JDOODLE_LIMITS_CONFIRMED=true`. If those guarantees cannot be obtained for the free plan, keep it false and report the capability blocker. Do not execute submissions locally as a workaround.
+The tracked local template defaults to disabled. Production activation follows the OnlineCompiler rollout above. JDoodle REST documents no caller-configurable numeric compilation/runtime/memory/output ceilings. Broker deadlines, output caps and source restrictions are not sandbox enforcement. The operator must obtain concrete provider confirmation of finite compilation, runtime, memory, output and process limits, per-run filesystem isolation, no network access and the selected Java version/entry-point behavior before setting `JDOODLE_LIMITS_CONFIRMED=true`. If those guarantees cannot be obtained for the free plan, keep it false and report the capability blocker. Do not execute submissions locally as a workaround.
 
-Server-only environment variables are listed in `apps/web/.env.example`. The JDoodle adapter pins Java, accepts no extra libraries or compiler/runtime arguments, bounds the broker deadline to 30 seconds, limits source+harness to 64 KB, bounds response reading to 64 KB and output to 16 KB, and stores at most 4 KB of diagnostics. Provider CPU/memory fields are retained as opaque measurements; no undocumented memory unit is assumed. These application bounds do not stop remote execution. Regex source rejection is a usability restriction, not a security sandbox.
+Server-only environment variables are listed in `apps/web/.env.example`. The JDoodle adapter pins Java, accepts no extra libraries or compiler/runtime arguments, bounds the broker deadline to 30 seconds, limits source+harness to 64 KB, and bounds response reading to 64 KB and output to 16 KB. The judge sanitizes provider diagnostics before storage. Provider CPU/memory fields are retained as opaque measurements; no undocumented memory unit is assumed. These application bounds do not stop remote execution. Regex source rejection is a usability restriction, not a security sandbox.
 
 References: [REST contract](https://www.jdoodle.com/docs/api/rest), [quota and reset](https://www.jdoodle.com/docs/api/credits), [failures](https://www.jdoodle.com/docs/api/errors).
 

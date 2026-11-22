@@ -1,21 +1,26 @@
 import "dotenv/config";
 import http from "node:http";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import { createClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
+import { judgeParticipants, waitForJudgeParticipants } from "./judge-participants.js";
 import {
   chatSendSchema,
   codeUpdateSchema,
+  codeStateRequestSchema,
+  codeReplaceSchema,
   createRoomSchema,
+  roomCodeSchema,
   roomIdSchema,
   setMemberPermissionsSchema,
   setProblemSchema,
   timerActionSchema,
   whiteboardStrokeAddSchema,
   whiteboardUndoSchema,
+  judgeSubmissionRequestSchema,
   type RoomErrorCode,
   type RoomPermissions,
   type Acknowledgement,
@@ -29,9 +34,12 @@ import {
 
 const port = Number(process.env.PORT ?? 3001);
 const host = process.env.HOST ?? "0.0.0.0";
-const origin = process.env.CORS_ORIGIN ?? "http://localhost:3000";
+const origin = (process.env.CORS_ORIGIN ?? "http://localhost:3000").split(",").map(value => value.trim());
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const judgeSharedSecret = process.env.REALTIME_JUDGE_SHARED_SECRET?.trim();
+const judgeSecretHash = judgeSharedSecret ? createHash("sha256").update(judgeSharedSecret).digest() : null;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("SUPABASE_URL and SUPABASE_ANON_KEY are required.");
@@ -40,6 +48,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
+const supabaseAdmin = supabaseServiceRoleKey ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+}) : null;
 const app = express();
 app.use(helmet());
 app.use(cors({ origin, credentials: true }));
@@ -82,6 +93,61 @@ function activeRoomForUser(userId: string): Room | null {
 
   return room;
 }
+
+function judgeActorToken(request: express.Request) {
+  const secret = request.header("x-realtime-judge-secret");
+  if (!judgeSecretHash || !secret || !timingSafeEqual(createHash("sha256").update(secret).digest(), judgeSecretHash)) return;
+  return /^Bearer ([^\s]+)$/.exec(request.header("authorization") ?? "")?.[1];
+}
+
+app.get("/judge/participants", async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  const token = judgeActorToken(request);
+  if (!token) return void response.status(401).json({ error: "Authentication required." });
+  const parsed = judgeSubmissionRequestSchema.shape.problemId.safeParse(request.query.problemId);
+  const expectedRoom = roomCodeSchema.safeParse(request.query.roomId);
+  if (!parsed.success || !expectedRoom.success) return void response.status(400).json({ error: "Invalid participation request." });
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) return void response.status(401).json({ error: "Authentication required." });
+    const userId = data.user.id;
+    const snapshot = await waitForJudgeParticipants(() => {
+      const room = activeRoomForUser(userId);
+      const joined = io.sockets.adapter.rooms.get(room?.roomId ?? "");
+      const present = new Set((room?.members ?? []).filter(member =>
+        [...(socketIdsByUser.get(member.userId) ?? [])].some(id => joined?.has(id))).map(member => member.userId));
+      return judgeParticipants(room, userId, parsed.data, present, expectedRoom.data);
+    });
+    if (!snapshot) return void response.status(409).json({ error: "Reconnect to the current room and exercise before submitting." });
+    return void response.json(snapshot);
+  } catch {
+    return void response.status(503).json({ error: "Room participation unavailable." });
+  }
+});
+
+app.post("/judge/refresh", express.json({ limit: "2kb" }), async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  const token = judgeActorToken(request);
+  if (!token) return void response.status(401).json({ error: "Authentication required." });
+  const parsed = judgeSubmissionRequestSchema.shape.idempotencyKey.safeParse(request.body?.submissionId);
+  if (!parsed.success) return void response.status(400).json({ error: "Invalid submission." });
+  try {
+    const { data: identity, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !identity.user) return void response.status(401).json({ error: "Authentication required." });
+    if (!supabaseAdmin) return void response.status(503).json({ error: "Completion refresh unavailable." });
+    const { data, error } = await supabaseAdmin.rpc("judge_refresh_recipients", {
+      p_submission_id: parsed.data, p_actor_id: identity.user.id,
+    });
+    if (error) throw error;
+    for (const { user_id, room_id, problem_id } of data ?? []) {
+      const joined = io.sockets.adapter.rooms.get(room_id);
+      for (const socketId of socketIdsByUser.get(user_id) ?? []) {
+        if (joined?.has(socketId)) io.to(socketId).emit("practice:refresh", { problemId: problem_id });
+      }
+    }
+    return void response.status(202).json({ ok: true });
+  } catch { return void response.status(503).json({ error: "Completion refresh unavailable." }); }
+});
 
 function memberCan(
   room: Room,
@@ -240,7 +306,6 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     unregisterSocket(socket.data.userId, socket.id);
   });
-
   socket.on("room:create", async (payload, callback) => {
     const currentRoom = activeRoomForUser(socket.data.userId);
     if (currentRoom) {
@@ -422,14 +487,50 @@ io.on("connection", (socket) => {
     callback(success(room));
   });
 
-  socket.on("code:update", (payload) => {
+  socket.on("code:current", (payload, callback) => {
+    if (typeof callback !== "function") return;
+    const parsed = codeStateRequestSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid code request."));
+    const { roomId, problemId } = parsed.data;
+    const room = roomForMember(roomId, socket.data.userId);
+    if (!room || !socket.rooms.has(roomId) || (room.problem?.id ?? null) !== problemId) {
+      return callback(failure("The shared room or exercise changed."));
+    }
+    callback(success(room.code));
+  });
+
+  socket.on("code:update", (payload, callback) => {
+    const acknowledge = typeof callback === "function" ? callback : undefined;
     const parsed = codeUpdateSchema.safeParse(payload);
-    if (!parsed.success) return;
-    const room = roomForMember(parsed.data.roomId, socket.data.userId);
-    if (!room) return;
-    if (!memberCan(room, socket.data.userId, "canEditCode")) return;
-    room.code = parsed.data.code;
-    socket.to(room.roomId).emit("code:updated", room.code);
+    if (!parsed.success) return acknowledge?.(failure("Invalid code update."));
+    const { roomId, problemId, code } = parsed.data;
+    const room = roomForMember(roomId, socket.data.userId);
+    if (!room || !socket.rooms.has(roomId) || !memberCan(room, socket.data.userId, "canEditCode")) {
+      return acknowledge?.(failure("You must be connected with edit permission to update shared code."));
+    }
+    if ((room.problem?.id ?? null) !== problemId) {
+      return acknowledge?.(failure("The shared exercise changed."));
+    }
+    room.code = code;
+    socket.to(roomId).emit("code:updated", code);
+    acknowledge?.(success(null));
+  });
+
+  socket.on("code:replace", (payload, callback) => {
+    if (typeof callback !== "function") return;
+    const parsed = codeReplaceSchema.safeParse(payload);
+    if (!parsed.success) return callback(failure("Invalid code replacement."));
+    const { roomId, problemId, expectedCode, code } = parsed.data;
+    const room = roomForMember(roomId, socket.data.userId);
+    if (!room || !socket.rooms.has(roomId) || !memberCan(room, socket.data.userId, "canEditCode")) {
+      return callback(failure("You must be connected with edit permission to replace shared code."));
+    }
+    if (room.problem?.id !== problemId || room.code !== expectedCode) {
+      return callback(failure("The shared exercise or code changed. Try again."));
+    }
+    room.code = code;
+    socket.to(roomId).emit("code:updated", code, true);
+    callback(success(null));
   });
 
   socket.on("chat:send", (payload, callback) => {
@@ -547,4 +648,7 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(port, host, () => console.log(`Realtime server listening on http://${host}:${port}`));
+server.listen(port, host, () => {
+  const address = server.address();
+  if (address && typeof address !== "string") console.log(`Realtime server listening on http://${host}:${address.port}`);
+});

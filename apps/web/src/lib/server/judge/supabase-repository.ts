@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JudgeQuota, JudgeVerdict } from "@leetcollab/contracts";
 import { withRemaining } from "./service";
+import { readPublicCasePlan } from "./public-cases";
 import type {
   JudgeCompletion,
   JudgeConfig,
@@ -48,12 +49,12 @@ function submission(row: Record<string, unknown>): StoredSubmission {
 const submissionColumns = "id, problem_id, verdict, tests_passed, tests_total, duration_ms, diagnostics, created_at, judge_state";
 
 export class SupabaseJudgeRepository implements JudgeRepository {
-  constructor(private readonly client: SupabaseClient) {}
+  constructor(private readonly client: SupabaseClient, private readonly options: { userId?: string; sharedQuota?: boolean } = {}) {}
 
   async getConfig(problemId: string): Promise<JudgeConfig | null> {
     const { data, error } = await this.client
       .from("problem_judge_configs")
-      .select("problem_id, fixture_version, harness_source, expected_output, source_judge_name, source_judge_url, problems!inner(is_enabled)")
+      .select("problem_id, fixture_version, harness_source, expected_output, public_case_plan, source_judge_name, source_judge_url, problems!inner(is_enabled)")
       .eq("problems.is_enabled", true)
       .eq("problem_id", problemId)
       .maybeSingle();
@@ -66,6 +67,7 @@ export class SupabaseJudgeRepository implements JudgeRepository {
       fixtureVersion: data.fixture_version,
       harnessSource: data.harness_source,
       expectedOutput: data.expected_output,
+      publicCasePlan: readPublicCasePlan(data.public_case_plan, data.fixture_version, data.harness_source, data.expected_output),
       fallback: data.source_judge_name && data.source_judge_url
         ? { name: data.source_judge_name, url: data.source_judge_url, verification: "external_self_reported" }
         : null,
@@ -87,13 +89,15 @@ export class SupabaseJudgeRepository implements JudgeRepository {
       if (error) throw error;
       return { ...quota(data as RpcQuota), admission: (data as RpcQuota).admission };
     }
-    const { data, error } = await this.client.rpc("get_judge_quota_status", {
+    const personal = this.options.userId && !this.options.sharedQuota;
+    const { data, error } = await this.client.rpc(personal ? "get_user_judge_quota_status" : "get_judge_quota_status", {
+      ...(personal ? { p_user_id: this.options.userId } : {}),
       p_period_start: period.start,
       p_period_end: period.end,
       p_quota_limit: limit,
     });
     if (error) throw error;
-    return quota(data as RpcQuota);
+    return { ...quota(data as RpcQuota), admission: (data as RpcQuota).admission };
   }
 
   async reserve(input: Parameters<JudgeRepository["reserve"]>[0]): Promise<Reservation> {
@@ -101,8 +105,15 @@ export class SupabaseJudgeRepository implements JudgeRepository {
       throw new Error("Invalid server-owned judge runner selection.");
     }
     if (input.render) return this.reserveRender(input);
-    const { data, error } = await this.client.rpc(input.runner === "onlinecompiler"
+    const contextual = Boolean(this.options.userId);
+    const { data, error } = await this.client.rpc(contextual ? "reserve_judge_execution" : input.runner === "onlinecompiler"
       ? "reserve_onlinecompiler_submission" : "reserve_judge_submission", {
+      ...(contextual ? {
+        p_scope: this.options.sharedQuota ? "shared" : "user",
+        p_runner: input.runner ?? "jdoodle", p_action: input.action,
+        p_room_id: input.participants?.roomId ?? null,
+        p_participant_ids: input.participants?.userIds ?? null,
+      } : {}),
       p_user_id: input.userId,
       p_problem_id: input.problemId,
       p_idempotency_key: input.idempotencyKey,
@@ -160,6 +171,13 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     return { result: result.result, quota: resultQuota };
   }
 
+  async hasSubmissionKey(userId: string, key: string): Promise<boolean> {
+    const { data, error } = await this.client.from("submissions").select("id")
+      .eq("user_id", userId).eq("idempotency_key", key).maybeSingle();
+    if (error) throw error;
+    return Boolean(data);
+  }
+
   async getSubmission(userId: string, submissionId: string): Promise<StoredSubmission | null> {
     const { data, error } = await this.client
       .from("submissions")
@@ -171,7 +189,7 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     return data ? submission(data) : null;
   }
 
-  async complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota }> {
+  async complete(completion: JudgeCompletion): Promise<{ submission: StoredSubmission; quota: JudgeQuota; applied: boolean }> {
     const { data, error } = await this.client.rpc("complete_judge_submission", {
       p_user_id: completion.userId,
       p_submission_id: completion.submissionId,
@@ -187,12 +205,17 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     if (error) throw error;
     const stored = await this.getSubmission(completion.userId, completion.submissionId);
     if (!stored) throw new Error("Completed submission could not be loaded.");
-    return { submission: stored, quota: quota(data as RpcQuota) };
+    const result = data as RpcQuota & { result?: string };
+    return { submission: stored, quota: quota(result), applied: result.result === "completed" };
   }
 
-  async exhaust(periodStart: string): Promise<JudgeQuota> {
-    const { data, error } = await this.client.rpc("exhaust_judge_quota", { p_period_start: periodStart });
+  async exhaust(period: QuotaPeriod, limit: number): Promise<JudgeQuota> {
+    const { data, error } = await this.client.rpc("exhaust_judge_quota", { p_period_start: period.start });
     if (error) throw error;
+    if (this.options.userId && !this.options.sharedQuota) {
+      const { admission: _admission, ...personal } = await this.getQuota(period, limit);
+      return personal;
+    }
     return quota(data as RpcQuota);
   }
 }

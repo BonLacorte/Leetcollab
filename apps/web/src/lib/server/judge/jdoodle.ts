@@ -1,3 +1,4 @@
+import { hasCompilerLocation } from "./diagnostics";
 import { ProviderFailure, type ExecutionProvider, type ExecutionResult } from "./types";
 
 type Fetch = typeof fetch;
@@ -50,7 +51,10 @@ function stringField(value: unknown): string | null {
   return null;
 }
 
-function executionFailure(output: string, durationMs: number, cpuTime: string | null, memory: string | null): ExecutionResult {
+function executionFailure(output: string, durationMs: number, cpuTime: string | null, memory: string | null, compilerLocation: boolean): ExecutionResult {
+  if (compilerLocation) {
+    return { kind: "execution_error", verdict: "compile_error", diagnostics: output, durationMs, cpuTime, memory };
+  }
   const diagnostics = output.slice(0, 4096) || "The external sandbox did not report execution details.";
   if (/time\s+limit|timed\s*out/i.test(output)) {
     return { kind: "execution_error", verdict: "time_limit", diagnostics, durationMs, cpuTime, memory };
@@ -59,7 +63,7 @@ function executionFailure(output: string, durationMs: number, cpuTime: string | 
     return { kind: "execution_error", verdict: "memory_limit", diagnostics, durationMs, cpuTime, memory };
   }
   if (/compil(?:e|ation).*(?:error|failed)|\berror\s*:/i.test(output)) {
-    return { kind: "execution_error", verdict: "compile_error", diagnostics, durationMs, cpuTime, memory };
+    return { kind: "execution_error", verdict: "compile_error", diagnostics: output, durationMs, cpuTime, memory };
   }
   return { kind: "execution_error", verdict: "runtime_error", diagnostics, durationMs, cpuTime, memory };
 }
@@ -170,9 +174,10 @@ export class JdoodleProvider implements ExecutionProvider {
       };
     }
 
-    if (payload.isExecutionSuccess === false
+    const compilerLocation = hasCompilerLocation(output);
+    if (compilerLocation || payload.isExecutionSuccess === false
       || /(?:^|\n)[^\n]*\.java:\d+: error:|Exception in thread|time\s+limit|timed\s*out|OutOfMemoryError/i.test(output)) {
-      return executionFailure(output, durationMs, cpuTime, memory);
+      return executionFailure(output, durationMs, cpuTime, memory, compilerLocation);
     }
 
     return { kind: "completed", output, durationMs, cpuTime, memory };

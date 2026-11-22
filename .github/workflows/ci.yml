@@ -24,6 +24,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - run: pnpm --filter @leetcollab/realtime exec tsx --test src/cors.test.ts
       - run: pnpm typecheck
       - run: pnpm build
 
@@ -51,8 +52,12 @@ jobs:
         run: |
           docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/disposable_auth.sql"
           for migration in "$GITHUB_WORKSPACE"/supabase/migrations/*.sql; do
+            if [ "${migration##*/}" = "202611180002_execution_intent_and_credit.sql" ]; then
+              docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/execution_intent_upgrade_seed.sql"
+            fi
             docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$migration"
           done
+          docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/execution_intent_upgrade.sql"
       - name: Exercise shared admission transactions and permissions
         env:
           TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
@@ -61,3 +66,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/supabase/tests/quota_concurrency.py"
           docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/onlinecompiler_reservations.sql"
           python3 "$GITHUB_WORKSPACE/supabase/tests/onlinecompiler_concurrency.py"
+          docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/execution_intent.sql"
+          docker exec -i "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 < "$GITHUB_WORKSPACE/supabase/tests/public_case_plans.sql"
+          docker cp "$GITHUB_WORKSPACE/supabase" "$TEST_POSTGRES_CONTAINER:/tmp/leetcollab-supabase"
+          docker exec "$TEST_POSTGRES_CONTAINER" psql -U postgres -d "$TEST_DATABASE_NAME" -v ON_ERROR_STOP=1 -f /tmp/leetcollab-supabase/tests/local_test_quota.sql

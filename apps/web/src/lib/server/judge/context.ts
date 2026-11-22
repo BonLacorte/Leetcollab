@@ -5,6 +5,7 @@ import { OnlineCompilerProvider } from "./onlinecompiler";
 import { JudgeService } from "./service";
 import { SupabaseJudgeRepository } from "./supabase-repository";
 import { ProviderFailure, type ExecutionProvider } from "./types";
+import { captureSubmissionParticipants, notifyRoomCompletion } from "./room-participants";
 
 function integerEnvironment(name: string, fallback: number): number {
   const value = process.env[name];
@@ -13,17 +14,32 @@ function integerEnvironment(name: string, fallback: number): number {
   return Number.isInteger(parsed) ? parsed : fallback;
 }
 
-export function getJudgeService(userId?: string, problemId?: string): JudgeService {
+function localTestingEnabled(): boolean {
+  if (process.env.NODE_ENV !== "development" || process.env.JUDGE_LOCAL_TESTING !== "true"
+    || process.env.JUDGE_PROVIDER !== "onlinecompiler"
+    || ![undefined, "normal"].includes(process.env.JUDGE_ACCESS_MODE)) return false;
+  try {
+    const url = new URL(process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "");
+    return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function getJudgeService(userId?: string, problemId?: string, accessToken?: string): JudgeService {
   const evaluation = readJudgeEvaluation();
   const beforeRequest = () => assertEvaluationAdmission(evaluation, userId, problemId);
   // Refuse before constructing a provider or a quota-mutating repository path.
   beforeRequest();
   return new JudgeService(
-    new SupabaseJudgeRepository(getSupabaseAdmin()),
+    new SupabaseJudgeRepository(getSupabaseAdmin(), { userId, sharedQuota: Boolean(evaluation) }),
     getExecutionProvider(beforeRequest),
     {
       evaluation,
-      quotaLimit: integerEnvironment("JUDGE_DAILY_LIMIT", 20),
+      localTesting: localTestingEnabled(),
+      quotaLimit: integerEnvironment("JUDGE_DAILY_LIMIT", 25),
+      ...(!evaluation && accessToken && userId ? { captureParticipants: (roomId: string) => captureSubmissionParticipants(accessToken, userId, problemId!, roomId) } : {}),
+      ...(!evaluation && accessToken ? { notifyCompletion: (id: string) => notifyRoomCompletion(accessToken, id) } : {}),
       activeLimit: integerEnvironment("JUDGE_MAX_CONCURRENCY", 4),
       reservationSeconds: integerEnvironment("JUDGE_RESERVATION_SECONDS", 45),
     },

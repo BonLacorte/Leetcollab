@@ -1,7 +1,6 @@
 const forbiddenSourcePatterns: Array<[RegExp, string]> = [
   [/\\u[0-9a-fA-F]{4}/, "Unicode escapes are not supported."],
   [/\bpackage\s+/, "Package declarations are not supported."],
-  [/\bimport\s+/, "Import declarations are not supported. Use java.util or java.math with qualified names."],
   [/\bpublic\s+(?:final\s+)?class\s+/, "The Solution class must not be public."],
   [/\bclass\s+Main\b/, "The Main harness class is reserved."],
   [/\bstatic\s+void\s+main\s*\(/, "Entry-point methods are reserved for the judge harness."],
@@ -21,6 +20,21 @@ export function validateJavaSource(source: string): string | null {
 
   for (const [pattern, message] of forbiddenSourcePatterns) {
     if (pattern.test(source)) return message;
+  }
+
+  // Allow only ordinary imports from the same two packages recommended for
+  // qualified names. Check every other restriction against the original source,
+  // including imported names; imports must never hide a forbidden API.
+  const importTokens = source.replace(
+    /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
+    token => token.startsWith("/") ? " " : token,
+  );
+  const withoutSupportedImports = importTokens.replace(
+    /\bimport\s+java\s*\.\s*(?:util|math)\s*\.\s*(?:[A-Za-z_$][\w$]*|\*)\s*;/g,
+    "",
+  );
+  if (/\bimport\s+/.test(withoutSupportedImports)) {
+    return "Only non-static imports of top-level java.util or java.math types (or package wildcards) are supported. Use qualified names for other supported APIs.";
   }
 
   return null;

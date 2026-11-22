@@ -4,11 +4,9 @@ import { FormEvent, PointerEvent, WheelEvent, useEffect, useRef, useState } from
 import { useRouter } from "next/navigation";
 import type {
   Problem,
-  ProblemProgress,
   RoomPermissions,
   RoomState,
   RoomTimer,
-  SolvedWithMember,
   WhiteboardPoint,
   WhiteboardStroke,
   WhiteboardStrokeInput,
@@ -22,7 +20,10 @@ import { EditorPanel } from "./room/editor-panel";
 import { type DifficultyFilter, ProblemPanel } from "./room/problem-panel";
 import { RoomHeader } from "./room/room-header";
 import { WorkspacePanel } from "./room/workspace-panel";
+import type { PracticeExecution } from "./room/practice-result";
+import { usePracticeDraft } from "./room/use-practice-draft";
 import { Alert, AlertDescription } from "./ui/alert";
+import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Skeleton } from "./ui/skeleton";
 
@@ -78,19 +79,7 @@ type ProblemRow = {
   constraints: string[];
 };
 
-type ProgressRow = {
-  user_id: string;
-  problem_id: string;
-  draft_code: string | null;
-  draft_language: string | null;
-  last_saved_at: string | null;
-  solved_at: string | null;
-  solved_with: SolvedWithMember[] | null;
-  solved_code: string | null;
-};
-
 const problemSelect = "id, slug, title, category, difficulty, sort_order, statement, starter_code, examples, constraints";
-const progressSelect = "user_id, problem_id, draft_code, draft_language, last_saved_at, solved_at, solved_with, solved_code";
 
 function normalizeProblem(row: ProblemRow): Problem {
   return {
@@ -120,25 +109,27 @@ function formatTimer(timer: RoomTimer, now: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-function normalizeProgress(row: ProgressRow): ProblemProgress {
-  return {
-    userId: row.user_id,
-    problemId: row.problem_id,
-    draftCode: row.draft_code ?? "",
-    draftLanguage: row.draft_language ?? "java",
-    lastSavedAt: row.last_saved_at,
-    solvedAt: row.solved_at,
-    solvedWith: Array.isArray(row.solved_with) ? row.solved_with : [],
-    solvedCode: row.solved_code,
-  };
-}
+type PendingCodeWrite = { cancelReplacement?: () => void; syncMessage?: string };
+type SharedCodeState = { roomId: string; problemId: string | null; pendingEdit: PendingCodeWrite | null };
+const unconfirmedEditMessage = "Could not confirm the shared code edit.";
 
 export function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
   const { session, loading } = useAuth();
+  const userId = session?.user.id;
   const socket = useSocket();
   const [room, setRoom] = useState<RoomState | null>(null);
+  const [execution, setExecution] = useState<{ scope: string; value: PracticeExecution } | null>(null);
+  const executionScope = `${roomId}:${room?.problem?.id}:${session?.user.id}`;
+  useEffect(() => { setExecution(null); }, [executionScope]);
   const [code, setCode] = useState("");
+  const codeRef = useRef("");
+  const sharedCode = useRef<SharedCodeState | null>(null);
+  const interruptedEdit = useRef<{ roomId: string; problemId: string | null; userId: string | undefined; message: string } | null>(null);
+  const [pendingCodeWrite, setPendingCodeWrite] = useState(false);
+  const [codeSync, setCodeSync] = useState<"checking" | "failed" | null>(null);
+  const reconcilingCode = codeSync !== null;
+  const [codeVersion, setCodeVersion] = useState(0);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("Connecting to room…");
   const [drawing, setDrawing] = useState(false);
@@ -146,9 +137,6 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [problemSearch, setProblemSearch] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState<DifficultyFilter>("All");
   const [timerNow, setTimerNow] = useState(Date.now());
-  const [progress, setProgress] = useState<ProblemProgress | null>(null);
-  const [progressStatus, setProgressStatus] = useState("");
-  const [isProgressLoading, setIsProgressLoading] = useState(false);
   const [whiteboardMode, setWhiteboardMode] = useState<WhiteboardMode>("pen");
   const [whiteboardColor, setWhiteboardColor] = useState("#4f46e5");
   const [whiteboardSize, setWhiteboardSize] = useState(3);
@@ -226,60 +214,34 @@ export function RoomClient({ roomId }: { roomId: string }) {
   }, [room?.whiteboard, whiteboardViewport]);
 
   useEffect(() => {
-    const userId = session?.user.id;
-    const problemId = room?.problem?.id;
-    if (!userId || !problemId) {
-      setProgress(null);
-      return;
-    }
-
-    let cancelled = false;
-    setIsProgressLoading(true);
-    setProgressStatus("");
-
-    async function loadProgress() {
-      try {
-        const { data, error } = await supabase
-          .from("user_problem_progress")
-          .select(progressSelect)
-          .eq("user_id", userId)
-          .eq("problem_id", problemId)
-          .maybeSingle();
-
-        if (cancelled) return;
-        if (error) {
-          setStatus(error.message);
-          setProgress(null);
-          return;
-        }
-
-        setProgress(data ? normalizeProgress(data as ProgressRow) : null);
-      } catch (error) {
-        if (cancelled) return;
-        setStatus(error instanceof Error ? error.message : "Could not load problem progress.");
-        setProgress(null);
-      } finally {
-        if (!cancelled) {
-          setIsProgressLoading(false);
-        }
-      }
-    }
-
-    loadProgress();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [room?.problem?.id, session?.user.id]);
-
-  useEffect(() => {
     if (!socket) return;
-    const handleState = (state: RoomState) => {
-      setRoom(state);
-      setCode(state.code);
-      setStatus("");
+    const clearSharedCode = () => {
+      const shared = sharedCode.current;
+      const edit = shared?.pendingEdit;
+      if (shared && edit?.syncMessage) {
+        interruptedEdit.current = { roomId: shared.roomId, problemId: shared.problemId, userId, message: edit.syncMessage };
+      }
+      edit?.cancelReplacement?.();
+      sharedCode.current = null;
     };
-    const handleCode = (nextCode: string) => setCode(nextCode);
+    const handleState = (state: RoomState) => {
+      const problemId = state.problem?.id ?? null;
+      const previous = sharedCode.current;
+      if (previous?.roomId !== state.roomId || previous.problemId !== problemId) {
+        clearSharedCode();
+        sharedCode.current = { roomId: state.roomId, problemId, pendingEdit: null };
+        setPendingCodeWrite(false);
+        setCodeSync(null);
+      }
+      setRoom(state);
+      receiveEditorCode(state.code, previous === null);
+      const notice = interruptedEdit.current;
+      if (notice && (notice.roomId !== state.roomId || notice.problemId !== problemId || notice.userId !== userId)) {
+        interruptedEdit.current = null;
+      }
+      setStatus(interruptedEdit.current?.message ?? "");
+    };
+    const handleCode = (nextCode: string, replacement?: true) => receiveEditorCode(nextCode, replacement);
     const handleMessage = (nextMessage: RoomState["messages"][number]) => setRoom((current) => current ? { ...current, messages: [...current.messages, nextMessage] } : current);
     const handleStrokeAdded = (stroke: WhiteboardStroke) => {
       setRoom((current) => {
@@ -300,6 +262,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       if (payload.roomId === roomId) router.replace("/");
     };
     const joinRoom = () => {
+      if (!sharedCode.current) setCodeSync("checking");
       setStatus("Connecting to room...");
       socket.emit("room:join", { roomId }, (response) => {
         if (!response.ok) {
@@ -322,6 +285,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
       });
     };
     const handleDisconnect = () => {
+      clearSharedCode();
+      setCodeSync("checking");
       setStatus("Connection interrupted. Reconnecting...");
     };
 
@@ -337,6 +302,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (socket.connected) joinRoom();
 
     return () => {
+      clearSharedCode();
       socket.off("room:state", handleState);
       socket.off("code:updated", handleCode);
       socket.off("chat:message", handleMessage);
@@ -347,7 +313,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       socket.off("connect", joinRoom);
       socket.off("disconnect", handleDisconnect);
     };
-  }, [roomId, router, socket]);
+  }, [roomId, router, socket, userId]);
 
   const isHost = room?.hostUserId === session?.user.id;
   const currentMember = room?.members.find((member) => member.userId === session?.user.id);
@@ -355,6 +321,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const canDrawWhiteboard = isHost || currentMember?.permissions.canDrawWhiteboard === true;
   const canChat = isHost || currentMember?.permissions.canChat === true;
   const canChangeProblem = isHost || currentMember?.permissions.canChangeProblem === true;
+  const draft = usePracticeDraft({ roomId, userId: session?.user.id, problem: room?.problem ?? null, code,
+    canEditCode: canEditCode && !reconcilingCode, connected: socket?.connected ?? false, onCodeChange: updateCode, onCodeReplace: replaceSharedCode });
   const filteredProblems = problemCatalog.filter((problem) => {
     const matchesDifficulty = difficultyFilter === "All" || problem.difficulty === difficultyFilter;
     const search = problemSearch.trim().toLowerCase();
@@ -373,10 +341,93 @@ export function RoomClient({ roomId }: { roomId: string }) {
     socket.emit("room:leave", { roomId }, () => router.push("/"));
   }
 
-  function updateCode(nextCode: string) {
-    if (!canEditCode) return;
+  function replaceEditorCode(nextCode: string, invalidate = false) {
+    if (invalidate || nextCode !== codeRef.current) setCodeVersion(version => version + 1);
+    codeRef.current = nextCode;
     setCode(nextCode);
-    socket?.emit("code:update", { roomId, code: nextCode });
+  }
+
+  function receiveEditorCode(nextCode: string, invalidate = false) {
+    const shared = sharedCode.current;
+    if (!shared) return;
+    if (!shared.pendingEdit) replaceEditorCode(nextCode, invalidate);
+    else if (invalidate) setCodeVersion(version => version + 1);
+  }
+
+  function beginEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite) {
+    shared.pendingEdit = edit;
+    interruptedEdit.current = null;
+    setPendingCodeWrite(true);
+    setStatus("");
+  }
+
+  function settleEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite, authoritativeCode: string, invalidate = false) {
+    if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
+    shared.pendingEdit = null;
+    replaceEditorCode(authoritativeCode, invalidate);
+    setPendingCodeWrite(false);
+  }
+
+  function reconcileEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite) {
+    if (!socket?.connected || sharedCode.current !== shared || shared.pendingEdit !== edit) return;
+    setCodeSync("checking");
+    socket.timeout(3000).emit("code:current", { roomId: shared.roomId, problemId: shared.problemId }, (error, response) => {
+      if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
+      if (error || !response.ok) {
+        setCodeSync("failed");
+        return;
+      }
+      settleEditorWrite(shared, edit, response.data);
+      setCodeSync(null);
+      if (edit.syncMessage) setStatus(edit.syncMessage);
+    });
+  }
+
+  function retryCodeSync() {
+    const shared = sharedCode.current;
+    if (codeSync === "failed" && shared?.pendingEdit) reconcileEditorWrite(shared, shared.pendingEdit);
+  }
+
+  function updateCode(nextCode: string) {
+    if (!canEditCode || reconcilingCode) return;
+    const shared = sharedCode.current;
+    if (!socket?.connected || !shared || shared.roomId !== roomId || shared.problemId !== (room?.problem?.id ?? null)) return;
+    const edit: PendingCodeWrite = { syncMessage: unconfirmedEditMessage };
+    beginEditorWrite(shared, edit);
+    replaceEditorCode(nextCode, true);
+    socket.timeout(3000).emit("code:update", { roomId, problemId: shared.problemId, code: nextCode }, (error, response) => {
+      if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
+      const syncMessage = error ? unconfirmedEditMessage : response.ok ? null : response.error;
+      if (syncMessage !== null) {
+        edit.syncMessage = syncMessage;
+        return reconcileEditorWrite(shared, edit);
+      }
+      settleEditorWrite(shared, edit, nextCode);
+    });
+  }
+
+  async function replaceSharedCode(problemId: string, expectedCode: string, nextCode: string) {
+    const shared = sharedCode.current;
+    if (!socket?.connected || !shared || reconcilingCode || shared.roomId !== roomId || shared.problemId !== problemId) {
+      throw new Error("Reconnect before replacing shared code.");
+    }
+    await new Promise<void>((resolve, reject) => {
+      const edit: PendingCodeWrite = {
+        cancelReplacement: () => reject(new Error("The shared room or exercise changed.")),
+      };
+      beginEditorWrite(shared, edit);
+      socket.timeout(3000).emit("code:replace", { roomId, problemId, expectedCode, code: nextCode }, (error, response) => {
+        if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
+        edit.cancelReplacement = undefined;
+        const failure = error ?? (response.ok ? null : new Error(response.error));
+        if (failure) {
+          reject(failure);
+          return reconcileEditorWrite(shared, edit);
+        }
+        settleEditorWrite(shared, edit, nextCode, true);
+        resolve();
+      });
+    });
   }
 
   function sendMessage(event: FormEvent) {
@@ -553,52 +604,6 @@ export function RoomClient({ roomId }: { roomId: string }) {
     });
   }
 
-  async function saveDraft() {
-    const userId = session?.user.id;
-    const problemId = room?.problem?.id;
-    if (!userId || !problemId) return;
-
-    setIsProgressLoading(true);
-    setProgressStatus("");
-
-    const { data, error } = await supabase
-      .from("user_problem_progress")
-      .upsert({
-        user_id: userId,
-        problem_id: problemId,
-        draft_code: code,
-        draft_language: "java",
-        last_saved_at: new Date().toISOString(),
-      }, { onConflict: "user_id,problem_id" })
-      .select(progressSelect)
-      .single();
-
-    setIsProgressLoading(false);
-
-    if (error) {
-      setStatus(error.message);
-      return;
-    }
-
-    setProgress(normalizeProgress(data as ProgressRow));
-    setProgressStatus("Draft saved.");
-  }
-
-  function loadDraft() {
-    if (!canEditCode) {
-      setStatus("You need editor permission to load your draft into the shared editor.");
-      return;
-    }
-
-    if (!progress?.draftCode) {
-      setStatus("No saved draft found for this problem.");
-      return;
-    }
-
-    updateCode(progress.draftCode);
-    setProgressStatus("Draft loaded into the shared editor.");
-  }
-
   function selectProblem(problemId: string) {
     if (!socket || !canChangeProblem) {
       setStatus("You do not have permission to change the problem.");
@@ -715,9 +720,14 @@ export function RoomClient({ roomId }: { roomId: string }) {
       onResetTimer={() => updateTimer("reset")}
       onLeave={leaveRoom}
     />
-    {status && (
+    {(status || codeSync === "failed") && (
       <Alert className="room-alert" variant="destructive">
-        <AlertDescription>{status}</AlertDescription>
+        <AlertDescription>
+          {codeSync === "failed" ? <>
+            <p>Shared code could not be confirmed. Sync it before editing or running code.</p>
+            <Button type="button" size="sm" variant="outline" onClick={retryCodeSync}>Retry code sync</Button>
+          </> : status}
+        </AlertDescription>
       </Alert>
     )}
     {!room ? (
@@ -743,20 +753,34 @@ export function RoomClient({ roomId }: { roomId: string }) {
       </section>
       <section className="editor-region">
         <EditorPanel
+          roomId={roomId}
           problemId={room.problem?.id ?? null}
           code={code}
+          codeVersion={codeVersion}
+          execution={execution?.scope === executionScope ? execution.value : null}
           canEditCode={canEditCode}
-          progress={progress}
-          progressStatus={progressStatus}
-          isProgressLoading={isProgressLoading}
-          onCodeChange={updateCode}
-          onSaveDraft={saveDraft}
-          onLoadDraft={loadDraft}
+          pendingCodeWrite={pendingCodeWrite || room.roomId !== roomId}
+          reconcilingCode={reconcilingCode}
+          progress={draft.progress}
+          progressStatus={draft.status}
+          conflictingDraft={draft.conflictingDraft}
+          waitingForDraftWrite={draft.waitingForDraftWrite}
+          onRecoverConflict={draft.recoverConflict}
+          onDiscardConflict={draft.discardConflict}
+          isProgressLoading={draft.loading || draft.saving}
+          isRetrievingSubmission={draft.retrieving}
+          connected={socket?.connected ?? false}
+          onCodeChange={draft.editCode}
+          onResetCode={draft.resetCode}
+          onRestoreDraft={draft.restoreDraft}
+          onRetrieveSubmission={draft.retrieveSubmission}
+          onExecutionChange={value => setExecution({ scope: executionScope, value })}
         />
       </section>
       <section className="workspace-region">
         <WorkspacePanel
           problem={room.problem}
+          execution={execution?.scope === executionScope ? execution.value : null}
           canvasRef={canvasRef}
           canDrawWhiteboard={canDrawWhiteboard}
           drawing={drawing}

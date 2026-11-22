@@ -1,0 +1,15 @@
+-- LOCAL DEVELOPMENT ONLY. Do not add this script to migrations or apply it to hosted databases.
+\set ON_ERROR_STOP on
+do $$
+begin
+  lock table public.judge_quota_periods in access exclusive mode;
+  if exists (select 1 from public.submissions
+    where judge_state='reserved' and quota_period_start is not null and reservation_expires_at>now()) then
+    raise exception 'Wait for active judge reservations before changing the local test allowance';
+  end if;
+
+  update public.judge_user_quota_periods
+  set quota_limit = 50
+  where period_start = (date_trunc('day', (now() at time zone 'UTC') + interval '5 minutes') - interval '5 minutes') at time zone 'UTC';
+end;
+$$;

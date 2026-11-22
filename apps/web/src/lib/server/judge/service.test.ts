@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { JudgeQuota, JudgeSubmissionRequest, JudgeVerdict } from "@leetcollab/contracts";
 import { JudgeService } from "./service";
+import { JdoodleProvider } from "./jdoodle";
 import { OnlineCompilerProvider } from "./onlinecompiler";
+import { ProviderFailure } from "./types";
+import { judgeSubmissionResponseSchema } from "@leetcollab/contracts";
 import type {
   ExecutionProvider,
   JudgeCompletion,
@@ -77,6 +80,10 @@ class MemoryRepository implements JudgeRepository {
     return { result: "reserved", submissionId: id, quota: this.quota(input.period.end) };
   }
 
+  async hasSubmissionKey(userId: string, key: string) {
+    return this.keys.has(`${userId}:${key}`);
+  }
+
   async getSubmission(userId: string, submissionId: string) {
     const stored = this.submissions.get(submissionId);
     return stored?.owner === userId ? stored : null;
@@ -94,7 +101,7 @@ class MemoryRepository implements JudgeRepository {
       durationMs: value.durationMs,
       diagnostics: value.diagnostics,
     });
-    return { submission: stored, quota: this.quota() };
+    return { submission: stored, quota: this.quota(), applied: true };
   }
 
   async exhaust() {
@@ -124,10 +131,277 @@ function config(fallback: JudgeConfig["fallback"] = null): JudgeConfig {
 }
 
 function request(key = randomUUID()): JudgeSubmissionRequest {
-  return { problemId, language: "java", sourceCode, idempotencyKey: key };
+  return { problemId, language: "java", sourceCode, idempotencyKey: key, action: "run" };
 }
 
+describe("structured public results", () => {
+  const framed = (values: string[]) => values.map((value, index) =>
+    `__LEETCOLLAB_CASE_V1__${index}:${Buffer.from(value).toString("base64")}\n`).join("");
+  const publicConfig = (): JudgeConfig => ({ ...config(), expectedOutput: ["42", "HIDDEN_EXPECTED"],
+    harnessSource: 'class Main { public static void main(String[] args) { System.out.println(Solution.answer()); System.out.println("HIDDEN_EXPECTED"); } }',
+    publicCasePlan: { cases: [
+      { id: "sample:1", fixtureIndex: 0, title: "Public example", input: "value = 7", expected: "42" },
+    ] } });
+
+  it.each([
+    ["42", "HIDDEN_EXPECTED", "accepted", 2],
+    ["41", "HIDDEN_EXPECTED", "wrong_answer", 1],
+    ["42", "HIDDEN_WRONG", "wrong_answer", 1],
+  ] as const)("projects actual public output %s with private output withheld", async (actual, hidden, verdict, testsPassed) => {
+    const repository = new MemoryRepository(publicConfig());
+    const send = vi.fn(async (_url: string | URL | Request, _options?: RequestInit) => new Response(JSON.stringify({
+      output: framed([actual, hidden]), error: "", status: "success", exit_code: 0, signal: null, truncated: false,
+    })));
+    const provider = new OnlineCompilerProvider({ apiKey: "synthetic", executionApproved: true, policyAccepted: true, fetch: send });
+    const result = await new JudgeService(repository, provider, { now: () => now }).submit("user-a", request());
+    expect(result.status).toBe(200);
+    expect(judgeSubmissionResponseSchema.parse(result.body)).toMatchObject({ ok: true, submission: {
+      verdict, testsPassed, testsTotal: 2,
+      publicCases: [{ id: "sample:1", title: "Public example", input: "value = 7", expected: "42", output: actual, passed: actual === "42" }],
+    } });
+    const serialized = JSON.stringify(result.body);
+    expect(serialized).not.toContain("HIDDEN");
+    expect(serialized).not.toContain("fixtureIndex");
+    expect(serialized).not.toContain("__LEETCOLLAB");
+  });
+
+  it.each(["accepted", "compile_error"] as const)("omits late %s feedback when another transaction finalized the submission", async verdict => {
+    const repository = new MemoryRepository(publicConfig());
+    const complete = repository.complete.bind(repository);
+    const provider: ExecutionProvider = verdict === "accepted"
+      ? new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]))
+      : { configured: true, execute: async () => ({ kind: "execution_error", verdict: "compile_error",
+        diagnostics: "Main.java:1: error: ';' expected\n1 error", durationMs: 1, cpuTime: null, memory: null }) };
+    const notifyCompletion = vi.fn();
+    vi.spyOn(repository, "complete").mockImplementation(async completion => {
+      const stored = await complete({ ...completion, judgeState: "failed", verdict: "runtime_error", testsPassed: 0 });
+      return { ...stored, applied: false };
+    });
+    const service = new JudgeService(repository, provider, { notifyCompletion, captureParticipants: async () => ({
+      roomId: "abcdefgh", userIds: ["user-a", "user-b"],
+    }) });
+    const response = await service.submit("user-a", { ...request(), action: "submit", roomId: "abcdefgh" });
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({ ok: false, error: { code: "JUDGE_UNAVAILABLE" }, quota: { used: 1 } });
+    expect(response.body).not.toHaveProperty("submission");
+    expect(notifyCompletion).not.toHaveBeenCalled();
+  });
+
+  it("refuses raw stdout on a framed fixture and retains the charge without fabricating a pass", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OutputProvider("42\nHIDDEN_EXPECTED\n");
+    const result = await new JudgeService(repository, provider, { now: () => now }).submit("user-a", request());
+    expect(result.status).toBe(503);
+    expect(result.body).toMatchObject({ ok: false, error: { code: "JUDGE_UNAVAILABLE" }, quota: { used: 1 } });
+    expect(JSON.stringify(result.body)).not.toContain("HIDDEN_EXPECTED");
+    expect([...repository.submissions.values()][0]).toMatchObject({ judgeState: "failed", testsPassed: 0 });
+  });
+
+  it("replays a completed Submit when participant capture is unavailable", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
+    const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a"] }));
+    const service = new JudgeService(repository, provider, { now: () => now, captureParticipants });
+    const submit = { ...request(), action: "submit" as const, roomId: "abcdefgh" };
+    const initial = await service.submit("user-a", submit);
+    captureParticipants.mockRejectedValue(new Error("Snapshot unavailable"));
+    const replay = await service.submit("user-a", { ...submit, roomId: undefined });
+    expect(replay.body).toMatchObject({ ok: true, quota: { used: 1 }, submission: { verdict: "accepted" } });
+    if (initial.body.ok && replay.body.ok) expect(replay.body.submission.id).toBe(initial.body.submission.id);
+    expect(captureParticipants).toHaveBeenCalledTimes(1);
+    expect(provider.calls).toBe(1);
+  });
+
+  it("replays when the original completes while a retry is trying to capture participants", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
+    const routineCapture = async () => ({ roomId: "abcdefgh", userIds: ["user-a"] });
+    const original = new JudgeService(repository, provider, { captureParticipants: routineCapture });
+    const submit = { ...request(), action: "submit" as const, roomId: "abcdefgh" };
+    const retry = new JudgeService(repository, provider, {
+      captureParticipants: async () => {
+        expect((await original.submit("user-a", submit)).body).toMatchObject({ ok: true });
+        throw new Error("Snapshot unavailable");
+      },
+    });
+    expect((await retry.submit("user-a", submit)).body)
+      .toMatchObject({ ok: true, quota: { used: 1 }, submission: { verdict: "accepted" } });
+    expect(provider.calls).toBe(1);
+  });
+
+  it("does not invent observed results for a replay without retained per-case evidence", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OutputProvider(framed(["42", "HIDDEN_EXPECTED"]));
+    const service = new JudgeService(repository, provider, { now: () => now });
+    const key = randomUUID();
+    await service.submit("user-a", request(key));
+    const result = await service.submit("user-a", request(key));
+    expect(result.body).toMatchObject({ ok: true, submission: { verdict: "accepted" } });
+    expect(result.body.ok && result.body.submission.publicCases).toBeUndefined();
+    expect(provider.calls).toBe(1);
+  });
+
+  it.each(['"time limit"', '"memory limit"', "PRIVATE_ECHO".repeat(400).length])("preserves JDoodle compiler reports for echo case %s", async fragment => {
+    const echo = typeof fragment === "number" ? "x".repeat(fragment) : fragment;
+    const send = vi.fn(async () => new Response(JSON.stringify({
+      statusCode: 200, output: `Main.java:1: error: ';' expected\n${echo}\n1 error\n1 warning\n`,
+    })));
+    const provider = new JdoodleProvider({
+      clientId: "synthetic", clientSecret: "synthetic", javaVersionIndex: "0", limitsConfirmed: true, fetch: send,
+    });
+    const repository = new MemoryRepository(config());
+    const service = new JudgeService(repository, provider, { now: () => now });
+    const input = request();
+    const live = judgeSubmissionResponseSchema.parse((await service.submit("user-a", input)).body);
+    const diagnostic = "Expected a semicolon (;).";
+    const summary = `Line 1: ${diagnostic}`;
+    expect(live).toMatchObject({ ok: true, submission: { verdict: "compile_error",
+      diagnostics: summary, compilerDiagnostics: [{ line: 1, message: diagnostic }],
+      compilerErrorCount: 1, compilerDiagnosticsComplete: true,
+    } });
+    expect([...repository.submissions.values()][0].diagnostics).toBe(summary);
+    const replay = judgeSubmissionResponseSchema.parse((await service.submit("user-a", input)).body);
+    expect(replay).toMatchObject({ ok: true, submission: { diagnostics: summary,
+      compilerDiagnostics: [], compilerErrorCount: null, compilerDiagnosticsComplete: false,
+    } });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns source-mapped structured compiler errors and an authentic total without private echoes", async () => {
+    const repository = new MemoryRepository(publicConfig());
+    const provider = new OnlineCompilerProvider({ apiKey: "synthetic", executionApproved: true, policyAccepted: true,
+      fetch: async () => new Response(JSON.stringify({ output: "", status: "error", exit_code: 1, signal: null, truncated: false,
+        error: "Main.java:2: error: ';' expected\nPRIVATE_ECHO\nMain.java:2: error: ';' expected\nPRIVATE_ECHO\nMain.java:99: error: cannot find symbol\nHIDDEN_INPUT\n3 errors\n2 warnings\n",
+      })) });
+    const result = await new JudgeService(repository, provider, { now: () => now }).submit("user-a", {
+      ...request(), sourceCode: "\n\nclass Solution {\n  public static int answer() { return 42; }\n}",
+    });
+    expect(judgeSubmissionResponseSchema.parse(result.body)).toMatchObject({ ok: true, submission: {
+      verdict: "compile_error", compilerErrorCount: 3, compilerDiagnosticsComplete: false,
+      compilerDiagnostics: [{ line: 4, message: "Expected a semicolon (;)." }, { line: 4, message: "Expected a semicolon (;)." }],
+    } });
+    expect(result.body.ok && result.body.submission.publicCases).toBeUndefined();
+    expect(JSON.stringify(result.body)).not.toMatch(/PRIVATE|HIDDEN|Main\.java/);
+  });
+});
+
 describe("JudgeService", () => {
+  it.each(["run", "submit"] as const)("persists authenticated %s intent and captures room credit only for Submit", async action => {
+    const repository = new MemoryRepository(config());
+    const reserve = vi.spyOn(repository, "reserve");
+    const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a", "user-b"] }));
+    const notifyCompletion = vi.fn(async () => { throw new Error("Hint lost after durable completion"); });
+    const service = new JudgeService(repository, new OutputProvider(), { now: () => now, captureParticipants, notifyCompletion });
+    const result = await service.submit("user-a", { ...request(), action, roomId: "abcdefgh" });
+    expect(result.status).toBe(200);
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-a", action,
+      participants: action === "submit" ? { roomId: "abcdefgh", userIds: ["user-a", "user-b"] } : null,
+    }));
+    if (action === "submit") expect(captureParticipants).toHaveBeenCalledExactlyOnceWith("abcdefgh");
+    else expect(captureParticipants).not.toHaveBeenCalled();
+    expect(notifyCompletion).toHaveBeenCalledTimes(action === "submit" ? 1 : 0);
+  });
+
+  it("refuses an unverified room snapshot before charging or executing", async () => {
+    const repository = new MemoryRepository(config());
+    const reserve = vi.spyOn(repository, "reserve");
+    const provider = new OutputProvider();
+    const service = new JudgeService(repository, provider, { captureParticipants: async () => { throw new Error("Snapshot unavailable"); } });
+    await expect(service.submit("user-a", { ...request(), action: "submit", roomId: "abcdefgh" })).rejects.toThrow("Snapshot unavailable");
+    expect(reserve).not.toHaveBeenCalled();
+    expect(provider.calls).toBe(0);
+  });
+
+  it("reserves and records provider exhaustion in the new period when room capture crosses reset", async () => {
+    let instant = new Date("2026-11-10T23:54:59Z");
+    const repository = new MemoryRepository(config());
+    const reserve = vi.spyOn(repository, "reserve");
+    const exhaust = vi.spyOn(repository, "exhaust");
+    const provider: ExecutionProvider = { configured: true, execute: async () => {
+      throw new ProviderFailure("quota_exhausted", "Synthetic exhaustion");
+    } };
+    const service = new JudgeService(repository, provider, { now: () => instant, captureParticipants: async () => {
+      instant = new Date("2026-11-10T23:55:01Z");
+      return { roomId: "abcdefgh", userIds: ["user-a", "user-b"] };
+    } });
+    const result = await service.submit("user-a", { ...request(), action: "submit", roomId: "abcdefgh" });
+    expect(result.body).toMatchObject({ ok: false, error: { code: "QUOTA_EXHAUSTED" } });
+    expect(reserve).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      period: { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" },
+    }));
+    expect(exhaust).toHaveBeenCalledExactlyOnceWith(
+      { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" }, 25);
+  });
+
+  it.each(["run", "submit"] as const)("records provider exhaustion in the period admitted for %s", async action => {
+    const repository = new MemoryRepository(config());
+    const admittedPeriod = { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" };
+    const reserve = repository.reserve.bind(repository);
+    vi.spyOn(repository, "reserve").mockImplementation(input => reserve({ ...input, period: admittedPeriod }));
+    const exhaust = vi.spyOn(repository, "exhaust");
+    const provider: ExecutionProvider = { configured: true, execute: async () => {
+      throw new ProviderFailure("quota_exhausted", "Synthetic exhaustion");
+    } };
+    const service = new JudgeService(repository, provider, {
+      now: () => new Date("2026-11-10T23:54:59Z"),
+      captureParticipants: async () => ({ roomId: "abcdefgh", userIds: ["user-a"] }),
+    });
+    const result = await service.submit("user-a", { ...request(), action, roomId: "abcdefgh" });
+    expect(result.body).toMatchObject({ ok: false, error: { code: "QUOTA_EXHAUSTED" } });
+    expect(exhaust).toHaveBeenCalledExactlyOnceWith(admittedPeriod, 25);
+  });
+
+  it("refuses a new normal Submit without a room ID", async () => {
+    const repository = new MemoryRepository(config());
+    const provider = new OutputProvider();
+    const reserve = vi.spyOn(repository, "reserve");
+    const captureParticipants = vi.fn(async () => ({ roomId: "abcdefgh", userIds: ["user-a"] }));
+    const response = await new JudgeService(repository, provider, { captureParticipants }).submit("user-a", { ...request(), action: "submit" });
+    expect(response).toMatchObject({ status: 400, body: { ok: false, error: { code: "INVALID_REQUEST" } } });
+    expect(captureParticipants).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+    expect(provider.calls).toBe(0);
+  });
+
+  it("retains prior local usage and refuses the 51st execution", async () => {
+    const repository = new MemoryRepository(config());
+    repository.limit = 50;
+    repository.used = 49;
+    const provider = Object.assign(new OutputProvider(), { id: "onlinecompiler" as const });
+    const service = new JudgeService(repository, provider, { localTesting: true, quotaLimit: 100, now: () => now });
+    expect((await service.status(problemId)).body).toMatchObject({ limit: 50, used: 49, remaining: 1 });
+    const key = randomUUID();
+    expect((await service.submit("user-a", request(key))).body).toMatchObject({ ok: true, quota: { used: 50, remaining: 0 } });
+    await service.submit("user-a", request(key));
+    expect((await service.submit("user-a", request())).body).toMatchObject({
+      ok: false, error: { code: "QUOTA_EXHAUSTED" }, quota: { used: 50, remaining: 0 },
+    });
+    expect(provider.calls).toBe(1);
+  });
+
+  it.each([[undefined, true], ["jdoodle", true], ["onlinecompiler", false]] as const)("keeps the normal 25 ceiling for provider %s with localTesting=%s", async (id, localTesting) => {
+    const repository = new MemoryRepository(config());
+    repository.limit = 50;
+    const provider = Object.assign(new OutputProvider(), { id });
+    const service = new JudgeService(repository, provider, { localTesting, quotaLimit: 50, now: () => now });
+    expect((await service.status(problemId)).body).toMatchObject({ limit: 25 });
+  });
+
+  it("retains the evaluation ceiling even with an injected local opt-in", async () => {
+    const repository = new MemoryRepository(config());
+    repository.limit = 50;
+    const provider = Object.assign(new OutputProvider(), { id: "onlinecompiler" as const });
+    const service = new JudgeService(repository, provider, {
+      localTesting: true, quotaLimit: 50, now: () => now,
+      evaluation: {
+        userId: "user-a", problemId, baselineUsed: 0, quotaLimit: 20,
+        startsAt: now.getTime() - 1, expiresAt: now.getTime() + 1000,
+        period: { start: "2026-11-09T23:55:00.000Z", end: "2026-11-10T23:55:00.000Z" },
+      },
+    });
+    expect((await service.status(problemId, "user-a")).body).toMatchObject({ limit: 20 });
+  });
+
   it("returns a LeetCollab-verified verdict from owned output comparison", async () => {
     const repository = new MemoryRepository(config());
     const result = await new JudgeService(repository, new OutputProvider(), { now: () => now }).submit("user-a", request());
@@ -272,4 +546,19 @@ describe("OnlineCompiler uses the existing verified comparison and persistence p
     expect(send).toHaveBeenCalledTimes(1);
     expect(exhaust).not.toHaveBeenCalled();
   });
+});
+
+it.each(["compile_error", "runtime_error"] as const)("withholds legacy raw %s diagnostics on idempotent reads", async verdict => {
+  const repository = new MemoryRepository(config());
+  const provider = new OutputProvider();
+  const service = new JudgeService(repository, provider, { now: () => now });
+  const input = request();
+  await service.submit("user-a", input);
+  const saved = [...repository.submissions.values()][0];
+  saved.verdict = verdict;
+  saved.diagnostics = "Main.java:1: error: cannot find symbol\nPRIVATE_HARNESS_SOURCE PRIVATE_INPUT PRIVATE_EXPECTED";
+  const replay = await service.submit("user-a", input);
+  expect(JSON.stringify(replay.body)).not.toMatch(/PRIVATE|Main.java|cannot find symbol/);
+  expect(replay.body).toMatchObject({ ok: true, submission: { verdict } });
+  expect(provider.calls).toBe(1);
 });

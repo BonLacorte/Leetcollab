@@ -74,17 +74,32 @@ it("denies the tester's wrong problem on both endpoints", async () => {
   expect(db.rpc).not.toHaveBeenCalled();
   expect(network).not.toHaveBeenCalled();
 });
+it("records only the evaluation actor without consulting realtime", async () => {
+  const roomId = "abcdefgh";
+  const response = await POST(new Request("https://app.test/api/judge/submissions", {
+    method: "POST", headers: { authorization: `Bearer ${A}` },
+    body: JSON.stringify({ ...payload, action: "submit", roomId }),
+  }));
+  expect(response.status).toBe(200);
+  expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({
+    p_action: "submit", p_scope: "shared", p_room_id: null, p_participant_ids: [A],
+  }));
+  expect(network).toHaveBeenCalledTimes(1);
+  expect(network.mock.calls[0][0]).toMatch(/^https:\/\/api\.onlinecompiler\.io\//);
+});
+
 it("allows only A's pinned problem, using the exact shared cap and synthetic transport", async () => {
   const available = await status();
   expect(available.status).toBe(200);
-  expect(await available.json()).toMatchObject({ available: true, provider: "onlinecompiler" });
+  expect(await available.json()).toMatchObject({ available: true, provider: "onlinecompiler", quotaScope: "shared" });
   expect(network).not.toHaveBeenCalled();
   const response = await submit();
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body).toMatchObject({ ok: true, submission: { verdict: "accepted", testsPassed: 1 } });
   expect(network).toHaveBeenCalledTimes(1);
-  expect(db.rpc).toHaveBeenCalledWith("reserve_onlinecompiler_submission", expect.objectContaining({
+  expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({
+    p_scope: "shared", p_runner: "onlinecompiler", p_action: "run",
     p_user_id: A, p_problem_id: problem, p_quota_limit: 9, p_active_limit: 1, p_reservation_seconds: 45,
     p_period_start: settings.JUDGE_EVALUATION_PERIOD_START, p_period_end: periodEnd,
   }));
@@ -165,10 +180,12 @@ it("permits a new period row only with an explicit zero baseline and limit two",
   quotaRow = null;
   vi.stubEnv("JUDGE_EVALUATION_BASELINE_USED", "0");
   vi.stubEnv("JUDGE_DAILY_LIMIT", "2");
-  db.rpc.mockResolvedValue({ error: null, data: { result: "reserved", submissionId: submission,
-    used: 1, limit: 2, active: 1, resetAt: periodEnd } });
+  db.rpc.mockImplementation(async name => ({ error: null, data: {
+    result: name === "complete_judge_submission" ? "completed" : "reserved", submissionId: submission,
+    used: 1, limit: 2, active: 1, resetAt: periodEnd,
+  } }));
   expect((await submit()).status).toBe(200);
-  expect(db.rpc).toHaveBeenCalledWith("reserve_onlinecompiler_submission", expect.objectContaining({ p_quota_limit: 2 }));
+  expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({ p_quota_limit: 2 }));
 });
 it("rechecks after a delayed quota read before any quota mutation", async () => {
   db.from.mockImplementation(() => ({ select() { return this; }, eq() { return this; },
@@ -183,8 +200,9 @@ it("rechecks after a delayed quota read before any quota mutation", async () => 
 });
 it.each([settings.JUDGE_EVALUATION_EXPIRES_AT, periodEnd])("retains a queued reservation but sends nothing when admission ends at %s", async time => {
   db.rpc.mockImplementation(async name => {
-    if (name === "reserve_onlinecompiler_submission") vi.setSystemTime(new Date(time));
-    return { data: { result: "reserved", submissionId: submission, used: 8, active: 1, limit: 9, resetAt: periodEnd }, error: null };
+    if (name === "reserve_judge_execution") vi.setSystemTime(new Date(time));
+    return { data: { result: name === "complete_judge_submission" ? "completed" : "reserved",
+      submissionId: submission, used: 8, active: name === "complete_judge_submission" ? 0 : 1, limit: 9, resetAt: periodEnd }, error: null };
   });
   expect((await submit()).status).toBe(503);
   expect(network).not.toHaveBeenCalled();
@@ -210,7 +228,7 @@ it("keeps provider approval mandatory in evaluation mode", async () => {
   expect((await status()).status).toBe(200);
   expect(await (await status()).json()).toMatchObject({ available: false });
   expect((await submit()).status).toBe(503);
-  expect(db.rpc).not.toHaveBeenCalledWith("reserve_onlinecompiler_submission", expect.anything());
+  expect(db.rpc).not.toHaveBeenCalledWith("reserve_judge_execution", expect.anything());
   expect(network).not.toHaveBeenCalled();
 });
 
@@ -254,9 +272,11 @@ it("allows the maximum valid baseline 18 with the hard ceiling 20", async () => 
   vi.stubEnv("JUDGE_EVALUATION_BASELINE_USED", "18");
   vi.stubEnv("JUDGE_DAILY_LIMIT", "20");
   quotaRow = { used: 18, quota_limit: 20, active: 0, period_end: periodEnd };
-  db.rpc.mockResolvedValue({ error: null, data: { result: "reserved", submissionId: submission,
-    used: 19, limit: 20, active: 1, resetAt: periodEnd } });
+  db.rpc.mockImplementation(async name => ({ error: null, data: {
+    result: name === "complete_judge_submission" ? "completed" : "reserved", submissionId: submission,
+    used: 19, limit: 20, active: 1, resetAt: periodEnd,
+  } }));
   expect((await submit()).status).toBe(200);
-  expect(db.rpc).toHaveBeenCalledWith("reserve_onlinecompiler_submission", expect.objectContaining({ p_quota_limit: 20 }));
+  expect(db.rpc).toHaveBeenCalledWith("reserve_judge_execution", expect.objectContaining({ p_quota_limit: 20 }));
   expect(network).toHaveBeenCalledTimes(1);
 });

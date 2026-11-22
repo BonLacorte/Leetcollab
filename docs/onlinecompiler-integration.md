@@ -1,9 +1,10 @@
 # OnlineCompiler integration and evaluation
 
 This is a server-only integration for the exact service
-[OnlineCompiler.io](https://onlinecompiler.io/docs). It does not activate a hosted
-provider or replace an existing deployment's provider. Credentials, deployment,
-and live evaluation are separate operator actions.
+[OnlineCompiler.io](https://onlinecompiler.io/docs). The production release
+enables normal authenticated Run and Submit through the coordinated
+[rollout](#rollout-and-rollback). Restricted hosted evaluation keeps its own
+settings and fixed expiry.
 
 ## Selection and approval
 
@@ -138,6 +139,12 @@ The adapter sends one JSON POST to the fixed HTTPS endpoint
 Redirects are refused. There are no retries.
 
 The existing validation reserves the package-private `Solution` and `Main` names.
+Solutions may use ordinary imports of top-level types from `java.util` and
+`java.math`, including package wildcards. Static imports, subpackage/nested-type
+imports and imports from other packages remain unsupported. All existing
+forbidden-API checks still inspect the original source, including imported names.
+Imports are preserved when assembling the program and storing the submission;
+they do not change provider admission, isolation or fixture verification.
 After the server adds its trusted harness, the adapter makes that one `Main`
 class public. This supplies the documented public entry class when `Solution`
 is the first class in the single source file; it does not modify stored drafts
@@ -154,15 +161,17 @@ missing exit information, and truncated output cannot produce acceptance.
 The provider's structured status, exit code and signal distinguish execution errors
 and limits. An anchored Java compiler location identifies a compile failure;
 other unsuccessful exits remain runtime errors. Persisted error diagnostics are
-generated locally to avoid retaining source echoes or raw provider errors. A 429
+generated locally to avoid retaining source echoes or raw provider errors. Recognized
+Java error categories and locations follow the
+[structured result contract](structured-judge-results.md). A 429
 can mean account allowance, rate, or capacity, so it remains unavailable and never
 blindly exhausts all shared application quota. Provider wall time is not labeled
 as CPU time. See the [run-code reference](https://onlinecompiler.io/docs/run-code).
 
 Successful provider output still passes through LeetCollab's existing fixture
 comparison and private completion RPC. HTTP 200 is not an accepted solution.
-Run and Submit retain their existing shared persistence semantics. Authentication,
-rooms, drafts and verified-completion rules are unchanged.
+See [execution credit](execution-credit.md) for submission ownership and solved
+credit. Draft persistence is independent.
 
 ## Persistence and quota
 
@@ -173,13 +182,10 @@ and rejects reusing an idempotency key with another provider. Only the trusted
 service role can call the fixed-runner reservation RPCs; internal helpers cannot
 be called by application roles.
 
-The existing conservative application cap remains at most 20 attempts/day,
-resetting at 23:55 UTC, shared across JDoodle and OnlineCompiler. This is an
-application limit, not OnlineCompiler's monthly reset or an upgrade to 100,000
-application attempts. Existing consumed usage is preserved. Failed or ambiguous
-attempts retain their charge and cannot be replayed into another execution.
-A dedicated account/key without conflicting callers and reconciled provider
-usage remain evaluation prerequisites.
+Follow the [execution credit migration and restart steps](execution-credit.md#migration-and-restart)
+before enabling normal access. Application quotas are independent of
+OnlineCompiler's monthly allowance. Reconcile provider usage separately for
+[restricted evaluation](#restricted-hosted-evaluation).
 
 ## Accepted normal-user policy
 
@@ -209,7 +215,7 @@ post-run check. The evaluated transport therefore still sends neither
 `time_limit` nor `memory_limit`. Application deadlines do not terminate remote code.
 
 Application authentication, server-only keys and fixed endpoint, Java/source
-restrictions, deadlines, source/response/output caps, atomic at-most-20/day quota,
+restrictions, deadlines, source/response/output caps, atomic per-actor allowance,
 concurrency reservations, no fallback/redirect/retry, complete structured results,
 server fixture verification and private persisted completion remain required.
 Source filtering remains a usability check, not a sandbox boundary.
@@ -295,16 +301,37 @@ hosted configuration, deployment or public provider selection was changed.
 
 ## Rollout and rollback
 
-Tracked examples keep `JUDGE_PROVIDER=disabled` and both OnlineCompiler flags false.
-Policy adoption ships eligibility and disclosure code, not an enabled localhost or
-hosted runtime. A separately coordinated release must identify the owned
-authenticated runtime, verify its free dedicated-account configuration and migrations,
-and obtain an exact additional free-call allowance before a normal-composition
-live check with edited synthetic learner source. Retained fixture evidence and
-mocked tests cannot substitute for that release check. No paid requests,
-deployment, public activation or merge is authorized by this implementation.
+1. Use the release revision that passed CI. Confirm the private database backup
+   and isolated restore evidence, the dedicated OnlineCompiler REST account and
+   available allowance, and the known disabled web artifact for rollback. Keep
+   production admission stopped while the schema and realtime service change.
+2. Let in-flight executions settle and confirm there are no reserved submissions
+   or active leases. Apply pending migrations in order, including
+   `202611180001_public_case_plans.sql` and
+   `202611180002_execution_intent_and_credit.sql`. Preserve submissions and
+   consumed usage. Follow the [database checks](backend-setup.md).
+3. Set the same dedicated random `REALTIME_JUDGE_SHARED_SECRET` in both server
+   environments, set realtime's `SUPABASE_SERVICE_ROLE_KEY` for completion refresh,
+   and deploy the release realtime service first. Check `/health` and authenticated
+   room creation and join. The restart clears old in-memory rooms. Set
+   `NEXT_PUBLIC_SOCKET_URL` to the release realtime HTTPS origin for both room
+   connections and the web server's judge requests. Configure realtime
+   `CORS_ORIGIN` for the production frontend using the
+   [realtime environment settings](backend-setup.md#staging-setup).
+4. For the production web environment serving `https://leetcollab.vercel.app/`,
+   set `JUDGE_PROVIDER=onlinecompiler`, `JUDGE_ACCESS_MODE=normal`,
+   `ONLINECOMPILER_EXECUTION_APPROVED=true`, `ONLINECOMPILER_POLICY_ACCEPTED=true`,
+   `JUDGE_DAILY_LIMIT=25` and `JUDGE_LOCAL_TESTING=false`. Supply the private
+   `ONLINECOMPILER_API_KEY` and keep `JDOODLE_LIMITS_CONFIRMED=false`. Redeploy
+   to apply these settings. Keep expired evaluation artifacts pinned to their
+   original evaluation settings and expiry.
+5. Confirm authenticated judge status shows OnlineCompiler and the personal
+   25-attempt allowance less any consumed usage. Use the [two-user checks](execution-credit.md#user-acceptance-after-the-owner-confirms-readiness)
+   for scoped live acceptance only after confirming the account allowance and
+   the approved smoke-test budget. Record the deployed revision and results.
 
-To stop admission in future artifacts, set `ONLINECOMPILER_EXECUTION_APPROVED=false`
+To roll back, use the known disabled artifact and stop or protect every enabled
+artifact that remains directly reachable. For future artifacts, set `ONLINECOMPILER_EXECUTION_APPROVED=false`
 and `JUDGE_PROVIDER=disabled`; keep `JUDGE_ACCESS_MODE=evaluation` and its expired
 pin on tester-only configurations. Hosting environment edits require a new
 deployment and do not change an already-built artifact. Before enabling, verify
@@ -319,6 +346,10 @@ expiry and remains closed after reset. For immediate closure before expiry, the
 authorized hosting operator must also stop/protect those enabled artifacts; a
 settings edit alone is not an emergency switch. Configuration-only rollback cannot
 revoke already-running invocations or recall outbound source. Keep drafts,
-submissions and consumed quota.
+submissions and consumed quota. After the migration, **Save draft** in older
+tabs or a rolled-back web revision fails because draft writes require the
+version-checked save RPC. Existing drafts remain readable. Reload the updated
+web app to resume autosave. Attempts admitted by a compatible rollback revision
+also count in the same personal period after redeploy.
 Already-sent jobs cannot be cancelled by this switch and provider execution history
 cannot be recalled. There is no automatic fallback, database reset or schema rollback.

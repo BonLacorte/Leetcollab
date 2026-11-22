@@ -95,9 +95,18 @@ export const judgeSubmissionRequestSchema = z.object({
   language: judgeLanguageSchema,
   sourceCode: z.string().min(1).max(32_768),
   idempotencyKey: z.string().uuid(),
+  // Old callers can run code, but must explicitly opt into Submit credit.
+  action: z.enum(["run", "submit"]).default("run"),
+  roomId: roomCodeSchema.optional(),
 });
 
 export type JudgeSubmissionRequest = z.infer<typeof judgeSubmissionRequestSchema>;
+
+export const judgeParticipantSnapshotSchema = z.object({
+  problemId: z.string().uuid(),
+  roomId: roomCodeSchema,
+  userIds: z.array(z.string().uuid()).min(1).max(256),
+});
 
 export const judgeVerdictSchema = z.enum([
   "accepted",
@@ -129,6 +138,23 @@ export const judgeFallbackSchema = z.object({
 
 export type JudgeFallback = z.infer<typeof judgeFallbackSchema>;
 
+export const judgeCompilerDiagnosticSchema = z.object({
+  line: z.number().int().positive(),
+  message: z.string().max(512),
+});
+
+export const judgePublicCaseSchema = z.object({
+  id: z.string().max(128),
+  title: z.string().max(256),
+  input: z.string().max(4096),
+  output: z.string().max(4096).nullable(),
+  expected: z.string().max(4096),
+  passed: z.boolean(),
+});
+
+export type JudgeCompilerDiagnostic = z.infer<typeof judgeCompilerDiagnosticSchema>;
+export type JudgePublicCase = z.infer<typeof judgePublicCaseSchema>;
+
 export const judgeSubmissionSchema = z.object({
   id: z.string().uuid(),
   problemId: z.string().uuid(),
@@ -139,6 +165,10 @@ export const judgeSubmissionSchema = z.object({
   testsTotal: z.number().int().min(0),
   durationMs: z.number().nonnegative().nullable(),
   diagnostics: z.string().nullable(),
+  compilerDiagnostics: z.array(judgeCompilerDiagnosticSchema).max(8).optional(),
+  compilerErrorCount: z.number().int().positive().nullable().optional(),
+  compilerDiagnosticsComplete: z.boolean().optional(),
+  publicCases: z.array(judgePublicCaseSchema).max(16).optional(),
   createdAt: z.string().datetime(),
 });
 
@@ -181,6 +211,7 @@ export type JudgeSubmissionResponse = z.infer<typeof judgeSubmissionResponseSche
 
 export const judgeStatusResponseSchema = z.object({
   available: z.boolean(),
+  quotaScope: z.enum(["user", "shared"]).optional(),
   provider: z.enum(["jdoodle", "onlinecompiler", "render"]).nullable().optional(),
   used: z.number().int().min(0),
   limit: z.number().int().positive(),
@@ -260,7 +291,14 @@ export const createRoomSchema = z.object({
 });
 export const roomIdSchema = z.object({ roomId: roomCodeSchema });
 export const setProblemSchema = roomIdSchema.extend({ problemId: z.string().uuid() });
-export const codeUpdateSchema = roomIdSchema.extend({ code: z.string().max(100_000) });
+export const codeStateRequestSchema = roomIdSchema.extend({ problemId: z.string().uuid().nullable() });
+export const codeUpdateSchema = codeStateRequestSchema.extend({
+  code: z.string().max(100_000),
+});
+export const codeReplaceSchema = codeUpdateSchema.extend({
+  problemId: z.string().uuid(),
+  expectedCode: codeUpdateSchema.shape.code,
+});
 export const chatSendSchema = roomIdSchema.extend({ body: z.string().trim().min(1).max(2_000) });
 export const whiteboardStrokeAddSchema = roomIdSchema.extend({ stroke: whiteboardStrokeInputSchema });
 export const whiteboardUndoSchema = roomIdSchema;
@@ -284,7 +322,9 @@ export interface ClientToServerEvents {
   "room:timer:start": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "room:timer:pause": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
   "room:timer:reset": (payload: z.infer<typeof timerActionSchema>, callback: (response: Acknowledgement<RoomState>) => void) => void;
-  "code:update": (payload: z.infer<typeof codeUpdateSchema>) => void;
+  "code:current": (payload: z.infer<typeof codeStateRequestSchema>, callback: (response: Acknowledgement<string>) => void) => void;
+  "code:update": (payload: z.infer<typeof codeUpdateSchema>, callback: (response: Acknowledgement<null>) => void) => void;
+  "code:replace": (payload: z.infer<typeof codeReplaceSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "chat:send": (payload: z.infer<typeof chatSendSchema>, callback: (response: Acknowledgement<null>) => void) => void;
   "whiteboard:stroke:add": (
     payload: z.infer<typeof whiteboardStrokeAddSchema>,
@@ -306,9 +346,10 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
+  "practice:refresh": (payload: { problemId: string }) => void;
   "room:state": (state: RoomState) => void;
   "room:presence": (members: RoomState["members"]) => void;
-  "code:updated": (code: string) => void;
+  "code:updated": (code: string, replacement?: true) => void;
   "chat:message": (message: RoomState["messages"][number]) => void;
   "whiteboard:stroke:added": (stroke: WhiteboardStroke) => void;
   "whiteboard:undone": (payload: { strokeId: string }) => void;
