@@ -215,7 +215,7 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   expect(submit.disabled).toBe(false);
 });
 
-it.each(["acknowledged", "confirmed after timeout", "confirmed after retry", "received from a peer", "received from a peer during a local reset"])("clears compiler markers when an identical reset is %s", async confirmation => {
+it.each(["acknowledged", "resynced after timeout", "resynced after retry", "received from a peer", "received from a peer during a local reset"])("requires replacement evidence when an identical reset is %s", async confirmation => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
   Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: () => new DOMRect() });
@@ -254,12 +254,11 @@ it.each(["acknowledged", "confirmed after timeout", "confirmed after retry", "re
     await act(async () => receive(mocks.room.code, true));
     expect(container.querySelector(".cm-lintRange-error")).toBeNull();
   }
-  if (confirmation === "confirmed after timeout" || confirmation === "confirmed after retry") {
+  if (confirmation === "resynced after timeout" || confirmation === "resynced after retry") {
     await act(async () => acknowledge(new Error("Ack timed out")));
-    if (confirmation === "confirmed after retry") {
+    if (confirmation === "resynced after retry") {
       const loseRead = mocks.socket.emit.mock.lastCall?.[2] as unknown as (error: Error) => void;
       await act(async () => loseRead(new Error("Code read timed out")));
-      expect(container.textContent).toContain("Preparing shared code replacement");
       expect(run.disabled).toBe(true);
       const retry = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Retry code sync")!;
       await act(async () => retry.click());
@@ -268,6 +267,14 @@ it.each(["acknowledged", "confirmed after timeout", "confirmed after retry", "re
     expect(readEvent).toBe("code:current");
     const confirm = readCallback as unknown as (error: Error | null, response: Acknowledgement<string>) => void;
     await act(async () => confirm(null, { ok: true, data: mocks.room.code }));
+    expect(container.querySelector(".cm-lintRange-error")).not.toBeNull();
+    expect(container.textContent).toContain("Could not confirm the shared code replacement.");
+    expect(container.textContent).not.toContain("Shared editor reset to the default Java definition.");
+    expect(run.disabled).toBe(false);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Reset to default code definition"]')!.click());
+    const [retryEvent, , retryCallback] = mocks.socket.emit.mock.lastCall!;
+    expect(retryEvent).toBe("code:replace");
+    await act(async () => (retryCallback as unknown as typeof acknowledge)(null, { ok: true, data: null }));
   } else {
     await act(async () => acknowledge(null, { ok: true, data: null }));
   }

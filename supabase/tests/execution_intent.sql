@@ -234,6 +234,9 @@ begin
   result := public.save_practice_draft(b,problem,'shared baseline',null);
   draft_saved_at := (result->>'last_saved_at')::timestamptz;
   if draft_saved_at is null then raise exception 'An owner must be able to save a first draft'; end if;
+  if result - 'last_saved_at' is distinct from '{"solved_at":null,"solved_with":[]}'::jsonb then
+    raise exception 'Draft save must return only its version and historical display fields: %', result;
+  end if;
   if public.save_practice_draft(b,problem,'stale first save',null) is not null then
     raise exception 'A stale first save must not overwrite an existing draft';
   end if;

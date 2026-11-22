@@ -7,7 +7,7 @@ import { PracticeControls } from "../practice-controls";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { ChevronDown, ChevronUp, FileDown, History, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import type { ProblemProgress } from "@leetcollab/contracts";
+import type { DraftProgress } from "./use-practice-draft";
 import { useTheme } from "../theme-provider";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -25,7 +25,7 @@ type EditorPanelProps = {
   canEditCode: boolean;
   pendingCodeWrite?: boolean;
   reconcilingCode?: boolean;
-  progress: ProblemProgress | null;
+  progress: DraftProgress | null;
   progressStatus: string;
   conflictingDraft?: string | null;
   waitingForDraftWrite?: boolean;

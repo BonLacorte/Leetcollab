@@ -109,7 +109,7 @@ function formatTimer(timer: RoomTimer, now: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-type PendingCodeWrite = { replacement?: { code: string; resolve: () => void; reject: (error: Error) => void } };
+type PendingCodeWrite = { cancelReplacement?: () => void };
 type SharedCodeState = { roomId: string; problemId: string | null; pendingEdit: PendingCodeWrite | null };
 
 export function RoomClient({ roomId }: { roomId: string }) {
@@ -213,7 +213,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   useEffect(() => {
     if (!socket) return;
     const clearSharedCode = () => {
-      sharedCode.current?.pendingEdit?.replacement?.reject(new Error("The shared room or exercise changed."));
+      sharedCode.current?.pendingEdit?.cancelReplacement?.();
       sharedCode.current = null;
     };
     const handleState = (state: RoomState) => {
@@ -345,13 +345,11 @@ export function RoomClient({ roomId }: { roomId: string }) {
     setPendingCodeWrite(true);
   }
 
-  function settleEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite, authoritativeCode: string, replaced = false) {
+  function settleEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite, authoritativeCode: string, invalidate = false) {
     if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
     shared.pendingEdit = null;
-    replaceEditorCode(authoritativeCode, replaced);
+    replaceEditorCode(authoritativeCode, invalidate);
     setPendingCodeWrite(false);
-    if (replaced) edit.replacement?.resolve();
-    else edit.replacement?.reject(new Error("The shared code replacement could not be confirmed."));
   }
 
   function reconcileEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite) {
@@ -363,7 +361,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
         setCodeSync("failed");
         return;
       }
-      settleEditorWrite(shared, edit, response.data, response.data === edit.replacement?.code);
+      settleEditorWrite(shared, edit, response.data);
       setCodeSync(null);
     });
   }
@@ -392,17 +390,20 @@ export function RoomClient({ roomId }: { roomId: string }) {
       throw new Error("Reconnect before replacing shared code.");
     }
     await new Promise<void>((resolve, reject) => {
-      const edit: PendingCodeWrite = { replacement: { code: nextCode, resolve, reject } };
+      const edit: PendingCodeWrite = {
+        cancelReplacement: () => reject(new Error("The shared room or exercise changed.")),
+      };
       beginEditorWrite(shared, edit);
       socket.timeout(3000).emit("code:replace", { roomId, problemId, expectedCode, code: nextCode }, (error, response) => {
         if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
-        if (error) return reconcileEditorWrite(shared, edit);
-        if (!response.ok) {
-          edit.replacement = undefined;
-          reject(new Error(response.error));
+        edit.cancelReplacement = undefined;
+        const failure = error ?? (response.ok ? null : new Error(response.error));
+        if (failure) {
+          reject(failure);
           return reconcileEditorWrite(shared, edit);
         }
         settleEditorWrite(shared, edit, nextCode, true);
+        resolve();
       });
     });
   }

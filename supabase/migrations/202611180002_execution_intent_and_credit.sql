@@ -358,7 +358,7 @@ grant insert (user_id, problem_id, is_liked, is_starred, solved_at, updated_at, 
 create function public.save_practice_draft(
   p_user_id uuid, p_problem_id uuid, p_draft_code text, p_expected_saved_at timestamptz
 ) returns jsonb language plpgsql security definer set search_path='' as $$
-declare saved public.user_problem_progress;
+declare saved record;
 begin
   if auth.uid() is distinct from p_user_id or p_user_id is null then
     raise exception 'draft owner authentication required' using errcode='42501';
@@ -369,12 +369,12 @@ begin
       on conflict(user_id,problem_id) do update set
         draft_code=excluded.draft_code,draft_language='java',last_saved_at=clock_timestamp()
       where user_problem_progress.last_saved_at is null
-      returning * into saved;
+      returning last_saved_at, solved_at, solved_with into saved;
   else
     update public.user_problem_progress set draft_code=p_draft_code,draft_language='java',
       last_saved_at=greatest(clock_timestamp(),p_expected_saved_at+interval '1 microsecond')
       where user_id=p_user_id and problem_id=p_problem_id and last_saved_at=p_expected_saved_at
-      returning * into saved;
+      returning last_saved_at, solved_at, solved_with into saved;
   end if;
   if not found then return null; end if;
   return to_jsonb(saved);

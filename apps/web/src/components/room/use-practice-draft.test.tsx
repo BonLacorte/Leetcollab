@@ -27,8 +27,10 @@ let latest: ReturnType<typeof usePracticeDraft>;
 let change: (values: Partial<Input>) => void;
 let input: Input;
 let root: Root | undefined;
-const row = (code: string, problemId = problem.id) => ({ user_id: "user", problem_id: problemId, draft_code: code,
-  draft_language: "java", last_saved_at: "2026-11-18T03:00:00.000Z", solved_at: null, solved_code: null, solved_with: [] });
+const row = (code: string) => ({ draft_code: code, draft_language: "java",
+  last_saved_at: "2026-11-18T03:00:00.000Z", solved_at: null, solved_with: [] });
+const savedVersion = ({ last_saved_at, solved_at, solved_with }: ReturnType<typeof row>) =>
+  ({ last_saved_at, solved_at, solved_with });
 function Harness() {
   const [value, setValue] = useState(input);
   input = value;
@@ -54,7 +56,7 @@ beforeEach(() => {
   mocks.read.mockResolvedValue({ data: null, error: null });
   mocks.submitted.mockResolvedValue({ data: null, error: null });
   mocks.acknowledge.mockResolvedValue(undefined);
-  mocks.save.mockImplementation(async value => ({ data: row(value.p_draft_code, value.p_problem_id), error: null }));
+  mocks.save.mockReset().mockResolvedValue({ data: savedVersion(row("")), error: null });
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.replaceChildren(); vi.useRealTimers(); });
 
@@ -269,7 +271,7 @@ it.each(["timer", "navigation"])("retains a recovered conflict for the next %s s
   await act(async () => latest.recoverConflict());
   expect(latest.conflictingDraft).toBeNull();
   expect(latest.progress?.draftCode).toBe("newer tab draft");
-  mocks.save.mockResolvedValueOnce({ data: row("my unsaved edit"), error: null });
+  mocks.save.mockResolvedValueOnce({ data: savedVersion(row("my unsaved edit")), error: null });
   if (trigger === "timer") await advance();
   else {
     const second = { ...problem, id: "problem-b" };
@@ -312,6 +314,49 @@ it("preserves a navigation save conflict privately when revisiting the exercise"
   expect(input.code).toBe("latest saved draft");
 });
 
+it.each(["timer", "navigation", "restore"])("preserves an edit matching the stale cached draft on %s", async trigger => {
+  const cached = row("cached draft");
+  mocks.read.mockResolvedValue({ data: cached, error: null });
+  await render({ userId: `cached-draft-${trigger}` });
+  mocks.read.mockResolvedValue({ data: { ...row("newer tab draft"), last_saved_at: "2026-11-18T03:01:00.000Z" }, error: null });
+  await act(async () => latest.editCode("cached draft"));
+
+  if (trigger === "restore") {
+    await act(async () => latest.restoreDraft());
+    expect(input.code).toBe("newer tab draft");
+    expect(mocks.save).not.toHaveBeenCalled();
+  } else {
+    mocks.save.mockResolvedValueOnce({ data: null, error: null });
+    if (trigger === "navigation") {
+      await act(async () => change({ problem: { ...problem, id: "problem-b" }, code: problem.starterCode }));
+      await act(async () => change({ problem, code: problem.starterCode }));
+    } else {
+      await advance();
+    }
+    expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      p_draft_code: "cached draft", p_expected_saved_at: cached.last_saved_at,
+    }));
+  }
+  expect(latest.conflictingDraft).toBe("cached draft");
+});
+
+it("only clears the edit sent by a save when the same text is entered again mid-save", async () => {
+  let finish!: (value: unknown) => void;
+  mocks.save.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await render();
+  await act(async () => latest.editCode("first edit"));
+  await advance();
+  await act(async () => latest.editCode("different edit"));
+  await act(async () => latest.editCode("first edit"));
+  const saved = savedVersion({ ...row("first edit"), last_saved_at: "2026-11-18T03:10:00.000Z" });
+  await act(async () => finish({ data: saved, error: null }));
+  await advance();
+  expect(mocks.save).toHaveBeenCalledTimes(2);
+  expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({
+    p_draft_code: "first edit", p_expected_saved_at: saved.last_saved_at,
+  }));
+});
+
 it("reports a save failure and retries dirty content at the next interval", async () => {
   await render();
   await act(async () => latest.editCode("dirty code"));
@@ -335,7 +380,7 @@ it("waits for a navigation save before reading that exercise again", async () =>
   await act(async () => change({ problem, code: problem.starterCode }));
   expect(mocks.read).toHaveBeenCalledTimes(readsBeforeReturn);
   mocks.read.mockResolvedValue({ data: row("latest A edit"), error: null });
-  await act(async () => finish({ data: row("latest A edit"), error: null }));
+  await act(async () => finish({ data: savedVersion(row("latest A edit")), error: null }));
   expect(input.code).toBe(problem.starterCode);
   expect(latest.progress?.draftCode).toBe("latest A edit");
 });
@@ -345,8 +390,8 @@ it("waits for earlier saves before enabling edits on a revisit", async () => {
   let stored = row("previous draft");
   mocks.read.mockImplementation(async () => ({ data: stored, error: null }));
   mocks.save.mockImplementation(value => new Promise(resolve => pending.push(() => {
-    stored = row(value.p_draft_code, value.p_problem_id);
-    resolve({ data: stored, error: null });
+    stored = row(value.p_draft_code);
+    resolve({ data: savedVersion(stored), error: null });
   })));
   await render();
   await act(async () => latest.editCode("first autosave"));

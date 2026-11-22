@@ -20,9 +20,9 @@ it("uses accessible icon-only reset and retrieval actions without presenting man
   await act(async () => {
     root = createRoot(container);
     root.render(<EditorPanel problemId="problem" code="class Solution {}" codeVersion={0} execution={null} canEditCode progress={{
-      userId: "user", problemId: "problem", draftCode: "saved code", draftLanguage: "java",
+      draftCode: "saved code", draftLanguage: "java",
       lastSavedAt: "2026-11-13T12:00:00.000Z", solvedAt: "2026-11-13T12:00:00.000Z",
-      solvedCode: "unverified code", solvedWith: [{ userId: "user", username: "old member" }],
+      solvedWith: [{ userId: "user", username: "old member" }],
     }} progressStatus="Autosaves every 10 minutes when code changes." isProgressLoading={false} isRetrievingSubmission={false} connected onCodeChange={() => {}} onResetCode={reset} onRestoreDraft={restore} onRetrieveSubmission={retrieve} onExecutionChange={() => {}} />);
   });
   expect(container.textContent).not.toContain("Mark solved");

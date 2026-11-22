@@ -3,20 +3,21 @@ import type { Problem, ProblemProgress, SolvedWithMember } from "@leetcollab/con
 import { supabase } from "../../lib/supabase";
 
 type ProgressRow = {
-  user_id: string; problem_id: string; draft_code: string | null; draft_language: string | null;
-  last_saved_at: string | null; solved_at: string | null; solved_with: SolvedWithMember[] | null; solved_code: string | null;
+  draft_code: string | null; draft_language: string | null;
+  last_saved_at: string | null; solved_at: string | null; solved_with: SolvedWithMember[] | null;
 };
-const progressSelect = "user_id, problem_id, draft_code, draft_language, last_saved_at, solved_at, solved_with, solved_code";
+export type DraftProgress = Pick<ProblemProgress, "draftCode" | "draftLanguage" | "lastSavedAt" | "solvedAt" | "solvedWith">;
+const progressSelect = "draft_code, draft_language, last_saved_at, solved_at, solved_with";
 const autosaveMs = 10 * 60 * 1000;
 // A route or exercise can remount before its final save finishes. Serialize
 // writes and wait for them before restoring that same user's exercise again.
 const pendingDraftWrites = new Map<string, Promise<void>>();
 const conflictingDrafts = new Map<string, string>();
 
-function progressFromRow(row: ProgressRow): ProblemProgress {
-  return { userId: row.user_id, problemId: row.problem_id, draftCode: row.draft_code ?? "",
+function progressFromRow(row: ProgressRow): DraftProgress {
+  return { draftCode: row.draft_code ?? "",
     draftLanguage: row.draft_language ?? "java", lastSavedAt: row.last_saved_at, solvedAt: row.solved_at,
-    solvedWith: Array.isArray(row.solved_with) ? row.solved_with : [], solvedCode: row.solved_code };
+    solvedWith: Array.isArray(row.solved_with) ? row.solved_with : [] };
 }
 
 async function readProgress(userId: string, problemId: string): Promise<ProgressRow | null> {
@@ -44,14 +45,14 @@ export function usePracticeDraft(options: Options) {
   // Each scope owns its pending reads/writes. Cleanup can flush the old scope
   // without accidentally saving the next exercise's code under the old ID.
   const context = useMemo(() => ({
-    ...options, revision: 0, ready: false, lastSaved: null as string | null, lastSavedAt: null as string | null, draftEdit: null as string | null,
+    ...options, revision: 0, ready: false, lastSaved: null as string | null, lastSavedAt: null as string | null, draftEdit: null as { code: string } | null,
     retrieving: false, active: false, loading: true, waitingForDraftWrite: false,
   }), [scope]); // The remaining fields track current values below, without restarting the timer.
   useLayoutEffect(() => {
     if (context.code !== code) context.revision += 1;
     Object.assign(context, options);
   });
-  const [state, setState] = useState<{ scope: string; progress: ProblemProgress | null; status: string; loading: boolean; saving: boolean; retrieving: boolean }>(
+  const [state, setState] = useState<{ scope: string; progress: DraftProgress | null; status: string; loading: boolean; saving: boolean; retrieving: boolean }>(
     { scope, progress: null, status: "", loading: Boolean(userId && problemId), saving: false, retrieving: false },
   );
   const update = (value: Partial<typeof state>) => {
@@ -70,7 +71,7 @@ export function usePracticeDraft(options: Options) {
     };
     function retainDraft() {
       if (context.draftEdit === null || conflictingDrafts.has(persistenceScope)) return;
-      conflictingDrafts.set(persistenceScope, context.draftEdit);
+      conflictingDrafts.set(persistenceScope, context.draftEdit.code);
       context.draftEdit = null;
     }
     async function save(): Promise<void> {
@@ -79,16 +80,16 @@ export function usePracticeDraft(options: Options) {
       const currentWrite = (async () => {
         await previousSave;
         await read;
-        const savedCode = context.draftEdit;
+        const edit = context.draftEdit;
         if (!context.ready) {
           if (!active) retainDraft();
           return;
         }
-        if (conflictingDrafts.has(persistenceScope) || savedCode === null || savedCode === context.lastSaved) return;
+        if (conflictingDrafts.has(persistenceScope) || edit === null) return;
         updateCurrent({ saving: true, status: "Saving draft…" });
         try {
           const { data, error } = await supabase.rpc("save_practice_draft", {
-            p_user_id: userId, p_problem_id: problemId, p_draft_code: savedCode, p_expected_saved_at: context.lastSavedAt,
+            p_user_id: userId, p_problem_id: problemId, p_draft_code: edit.code, p_expected_saved_at: context.lastSavedAt,
           });
           if (error) throw error;
           if (!data) {
@@ -96,10 +97,11 @@ export function usePracticeDraft(options: Options) {
             updateCurrent({ status: "Your saved draft changed in another tab. This edit was not saved." });
             return;
           }
-          const row = data as ProgressRow;
-          context.lastSaved = savedCode;
-          context.lastSavedAt = row.last_saved_at;
-          updateCurrent({ progress: progressFromRow(row), status: "Draft autosaved." });
+          const saved = data as Pick<ProgressRow, "last_saved_at" | "solved_at" | "solved_with">;
+          context.lastSaved = edit.code;
+          context.lastSavedAt = saved.last_saved_at;
+          if (context.draftEdit === edit) context.draftEdit = null;
+          updateCurrent({ progress: progressFromRow({ ...saved, draft_code: edit.code, draft_language: "java" }), status: "Draft autosaved." });
         } catch {
           if (!active) retainDraft();
           updateCurrent({ status: "Could not autosave draft. Your editor content is still here; the next autosave will retry." });
@@ -142,7 +144,7 @@ export function usePracticeDraft(options: Options) {
   function editCode(nextCode: string) {
     if (!context.active || !context.canEditCode || context.retrieving || context.waitingForDraftWrite
       || conflictingDrafts.has(persistenceScope) || nextCode === context.code) return;
-    context.draftEdit = nextCode;
+    context.draftEdit = { code: nextCode };
     context.revision += 1;
     context.code = nextCode;
     context.onCodeChange(nextCode);
@@ -192,8 +194,8 @@ export function usePracticeDraft(options: Options) {
       return javaDraft(row);
     }, "Saved draft restored into the shared editor.", "No saved Java draft found for this exercise.", () => {
       const savedCode = javaDraft(row);
-      if (context.draftEdit !== null && context.draftEdit !== context.lastSaved && context.draftEdit !== savedCode) {
-        conflictingDrafts.set(persistenceScope, context.draftEdit);
+      if (context.draftEdit !== null && context.draftEdit.code !== savedCode) {
+        conflictingDrafts.set(persistenceScope, context.draftEdit.code);
       }
       applySavedProgress(row);
     });
@@ -209,7 +211,7 @@ export function usePracticeDraft(options: Options) {
     }, "Unsaved draft recovered into the shared editor.", "", () => {
       conflictingDrafts.delete(persistenceScope);
       applySavedProgress(row);
-      context.draftEdit = conflict;
+      context.draftEdit = { code: conflict };
     });
   }
 
