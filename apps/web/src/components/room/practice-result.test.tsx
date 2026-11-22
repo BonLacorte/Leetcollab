@@ -37,7 +37,7 @@ const problemId = "11111111-1111-4111-8111-111111111111";
 const response = (body: unknown) => new Response(JSON.stringify(body));
 function Harness({ code }: { code: string }) {
   const [execution, setExecution] = useState<PracticeExecution | null>(null);
-  return <><EditorPanel problemId={problemId} code={code} codeVersion={0} execution={execution}
+  return <><EditorPanel roomId="abcdefgh" problemId={problemId} code={code} codeVersion={0} execution={execution}
     canEditCode connected progress={null} progressStatus="" isProgressLoading={false} isRetrievingSubmission={false}
     onCodeChange={noop} onResetCode={noop} onRestoreDraft={noop} onRetrieveSubmission={noop} onExecutionChange={setExecution} />
     <WorkspacePanel {...workspaceProps} execution={execution} /></>;

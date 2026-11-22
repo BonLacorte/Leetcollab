@@ -18,7 +18,7 @@ import { clearCompilerDiagnosticsOnEdit, editorDiagnostics } from "./editor-diag
 
 type EditorPanelProps = {
   problemId: string | null;
-  roomId?: string;
+  roomId: string;
   code: string;
   codeVersion: number;
   execution: PracticeExecution | null;

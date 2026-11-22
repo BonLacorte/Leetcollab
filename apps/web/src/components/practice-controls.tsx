@@ -16,7 +16,7 @@ const reviewGrades = [
 
 type PracticeControlsProps = {
   problemId: string;
-  roomId?: string;
+  roomId: string;
   code: string;
   codeVersion?: number;
   codePending?: boolean;
@@ -117,7 +117,7 @@ function SessionPracticeControls({ problemId, roomId, code, codeVersion = 0, cod
       const response = await fetch("/api/judge/submissions", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ problemId, action: action === "Submit" ? "submit" : "run", ...(action === "Submit" && roomId ? { roomId } : {}), sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ problemId, action: action === "Submit" ? "submit" : "run", ...(action === "Submit" ? { roomId } : {}), sourceCode: snapshot.sourceCode, language: "java", idempotencyKey: crypto.randomUUID() }),
       });
       const result = judgeSubmissionResponseSchema.parse(await response.json());
       if (result.ok && result.submission.problemId !== problemId) throw new Error("Submission belongs to another exercise.");

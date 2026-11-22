@@ -19,7 +19,7 @@ it("uses accessible icon-only reset and retrieval actions without presenting man
   document.body.append(container);
   await act(async () => {
     root = createRoot(container);
-    root.render(<EditorPanel problemId="problem" code="class Solution {}" codeVersion={0} execution={null} canEditCode progress={{
+    root.render(<EditorPanel roomId="abcdefgh" problemId="problem" code="class Solution {}" codeVersion={0} execution={null} canEditCode progress={{
       lastSavedAt: "2026-11-13T12:00:00.000Z", solvedAt: "2026-11-13T12:00:00.000Z",
       solvedWith: [{ userId: "user", username: "old member" }],
     }} progressStatus="Autosaves every 10 minutes when code changes." isProgressLoading={false} isRetrievingSubmission={false} connected onCodeChange={() => {}} onResetCode={reset} onRestoreDraft={restore} onRetrieveSubmission={retrieve} onExecutionChange={() => {}} />);

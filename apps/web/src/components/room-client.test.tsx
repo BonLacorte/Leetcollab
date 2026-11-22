@@ -60,6 +60,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   mocks.realEditor = false;
+  mocks.socket.connected = true;
   mocks.room.problem = null;
   mocks.room.code = "";
   mocks.auth.session.user.id = "11111111-1111-4111-8111-111111111111";
@@ -213,6 +214,21 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   expect(editor.value).toBe("peer's confirmed code");
   expect(container.textContent).toContain("Could not confirm the shared code edit.");
   expect(editor.readOnly).toBe(false);
+  expect(run.disabled).toBe(false);
+  expect(submit.disabled).toBe(false);
+
+  await type("edit just before disconnecting");
+  const oldWrite = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
+  const disconnect = mocks.socket.on.mock.calls.find(([event]) => event === "disconnect")![1] as () => void;
+  const connect = mocks.socket.on.mock.calls.find(([event]) => event === "connect")![1] as () => void;
+  await act(async () => { mocks.socket.connected = false; disconnect(); });
+  expect(run.disabled).toBe(true);
+  await act(async () => oldWrite(new Error("Socket disconnected")));
+  mocks.room.code = "peer edit while disconnected";
+  await act(async () => { mocks.socket.connected = true; connect(); });
+  await act(async () => state({ ...mocks.room }));
+  expect(editor.value).toBe(mocks.room.code);
+  expect(container.textContent).toContain("Could not confirm the shared code edit.");
   expect(run.disabled).toBe(false);
   expect(submit.disabled).toBe(false);
 });

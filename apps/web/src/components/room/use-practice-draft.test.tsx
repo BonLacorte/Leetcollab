@@ -372,6 +372,9 @@ it("reports a save failure and retries dirty content at the next interval", asyn
 it("waits for a navigation save before reading that exercise again", async () => {
   let finish!: (value: unknown) => void;
   mocks.save.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const original = row("previous draft");
+  const departure = { ...row("latest A edit"), last_saved_at: "2026-11-18T03:01:00.000Z" };
+  mocks.read.mockResolvedValue({ data: original, error: null });
   await render();
   await act(async () => latest.editCode("latest A edit"));
   const second = { ...problem, id: "problem-b" };
@@ -379,10 +382,12 @@ it("waits for a navigation save before reading that exercise again", async () =>
   const readsBeforeReturn = mocks.read.mock.calls.length;
   await act(async () => change({ problem, code: problem.starterCode }));
   expect(mocks.read).toHaveBeenCalledTimes(readsBeforeReturn);
-  mocks.read.mockResolvedValue({ data: row("latest A edit"), error: null });
-  await act(async () => finish({ data: savedVersion(row("latest A edit")), error: null }));
+  mocks.read.mockResolvedValue({ data: departure, error: null });
+  await act(async () => finish({ data: savedVersion(departure), error: null }));
   expect(input.code).toBe(problem.starterCode);
-  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:00:00.000Z");
+  expect(latest.progress?.lastSavedAt).toBe(departure.last_saved_at);
+  await act(async () => latest.restoreDraft());
+  expect(input.code).toBe("latest A edit");
 });
 
 it("waits for earlier saves before enabling edits on a revisit", async () => {
@@ -390,7 +395,7 @@ it("waits for earlier saves before enabling edits on a revisit", async () => {
   let stored = row("previous draft");
   mocks.read.mockImplementation(async () => ({ data: stored, error: null }));
   mocks.save.mockImplementation(value => new Promise(resolve => pending.push(() => {
-    stored = row(value.p_draft_code);
+    stored = { ...row(value.p_draft_code), last_saved_at: new Date(Date.parse(stored.last_saved_at) + 60_000).toISOString() };
     resolve({ data: savedVersion(stored), error: null });
   })));
   await render();
@@ -406,12 +411,18 @@ it("waits for earlier saves before enabling edits on a revisit", async () => {
   await act(async () => pending[0]());
   expect(pending).toHaveLength(2);
   expect(latest.waitingForDraftWrite).toBe(true);
+  expect(mocks.save).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    p_draft_code: "first visit departure", p_expected_saved_at: "2026-11-18T03:01:00.000Z",
+  }));
   await act(async () => pending[1]());
   expect(latest.waitingForDraftWrite).toBe(false);
-  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:00:00.000Z");
+  expect(latest.progress?.lastSavedAt).toBe("2026-11-18T03:02:00.000Z");
   await act(async () => latest.editCode("edit after previous save"));
   expect(input.code).toBe("edit after previous save");
   await advance();
+  expect(mocks.save).toHaveBeenNthCalledWith(3, expect.objectContaining({
+    p_draft_code: "edit after previous save", p_expected_saved_at: "2026-11-18T03:02:00.000Z",
+  }));
   await act(async () => pending[2]());
 });
 
@@ -433,4 +444,19 @@ it("restores the first Java draft saved in another tab after this room loaded", 
   mocks.read.mockResolvedValue({ data: row("saved in another tab"), error: null });
   await act(async () => latest.restoreDraft());
   expect(input.code).toBe("saved in another tab");
+});
+
+it("resumes autosave after Restore finds no draft following an initial read failure", async () => {
+  mocks.read.mockResolvedValueOnce({ data: null, error: new Error("Offline") });
+  await render({ userId: "fresh-empty-draft" });
+  expect(latest.status).toContain("Autosave is paused");
+  await act(async () => latest.editCode("private text typed offline"));
+  await act(async () => latest.restoreDraft());
+  expect(latest.status).toContain("No saved Java draft");
+  expect(input.code).toBe("private text typed offline");
+  expect(mocks.acknowledge).not.toHaveBeenCalled();
+  await advance();
+  expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    p_draft_code: "private text typed offline", p_expected_saved_at: null,
+  }));
 });

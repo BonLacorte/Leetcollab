@@ -111,10 +111,12 @@ function formatTimer(timer: RoomTimer, now: number): string {
 
 type PendingCodeWrite = { cancelReplacement?: () => void; syncMessage?: string };
 type SharedCodeState = { roomId: string; problemId: string | null; pendingEdit: PendingCodeWrite | null };
+const unconfirmedEditMessage = "Could not confirm the shared code edit.";
 
 export function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
   const { session, loading } = useAuth();
+  const userId = session?.user.id;
   const socket = useSocket();
   const [room, setRoom] = useState<RoomState | null>(null);
   const [execution, setExecution] = useState<{ scope: string; value: PracticeExecution } | null>(null);
@@ -123,6 +125,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [code, setCode] = useState("");
   const codeRef = useRef("");
   const sharedCode = useRef<SharedCodeState | null>(null);
+  const interruptedEdit = useRef<{ roomId: string; userId: string | undefined; message: string } | null>(null);
   const [pendingCodeWrite, setPendingCodeWrite] = useState(false);
   const [codeSync, setCodeSync] = useState<"checking" | "failed" | null>(null);
   const reconcilingCode = codeSync !== null;
@@ -213,7 +216,10 @@ export function RoomClient({ roomId }: { roomId: string }) {
   useEffect(() => {
     if (!socket) return;
     const clearSharedCode = () => {
-      sharedCode.current?.pendingEdit?.cancelReplacement?.();
+      const shared = sharedCode.current;
+      const edit = shared?.pendingEdit;
+      if (shared && edit?.syncMessage) interruptedEdit.current = { roomId: shared.roomId, userId, message: edit.syncMessage };
+      edit?.cancelReplacement?.();
       sharedCode.current = null;
     };
     const handleState = (state: RoomState) => {
@@ -226,7 +232,9 @@ export function RoomClient({ roomId }: { roomId: string }) {
       }
       setRoom(state);
       receiveEditorCode(state.code);
-      setStatus("");
+      const notice = interruptedEdit.current;
+      if (notice && (notice.roomId !== state.roomId || notice.userId !== userId)) interruptedEdit.current = null;
+      setStatus(interruptedEdit.current?.message ?? "");
     };
     const handleCode = (nextCode: string, replacement?: true) => receiveEditorCode(nextCode, replacement);
     const handleMessage = (nextMessage: RoomState["messages"][number]) => setRoom((current) => current ? { ...current, messages: [...current.messages, nextMessage] } : current);
@@ -249,6 +257,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       if (payload.roomId === roomId) router.replace("/");
     };
     const joinRoom = () => {
+      if (!sharedCode.current) setCodeSync("checking");
       setStatus("Connecting to room...");
       socket.emit("room:join", { roomId }, (response) => {
         if (!response.ok) {
@@ -299,7 +308,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       socket.off("connect", joinRoom);
       socket.off("disconnect", handleDisconnect);
     };
-  }, [roomId, router, socket]);
+  }, [roomId, router, socket, userId]);
 
   const isHost = room?.hostUserId === session?.user.id;
   const currentMember = room?.members.find((member) => member.userId === session?.user.id);
@@ -342,6 +351,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
 
   function beginEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite) {
     shared.pendingEdit = edit;
+    interruptedEdit.current = null;
     setPendingCodeWrite(true);
     setStatus("");
   }
@@ -377,12 +387,12 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (!canEditCode || reconcilingCode) return;
     const shared = sharedCode.current;
     if (!socket?.connected || !shared || shared.roomId !== roomId || shared.problemId !== (room?.problem?.id ?? null)) return;
-    const edit: PendingCodeWrite = {};
+    const edit: PendingCodeWrite = { syncMessage: unconfirmedEditMessage };
     beginEditorWrite(shared, edit);
     replaceEditorCode(nextCode, true);
     socket.timeout(3000).emit("code:update", { roomId, problemId: shared.problemId, code: nextCode }, (error, response) => {
       if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
-      const syncMessage = error ? "Could not confirm the shared code edit." : response.ok ? null : response.error;
+      const syncMessage = error ? unconfirmedEditMessage : response.ok ? null : response.error;
       if (syncMessage !== null) {
         edit.syncMessage = syncMessage;
         return reconcileEditorWrite(shared, edit);

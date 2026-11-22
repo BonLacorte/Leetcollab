@@ -177,7 +177,6 @@ export function usePracticeDraft(options: Options) {
   function applySavedProgress(row: ProgressRow | null) {
     context.lastSavedAt = row?.last_saved_at ?? null;
     context.ready = true;
-    context.draftEdit = null;
     update({ progress: row ? progressFromRow(row) : null });
   }
 
@@ -188,12 +187,14 @@ export function usePracticeDraft(options: Options) {
       await pendingDraftWrites.get(persistenceScope);
       if (conflictingDrafts.has(persistenceScope)) throw new Error("Resolve the unsaved draft first.");
       row = await readProgress(userId, problemId, true);
+      if (context.active && !context.ready) applySavedProgress(row);
       return javaDraft(row);
     }, "Saved draft restored into the shared editor.", "No saved Java draft found for this exercise.", () => {
       const savedCode = javaDraft(row);
       if (context.draftEdit !== null && context.draftEdit.code !== savedCode) {
         conflictingDrafts.set(persistenceScope, context.draftEdit.code);
       }
+      context.draftEdit = null;
       applySavedProgress(row);
     });
   }
@@ -220,6 +221,7 @@ export function usePracticeDraft(options: Options) {
       const row = await readProgress(userId, problemId);
       if (!context.active) return;
       conflictingDrafts.delete(persistenceScope);
+      context.draftEdit = null;
       applySavedProgress(row);
       update({ status: "Unsaved draft discarded." });
     } catch {

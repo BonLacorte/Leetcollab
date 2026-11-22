@@ -19,7 +19,7 @@ const submission: JudgeSubmission = { id: "22222222-2222-4222-8222-222222222222"
   verification: "leetcollab", testsPassed: 0, testsTotal: 4, durationMs: 10, diagnostics: "Compile failure", createdAt: "2026-11-18T03:00:00.000Z",
   compilerDiagnostics: [{ line: 3, message: "Expected a semicolon (;)." }], compilerErrorCount: 1, compilerDiagnosticsComplete: true };
 const props: ComponentProps<typeof EditorPanel> = {
-  problemId, code, codeVersion: 5, execution: { action: "Run", sourceCode: code, codeVersion: 5, state: "finished", response: {
+  roomId: "abcdefgh", problemId, code, codeVersion: 5, execution: { action: "Run", sourceCode: code, codeVersion: 5, state: "finished", response: {
     ok: true, submission, quota: { used: 1, limit: 50, remaining: 49, active: 0, resetAt: "2026-11-18T23:55:00.000Z" },
   } }, canEditCode: true, progress: null, progressStatus: "", isProgressLoading: false, isRetrievingSubmission: false, connected: true,
   onCodeChange: () => {}, onResetCode: () => {}, onRestoreDraft: () => {}, onRetrieveSubmission: () => {}, onExecutionChange: () => {},
@@ -49,18 +49,21 @@ it("renders a real CodeMirror gutter marker and clears it immediately on documen
   expect(diagnosticCount(view.state)).toBe(0);
 });
 
-it("does not mark edited code when an older pending result finishes", async () => {
+it.each([false, true])("does not mark a newer revision when an older result finishes (same text=%s)", async sameText => {
   const container = document.createElement("div"); document.body.append(container);
   const pending = { action: "Run", sourceCode: code, codeVersion: 5, state: "running" } as const;
   await act(async () => { root = createRoot(container); root.render(<EditorPanel {...props} execution={pending} />); });
   const newerCode = code + "\n// newer code";
   await act(async () => root.render(<EditorPanel {...props} execution={pending} code={newerCode} codeVersion={6} />));
-  await act(async () => {
-    root.render(<EditorPanel {...props} code={newerCode} codeVersion={6} />);
-    await vi.advanceTimersByTimeAsync(1000);
-  });
+  const currentCode = sameText ? code : newerCode;
+  const currentVersion = sameText ? 7 : 6;
+  if (sameText) {
+    await act(async () => root.render(<EditorPanel {...props} execution={pending} code={currentCode} codeVersion={currentVersion} />));
+  }
+  await act(async () => root.render(<EditorPanel {...props} execution={props.execution} code={currentCode} codeVersion={currentVersion} />));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
   const view = EditorView.findFromDOM(container.querySelector(".cm-editor")!)!;
-  expect(view.state.doc.toString()).toBe(newerCode);
+  expect(view.state.doc.toString()).toBe(currentCode);
   expect(diagnosticCount(view.state)).toBe(0);
   expect(container.querySelector(".cm-lintRange-error")).toBeNull();
 });

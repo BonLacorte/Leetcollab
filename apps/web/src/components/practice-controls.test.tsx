@@ -35,7 +35,7 @@ it.each([false, true])("ignores an older status success or failure after exhaust
   const pending: { resolve: (value: Response) => void; reject: (reason: Error) => void }[] = [];
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({ resolve, reject }))));
   const status = (remaining: number) => new Response(JSON.stringify({ available: remaining > 0, used: 20 - remaining, limit: 20, remaining, active: 0, resetAt: "2026-11-13T23:55:00.000Z", fallback: null, unavailableReason: remaining ? null : "quota_exhausted" }));
-  await act(async () => { renderer = create(<PracticeControls problemId="problem" code="class Solution {}" onExecutionChange={() => {}} />); });
+  await act(async () => { renderer = create(<PracticeControls problemId="problem" roomId="abcdefgh" code="class Solution {}" onExecutionChange={() => {}} />); });
   await act(async () => pending[0].resolve(status(1)));
   const button = (label: string) => renderer.root.findAllByType("button").find(node => node.children.includes(label))!;
   await act(async () => button("Refresh status").props.onClick());
@@ -52,7 +52,7 @@ it("clears a status failure after a successful refresh", async () => {
   vi.stubGlobal("fetch", vi.fn()
     .mockRejectedValueOnce(new Error("offline"))
     .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, used: 20, limit: 20, remaining: 0, active: 0, resetAt: "2026-11-13T23:55:00.000Z", fallback: null, unavailableReason: "quota_exhausted" }))));
-  await act(async () => { renderer = create(<PracticeControls problemId="problem" code="class Solution {}" onExecutionChange={() => {}} />); });
+  await act(async () => { renderer = create(<PracticeControls problemId="problem" roomId="abcdefgh" code="class Solution {}" onExecutionChange={() => {}} />); });
   expect(JSON.stringify(renderer.toJSON())).toContain("Judge status unavailable.");
   const refresh = renderer.root.findAllByType("button").find(node => node.children.includes("Refresh status"))!;
   await act(async () => refresh.props.onClick());
@@ -65,10 +65,10 @@ const quota = { available: true, used: 0, limit: 20, remaining: 20, active: 0, r
 const button = (label: string) => renderer.root.findAllByType("button").find(node => node.children.includes(label))!;
 const output = () => JSON.stringify(renderer.toJSON());
 const response = (body: unknown) => new Response(JSON.stringify(body));
-async function renderControls(roomId?: string) {
+async function renderControls() {
   function Harness() {
     const [execution, setExecution] = useState<PracticeExecution | null>(null);
-    return <><PracticeControls problemId="11111111-1111-4111-8111-111111111111" roomId={roomId} code="class Solution {}" onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
+    return <><PracticeControls problemId="11111111-1111-4111-8111-111111111111" roomId="abcdefgh" code="class Solution {}" onExecutionChange={setExecution} /><PracticeResult execution={execution} /></>;
   }
   await act(async () => { renderer = create(<Harness />); });
 }
@@ -133,6 +133,7 @@ it.each(["Run", "Submit"])("%s sends its action to the authenticated judge and r
   expect(options.headers.Authorization).toBe("Bearer token");
   expect(JSON.parse(options.body)).toEqual({
     problemId: "11111111-1111-4111-8111-111111111111", action: label.toLowerCase(), sourceCode: "class Solution {}", language: "java", idempotencyKey: expect.any(String),
+    ...(label === "Submit" ? { roomId: "abcdefgh" } : {}),
   });
   expect(renderer.root.findByType("h2").children).toEqual(["Accepted"]);
 });
@@ -140,7 +141,7 @@ it.each(["Run", "Submit"])("%s sends its action to the authenticated judge and r
 it.each(["user", "shared"])("sends the room ID on Submit with a %s allowance", async quotaScope => {
   const fetch = vi.fn().mockResolvedValue(response({ ...quota, quotaScope }));
   vi.stubGlobal("fetch", fetch);
-  await renderControls("abcdefgh");
+  await renderControls();
   await act(async () => { await button("Submit").props.onClick(); });
   const [, options] = fetch.mock.calls.find(([, options]) => options?.method === "POST")!;
   expect(JSON.parse(options.body)).toMatchObject({ action: "submit", roomId: "abcdefgh" });
@@ -256,9 +257,9 @@ it("keeps the exact request source and editor revision when code changes during 
   const changed = vi.fn<(execution: PracticeExecution) => void>();
   const sourceCode = "\r\nclass Solution {\r\n  // exact submitted bytes\r\n}";
   const problemId = "11111111-1111-4111-8111-111111111111";
-  await act(async () => { renderer = create(<PracticeControls problemId={problemId} code={sourceCode} codeVersion={5} onExecutionChange={changed} />); });
+  await act(async () => { renderer = create(<PracticeControls problemId={problemId} roomId="abcdefgh" code={sourceCode} codeVersion={5} onExecutionChange={changed} />); });
   await act(async () => { void button("Run").props.onClick(); });
-  await act(async () => renderer.update(<PracticeControls problemId={problemId} code="newer code" codeVersion={6} onExecutionChange={changed} />));
+  await act(async () => renderer.update(<PracticeControls problemId={problemId} roomId="abcdefgh" code="newer code" codeVersion={6} onExecutionChange={changed} />));
   await act(async () => finish(response({ ok: true, quota, submission: {
     id: "22222222-2222-4222-8222-222222222222", problemId, language: "java", verification: "leetcollab", verdict: "compile_error",
     testsPassed: 0, testsTotal: 4, durationMs: 10, diagnostics: "Compile failure", createdAt: "2026-11-13T12:00:00.000Z",
