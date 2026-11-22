@@ -50,9 +50,11 @@ remain internal. Direct application-role access to solve rows is forbidden. A
 recipient keeps earned credit if the originating submission or its actor is deleted. Reservation and completion RPCs
 are restricted to the trusted server role.
 
-The realtime completion endpoint independently checks that a submission belongs
-to the authenticated caller and is an accepted Submit before sending a refresh
-hint to captured, newly solved recipients still connected to the room. Set
+The web server sends its private `REALTIME_JUDGE_SHARED_SECRET` and the actor's
+bearer token to the realtime completion endpoint. Realtime requires both
+credentials and checks that the submission belongs to the actor and is an
+accepted Submit before sending a refresh hint to captured, newly solved
+recipients still connected to the room. Set
 `SUPABASE_SERVICE_ROLE_KEY` on the realtime server to enable the internal
 recipient lookup. Clients read their protected credit again on that hint, reconnect, window
 focus or Refresh status. Losing a hint cannot undo durable credit or trigger a

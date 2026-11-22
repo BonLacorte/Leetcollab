@@ -8,6 +8,12 @@ function realtimeUrl(path: string): URL {
   return new URL(path, base);
 }
 
+function judgeHeaders(token: string) {
+  const secret = process.env.REALTIME_JUDGE_SHARED_SECRET?.trim();
+  if (!secret) throw new Error("Realtime judge credential is missing.");
+  return { Authorization: `Bearer ${token}`, "X-Realtime-Judge-Secret": secret };
+}
+
 export class RoomParticipationUnavailable extends ProviderFailure {
   constructor(expectedRoomId?: string) {
     super("unavailable", expectedRoomId
@@ -20,13 +26,11 @@ export async function captureSubmissionParticipants(
   token: string, userId: string, problemId: string, expectedRoomId?: string, request: typeof fetch = fetch,
 ): Promise<SubmissionParticipants> {
   try {
-    const secret = process.env.REALTIME_JUDGE_SHARED_SECRET?.trim();
-    if (!secret) throw new Error();
     const url = realtimeUrl("/judge/participants");
     url.searchParams.set("problemId", problemId);
     if (expectedRoomId) url.searchParams.set("roomId", expectedRoomId);
     const response = await request(url, {
-      headers: { Authorization: `Bearer ${token}`, "X-Realtime-Judge-Secret": secret },
+      headers: judgeHeaders(token),
       cache: "no-store", redirect: "error", signal: AbortSignal.timeout(3000),
     });
     if (!response.ok) throw new Error();
@@ -45,7 +49,7 @@ export async function captureSubmissionParticipants(
 
 export async function notifyRoomCompletion(token: string, submissionId: string): Promise<void> {
   const response = await fetch(realtimeUrl("/judge/refresh"), {
-    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    method: "POST", headers: { ...judgeHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify({ submissionId }), cache: "no-store", redirect: "error", signal: AbortSignal.timeout(2000),
   });
   if (!response.ok) throw new Error("Completion refresh unavailable.");

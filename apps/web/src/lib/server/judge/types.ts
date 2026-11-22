@@ -2,6 +2,7 @@ import type {
   JudgeFallback,
   JudgeQuota,
   JudgeSubmission,
+  JudgeSubmissionRequest,
   JudgeVerdict,
   JudgePublicCase,
   JudgeCompilerDiagnostic,
@@ -84,7 +85,7 @@ export interface JudgeRepository {
     problemId: string;
     idempotencyKey: string;
     sourceCode: string;
-    action?: "run" | "submit";
+    action: JudgeSubmissionRequest["action"];
     participants?: SubmissionParticipants | null;
     period: QuotaPeriod;
     quotaLimit: number;

@@ -109,7 +109,8 @@ function formatTimer(timer: RoomTimer, now: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-type SharedCodeState = { roomId: string; problemId: string | null; pendingEdit: symbol | null };
+type PendingCodeWrite = { replacement?: { code: string; resolve: () => void; reject: (error: Error) => void } };
+type SharedCodeState = { roomId: string; problemId: string | null; pendingEdit: PendingCodeWrite | null };
 
 export function RoomClient({ roomId }: { roomId: string }) {
   const router = useRouter();
@@ -211,9 +212,14 @@ export function RoomClient({ roomId }: { roomId: string }) {
 
   useEffect(() => {
     if (!socket) return;
+    const clearSharedCode = () => {
+      sharedCode.current?.pendingEdit?.replacement?.reject(new Error("The shared room or exercise changed."));
+      sharedCode.current = null;
+    };
     const handleState = (state: RoomState) => {
       const problemId = state.problem?.id ?? null;
       if (sharedCode.current?.roomId !== state.roomId || sharedCode.current.problemId !== problemId) {
+        clearSharedCode();
         sharedCode.current = { roomId: state.roomId, problemId, pendingEdit: null };
         setPendingCodeWrite(false);
         setCodeSync(null);
@@ -265,7 +271,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       });
     };
     const handleDisconnect = () => {
-      sharedCode.current = null;
+      clearSharedCode();
       setCodeSync("checking");
       setStatus("Connection interrupted. Reconnecting...");
     };
@@ -282,7 +288,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (socket.connected) joinRoom();
 
     return () => {
-      sharedCode.current = null;
+      clearSharedCode();
       socket.off("room:state", handleState);
       socket.off("code:updated", handleCode);
       socket.off("chat:message", handleMessage);
@@ -334,36 +340,31 @@ export function RoomClient({ roomId }: { roomId: string }) {
     else if (replacement) setCodeVersion(version => version + 1);
   }
 
-  function beginEditorWrite(shared: SharedCodeState) {
-    const edit = Symbol();
+  function beginEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite) {
     shared.pendingEdit = edit;
     setPendingCodeWrite(true);
-    return edit;
   }
 
-  function settleEditorWrite(shared: SharedCodeState, edit: symbol, authoritativeCode: string, invalidate = false) {
+  function settleEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite, authoritativeCode: string, replaced = false) {
     if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
     shared.pendingEdit = null;
-    replaceEditorCode(authoritativeCode, invalidate);
+    replaceEditorCode(authoritativeCode, replaced);
     setPendingCodeWrite(false);
+    if (replaced) edit.replacement?.resolve();
+    else edit.replacement?.reject(new Error("The shared code replacement could not be confirmed."));
   }
 
-  function reconcileEditorWrite(shared: SharedCodeState, edit: symbol, replacementCode?: string, onConfirmed?: (replaced: boolean) => void) {
-    if (!socket?.connected || sharedCode.current !== shared || shared.pendingEdit !== edit) {
-      onConfirmed?.(false);
-      return;
-    }
+  function reconcileEditorWrite(shared: SharedCodeState, edit: PendingCodeWrite) {
+    if (!socket?.connected || sharedCode.current !== shared || shared.pendingEdit !== edit) return;
     setCodeSync("checking");
     socket.timeout(3000).emit("code:current", { roomId: shared.roomId, problemId: shared.problemId }, (error, response) => {
-      if (sharedCode.current !== shared || shared.pendingEdit !== edit) return onConfirmed?.(false);
+      if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
       if (error || !response.ok) {
         setCodeSync("failed");
-        return onConfirmed?.(false);
+        return;
       }
-      const replaced = response.data === replacementCode;
-      settleEditorWrite(shared, edit, response.data, replaced);
+      settleEditorWrite(shared, edit, response.data, response.data === edit.replacement?.code);
       setCodeSync(null);
-      onConfirmed?.(replaced);
     });
   }
 
@@ -376,7 +377,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (!canEditCode || reconcilingCode) return;
     const shared = sharedCode.current;
     if (!socket?.connected || !shared || shared.roomId !== roomId || shared.problemId !== (room?.problem?.id ?? null)) return;
-    const edit = beginEditorWrite(shared);
+    const edit: PendingCodeWrite = {};
+    beginEditorWrite(shared, edit);
     replaceEditorCode(nextCode, true);
     socket.timeout(3000).emit("code:update", { roomId, problemId: shared.problemId, code: nextCode }, (error, response) => {
       if (error || !response.ok) return reconcileEditorWrite(shared, edit);
@@ -389,20 +391,18 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (!socket?.connected || !shared || reconcilingCode || shared.roomId !== roomId || shared.problemId !== problemId) {
       throw new Error("Reconnect before replacing shared code.");
     }
-    const edit = beginEditorWrite(shared);
     await new Promise<void>((resolve, reject) => {
+      const edit: PendingCodeWrite = { replacement: { code: nextCode, resolve, reject } };
+      beginEditorWrite(shared, edit);
       socket.timeout(3000).emit("code:replace", { roomId, problemId, expectedCode, code: nextCode }, (error, response) => {
-        if (error) return reconcileEditorWrite(shared, edit, nextCode, replaced => {
-          if (replaced) resolve();
-          else reject(error);
-        });
-        if (sharedCode.current !== shared) return reject(new Error("The shared exercise changed."));
+        if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
+        if (error) return reconcileEditorWrite(shared, edit);
         if (!response.ok) {
-          reconcileEditorWrite(shared, edit);
-          return reject(new Error(response.error));
+          edit.replacement = undefined;
+          reject(new Error(response.error));
+          return reconcileEditorWrite(shared, edit);
         }
         settleEditorWrite(shared, edit, nextCode, true);
-        resolve();
       });
     });
   }

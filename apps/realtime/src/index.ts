@@ -93,13 +93,15 @@ function activeRoomForUser(userId: string): Room | null {
   return room;
 }
 
+function judgeActorToken(request: express.Request) {
+  const secret = request.header("x-realtime-judge-secret");
+  if (!judgeSecretHash || !secret || !timingSafeEqual(createHash("sha256").update(secret).digest(), judgeSecretHash)) return;
+  return /^Bearer ([^\s]+)$/.exec(request.header("authorization") ?? "")?.[1];
+}
+
 app.get("/judge/participants", async (request, response) => {
   response.set("Cache-Control", "no-store");
-  const secret = request.header("x-realtime-judge-secret");
-  if (!judgeSecretHash || !secret || !timingSafeEqual(createHash("sha256").update(secret).digest(), judgeSecretHash)) {
-    return void response.status(401).json({ error: "Authentication required." });
-  }
-  const token = /^Bearer ([^\s]+)$/.exec(request.header("authorization") ?? "")?.[1];
+  const token = judgeActorToken(request);
   if (!token) return void response.status(401).json({ error: "Authentication required." });
   const parsed = judgeSubmissionRequestSchema.shape.problemId.safeParse(request.query.problemId);
   const expectedRoom = judgeSubmissionRequestSchema.shape.roomId.safeParse(request.query.roomId);
@@ -124,7 +126,7 @@ app.get("/judge/participants", async (request, response) => {
 
 app.post("/judge/refresh", express.json({ limit: "2kb" }), async (request, response) => {
   response.set("Cache-Control", "no-store");
-  const token = /^Bearer ([^\s]+)$/.exec(request.header("authorization") ?? "")?.[1];
+  const token = judgeActorToken(request);
   if (!token) return void response.status(401).json({ error: "Authentication required." });
   const parsed = judgeSubmissionRequestSchema.shape.idempotencyKey.safeParse(request.body?.submissionId);
   if (!parsed.success) return void response.status(400).json({ error: "Invalid submission." });

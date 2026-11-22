@@ -224,7 +224,7 @@ export class JudgeService {
       );
     }
 
-    const action = request.action ?? "run";
+    const { action } = request;
     let participants: SubmissionParticipants | null = null;
     if (action === "submit") {
       const hasExisting = () => this.repository.hasSubmissionKey(userId, request.idempotencyKey);

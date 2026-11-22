@@ -106,10 +106,16 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     for (const [user, socket] of [[actor, reconnected], [peer, partner], [late, newcomer]] as const) {
       socket.on("practice:refresh", payload => { if (payload.problemId === problem) notified.push(user); });
     }
-    expect((await fetch(`${base}/judge/refresh`, {
-      method: "POST", headers: { Authorization: `Bearer ${actor}`, "Content-Type": "application/json" },
+    const requestRefresh = (secret?: string, token = actor) => fetch(`${base}/judge/refresh`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json",
+        ...(secret ? { "X-Realtime-Judge-Secret": secret } : {}) },
       body: JSON.stringify({ submissionId: submission }), signal: AbortSignal.timeout(3000),
-    })).status).toBe(202);
+    });
+    expect((await requestRefresh()).status).toBe(401);
+    expect((await requestRefresh("wrong-secret")).status).toBe(401);
+    expect((await requestRefresh("synthetic-capture-secret", "invalid-user")).status).toBe(401);
+    expect(refreshLookup).toBeUndefined();
+    expect((await requestRefresh("synthetic-capture-secret")).status).toBe(202);
     for (const socket of [reconnected, partner, newcomer]) await socket.emitWithAck("room:current");
     expect(refreshLookup).toEqual({ p_submission_id: submission, p_actor_id: actor });
     expect(notified.sort()).toEqual([actor, peer]);

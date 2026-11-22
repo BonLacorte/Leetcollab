@@ -110,7 +110,7 @@ export class SupabaseJudgeRepository implements JudgeRepository {
       ? "reserve_onlinecompiler_submission" : "reserve_judge_submission", {
       ...(contextual ? {
         p_scope: this.options.sharedQuota ? "shared" : "user",
-        p_runner: input.runner ?? "jdoodle", p_action: input.action ?? "run",
+        p_runner: input.runner ?? "jdoodle", p_action: input.action,
         p_room_id: input.participants?.roomId ?? null,
         p_participant_ids: input.participants?.userIds ?? null,
       } : {}),

@@ -69,7 +69,7 @@ describe("PostgreSQL timestamps satisfy the public judge response contract", () 
     expect(completion.applied).toBe(true);
     const reservation = await repo.reserve({
       userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
-      period, quotaLimit: 20, activeLimit: 2, reservationSeconds: 45,
+      action: "run", period, quotaLimit: 20, activeLimit: 2, reservationSeconds: 45,
     });
     for (const quota of [await repo.getQuota(period, 20), reservation.quota,
       completion.quota, await repo.exhaust(period, 20)]) {
@@ -104,7 +104,7 @@ describe("server-owned Render RPC binding", () => {
     const provenance = { provider: "render" as const, workspaceId: "fixture", groupId: "fixture", imageId: "fixture", toolchain: "synthetic JDK" };
     const result = await repo.reserve({
       userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
-      period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
+      action: "run", period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
       render: { policyId: "reviewed-fixture", provenance },
     });
     expect(rpc.mock.calls[0]).toEqual(["reserve_render_submission", {
@@ -130,7 +130,7 @@ describe("server-owned Render RPC binding", () => {
     for (const result of ["existing", "in_progress", "busy", "exhausted"]) {
       rpc.mockResolvedValue({ data: { result, submissionId, used: 1, limit: 9, active: 1, resetAt: period.end }, error: null });
       const reservation = await repo.reserve({
-        userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}", period,
+        userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}", action: "run", period,
         quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
         render: { policyId: "synthetic", provenance: { provider: "render", workspaceId: "fixture", groupId: "fixture", imageId: "fixture", toolchain: "synthetic" } },
       });
@@ -151,7 +151,7 @@ describe("server-owned OnlineCompiler reservation binding", () => {
     const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient);
     const result = await repo.reserve({
       userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
-      period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45, runner,
+      action: "run", period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45, runner,
     });
     expect(rpc).toHaveBeenCalledExactlyOnceWith(name, {
       p_user_id: userId, p_problem_id: problemId, p_idempotency_key: submissionId,
@@ -170,7 +170,7 @@ describe("server-owned OnlineCompiler reservation binding", () => {
     const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient);
     await expect(repo.reserve({
       userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
-      period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
+      action: "run", period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
       runner: "onlinecompiler",
     })).rejects.toBe(refusal);
     expect(rpc).toHaveBeenCalledTimes(1);
@@ -181,7 +181,7 @@ describe("server-owned OnlineCompiler reservation binding", () => {
     const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient);
     await expect(repo.reserve({
       userId, problemId, idempotencyKey: submissionId, sourceCode: "class Solution {}",
-      period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
+      action: "run", period, quotaLimit: 20, activeLimit: 4, reservationSeconds: 45,
       runner: "onlinecompiler",
       render: { policyId: "synthetic", provenance: {
         provider: "render", workspaceId: "fixture", groupId: "fixture",

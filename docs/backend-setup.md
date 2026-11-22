@@ -36,7 +36,7 @@ does not persist these Maps; personal saved drafts and grades live in Supabase.
 | --- | --- |
 | Web public build configuration | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SOCKET_URL`. Use the hosted Supabase URL/key and Render public HTTPS origin. Rebuild when these values change. |
 | Web server runtime | `SUPABASE_SERVICE_ROLE_KEY`; optional `SUPABASE_URL` override must select the same project. Set `REALTIME_JUDGE_SHARED_SECRET` to match realtime and use `REALTIME_INTERNAL_URL` if the server uses a different HTTPS origin. |
-| Realtime runtime | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN` set to an exact frontend origin or a comma-separated allowlist. Render supplies `PORT`. Use the same server-only `REALTIME_JUDGE_SHARED_SECRET` as web for Submit capture and set `SUPABASE_SERVICE_ROLE_KEY` for immediate solved-state hints. |
+| Realtime runtime | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CORS_ORIGIN` set to an exact frontend origin or a comma-separated allowlist. Render supplies `PORT`. Use the same server-only `REALTIME_JUDGE_SHARED_SECRET` as web for Submit capture and solved-state refresh. Set `SUPABASE_SERVICE_ROLE_KEY` for immediate solved-state hints. |
 | Production judge, web server only | Use the OnlineCompiler settings in the [rollout sequence](onlinecompiler-integration.md#rollout-and-rollback). Normal authenticated access uses `JUDGE_DAILY_LIMIT=25` and `JUDGE_LOCAL_TESTING=false`. |
 
 The anonymous key is public by design and relies on RLS. Never prefix service-role

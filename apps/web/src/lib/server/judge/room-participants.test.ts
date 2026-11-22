@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RoomState } from "@leetcollab/contracts";
 import { judgeParticipants, waitForJudgeParticipants } from "../../../../../realtime/src/judge-participants.js";
-import { captureSubmissionParticipants } from "./room-participants";
+import { captureSubmissionParticipants, notifyRoomCompletion } from "./room-participants";
 
 const actor = "11111111-1111-4111-8111-111111111111";
 const peer = "22222222-2222-4222-8222-222222222222";
@@ -15,7 +15,10 @@ const room = (): RoomState => ({ roomId: "abcdefgh", hostUserId: actor,
     permissions: { canEditCode: true, canDrawWhiteboard: true, canChangeProblem: false, canChat: true } })),
 });
 beforeEach(() => vi.stubEnv("REALTIME_JUDGE_SHARED_SECRET", "synthetic-capture-secret"));
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 it("captures unique live members synchronously; departures retain eligibility and later joins cannot join the snapshot", () => {
   const state = room();
@@ -90,4 +93,19 @@ it("does not call the realtime authority without the server credential", async (
   const request = vi.fn();
   await expect(captureSubmissionParticipants("synthetic-token", actor, problem, undefined, request)).rejects.toThrow("No execution was started");
   expect(request).not.toHaveBeenCalled();
+});
+
+it("sends the server credential and actor token only to the configured solve refresh endpoint", async () => {
+  vi.stubEnv("REALTIME_INTERNAL_URL", "http://127.0.0.1:3201");
+  const request = vi.fn(async (_url: URL, _options: RequestInit) => new Response(null, { status: 202 }));
+  vi.stubGlobal("fetch", request);
+  await notifyRoomCompletion("synthetic-token", problem);
+  expect(String(request.mock.calls[0][0])).toBe("http://127.0.0.1:3201/judge/refresh");
+  expect(request.mock.calls[0][1]).toMatchObject({
+    method: "POST", redirect: "error", headers: { Authorization: "Bearer synthetic-token", "X-Realtime-Judge-Secret": "synthetic-capture-secret" },
+    body: JSON.stringify({ submissionId: problem }),
+  });
+  vi.stubEnv("REALTIME_JUDGE_SHARED_SECRET", "");
+  await expect(notifyRoomCompletion("synthetic-token", problem)).rejects.toThrow();
+  expect(request).toHaveBeenCalledTimes(1);
 });
