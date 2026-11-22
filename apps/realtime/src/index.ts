@@ -526,7 +526,7 @@ io.on("connection", (socket) => {
       return callback(failure("The shared exercise or code changed. Try again."));
     }
     room.code = code;
-    socket.to(roomId).emit("code:updated", code);
+    socket.to(roomId).emit("code:updated", code, true);
     callback(success(null));
   });
 

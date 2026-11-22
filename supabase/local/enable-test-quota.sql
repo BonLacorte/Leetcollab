@@ -3,7 +3,8 @@
 do $$
 begin
   lock table public.judge_quota_periods in access exclusive mode;
-  if exists (select 1 from public.judge_quota_periods where active > 0) then
+  if exists (select 1 from public.submissions
+    where judge_state='reserved' and quota_period_start is not null and reservation_expires_at>now()) then
     raise exception 'Wait for active judge reservations before changing the local test allowance';
   end if;
 

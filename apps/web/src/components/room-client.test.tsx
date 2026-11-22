@@ -135,11 +135,11 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(editor, code);
     editor.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  const receive = mocks.socket.on.mock.calls.find(([event]) => event === "code:updated")![1] as (code: string) => void;
+  const receive = mocks.socket.on.mock.calls.find(([event]) => event === "code:updated")![1] as (code: string, replacement?: true) => void;
   await type("my first edit");
   await type("my latest edit");
   expect(editor.value).toBe("my latest edit");
-  await act(async () => receive("peer replacement"));
+  await act(async () => receive("peer replacement", true));
   expect(editor.value).toBe("my latest edit");
   const acknowledgements = mocks.socket.emit.mock.calls.filter(([event]) => event === "code:update")
     .map(([, , callback]) => callback as unknown as (error: Error | null, response?: Acknowledgement<null>) => void);
@@ -158,16 +158,20 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
     confirm(null, { ok: true, data: code });
   };
   const run = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Run")!;
+  const submit = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Submit")!;
   await type("accepted without acknowledgement");
   const superseded = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
   await type("rejected local edit");
   const rejected = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
+  expect(run.disabled).toBe(true);
+  expect(submit.disabled).toBe(true);
   await act(async () => superseded(new Error("Ack timed out")));
   await act(async () => rejected(null, { ok: false, error: "Edit permission changed." }));
   expect(run.disabled).toBe(true);
   await act(async () => confirmCode("accepted without acknowledgement"));
   expect(editor.value).toBe("accepted without acknowledgement");
   expect(run.disabled).toBe(false);
+  expect(submit.disabled).toBe(false);
 
   await type("committed edit");
   const timedOutEdit = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
@@ -191,11 +195,12 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   expect(run.disabled).toBe(false);
 });
 
-it.each(["acknowledged", "confirmed after timeout"])("clears compiler markers when an identical reset is %s", async confirmation => {
+it.each(["acknowledged", "confirmed after timeout", "received from a peer", "received from a peer during a local reset"])("clears compiler markers when an identical reset is %s", async confirmation => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
   Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: () => new DOMRect() });
   mocks.realEditor = true;
+  mocks.socket.on.mockClear();
   mocks.room.code = "class Solution {";
   const problemId = "66666666-6666-4666-8666-666666666666";
   mocks.room.problem = { id: problemId, slug: "test", title: "Test", category: "Arrays", difficulty: "Easy", sortOrder: 1,
@@ -215,11 +220,21 @@ it.each(["acknowledged", "confirmed after timeout"])("clears compiler markers wh
   await act(async () => run.click());
   expect(container.querySelector(".cm-lintRange-error")).not.toBeNull();
 
+  const receive = mocks.socket.on.mock.calls.find(([event]) => event === "code:updated")![1] as (code: string, replacement: true) => void;
+  if (confirmation === "received from a peer") {
+    await act(async () => receive(mocks.room.code, true));
+    expect(container.querySelector(".cm-lintRange-error")).toBeNull();
+    return;
+  }
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Reset to default code definition"]')!.click());
   const [event, , callback] = mocks.socket.emit.mock.lastCall!;
   expect(event).toBe("code:replace");
   const acknowledge = callback as unknown as (error: Error | null, response?: Acknowledgement<null>) => void;
-  if (confirmation === "acknowledged") {
+  if (confirmation === "received from a peer during a local reset") {
+    await act(async () => receive(mocks.room.code, true));
+    expect(container.querySelector(".cm-lintRange-error")).toBeNull();
+  }
+  if (confirmation !== "confirmed after timeout") {
     await act(async () => acknowledge(null, { ok: true, data: null }));
   } else {
     await act(async () => acknowledge(new Error("Ack timed out")));

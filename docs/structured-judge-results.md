@@ -9,7 +9,7 @@ compilerErrorCount?: number | null;
 compilerDiagnosticsComplete?: boolean;
 publicCases?: {
   id: string; title: string; input: string; expected: string;
-  output: string | null; passed: boolean | null;
+  output: string | null; passed: boolean;
 }[];
 ```
 
@@ -52,10 +52,11 @@ boundary, without private indexes, framing or hidden values.
 
 Each public case's `output` is an observed value, never copied from `expected`.
 `passed` is computed from that record and the corresponding fixture comparison.
-Compilation or execution errors leave both fields null. Public output exceeding
-4,096 characters is withheld while its independently determined pass/fail can
-remain available. Framing counts toward the existing provider output bounds;
-no provider limit, timeout or admission gate is increased. Legacy fixtures retain
+Compilation or execution errors omit public cases. The Testcases tab still
+shows example inputs and expected outputs. Public output exceeding 4,096
+characters is withheld while its pass/fail status remains available. Framing
+counts toward the existing provider output bounds, which stay at their current
+limits alongside the existing timeout and admission gates. Legacy fixtures retain
 their aggregate judging path without exposing raw output. Idempotent replays
 omit per-case observations because they were not retained; the UI should show
 the aggregate result and an honest detail-unavailable state.

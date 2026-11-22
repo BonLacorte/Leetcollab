@@ -82,14 +82,14 @@ it("shows actual public-case Input, Output and Expected with passed and failed t
   expect(Array.from(panel().querySelectorAll("pre"), node => node.textContent)).toEqual(["signal = [(])", "false", "false"]);
 });
 
-it("does not invent output or a public-case pass from an Accepted aggregate verdict", async () => {
-  await render({ verdict: "accepted", testsPassed: 4, diagnostics: "All checks passed.", publicCases: [
-    { id: "public-a", title: "Public example", input: "public input", output: null, expected: "expected-only", passed: null },
+it("shows the observed case status when its output is too large to display", async () => {
+  await render({ verdict: "wrong_answer", testsPassed: 3, diagnostics: "3 of 4 checks passed.", publicCases: [
+    { id: "public-a", title: "Public example", input: "public input", output: null, expected: "expected output", passed: false },
   ] });
-  expect(container.querySelector("h2")?.textContent).toBe("Accepted");
+  expect(container.querySelector("h2")?.textContent).toBe("Wrong Answer");
   const panel = container.querySelector('.public-case-detail[data-state="active"]')!;
-  expect(panel.textContent).toContain("Result unavailable");
-  expect(Array.from(panel.querySelectorAll("pre"), node => node.textContent)).toEqual(["public input", "Not available", "expected-only"]);
+  expect(panel.textContent).toContain("Failed");
+  expect(Array.from(panel.querySelectorAll("pre"), node => node.textContent)).toEqual(["public input", "Not available", "expected output"]);
 });
 
 it("keeps the aggregate Accepted result when public attribution is unavailable", async () => {

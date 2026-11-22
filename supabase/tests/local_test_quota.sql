@@ -16,6 +16,14 @@ values (:'period_start', :'period_start'::timestamptz + interval '1 day', 20, 7)
 insert into public.judge_user_quota_periods(user_id, period_start, period_end, quota_limit, used)
 values (:'tester', :'period_start', :'period_start'::timestamptz + interval '1 day', 25, 7);
 
+select public.reserve_onlinecompiler_submission(
+  :'partner', (select id from public.problems where slug='parcel-pair'),
+  gen_random_uuid(), 'java', 'class Solution {}',
+  :'period_start'::timestamptz - interval '1 day', :'period_start', 20, 1, 45
+)->>'submissionId' as expired_attempt
+\gset
+update public.submissions set reservation_expires_at=now()-interval '1 second' where id=:'expired_attempt';
+
 \ir ../local/enable-test-quota.sql
 
 select set_config('test.quota_actor', :'tester', true),

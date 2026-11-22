@@ -82,8 +82,8 @@ it("projects only public cases and never copies hidden outputs/indexes into resp
   expect(publicCaseResults(config, ["41", "HIDDEN_ACTUAL"])).toEqual([
     { id: example.id, title: example.title, input: example.input, expected: "42", output: "41", passed: false },
   ]);
-  expect(publicCaseResults(config)).toEqual([
-    { id: example.id, title: example.title, input: example.input, expected: "42", output: null, passed: null },
+  expect(publicCaseResults(config, ["42" + " ".repeat(4096), "HIDDEN_ACTUAL"])).toEqual([
+    { id: example.id, title: example.title, input: example.input, expected: "42", output: null, passed: true },
   ]);
   expect(JSON.stringify(publicCaseResults(config, ["42", "HIDDEN_ACTUAL"]))).not.toContain("HIDDEN");
   expect(JSON.stringify(publicCaseResults(config, ["42", "HIDDEN_ACTUAL"]))).not.toContain("fixtureIndex");

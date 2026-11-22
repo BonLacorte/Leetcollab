@@ -193,7 +193,7 @@ it.each(["restoreDraft", "resetCode", "retrieveSubmission"] as const)("keeps the
 it.each([false, true])("flushes captured edits after a pending read only if it succeeds (failure=%s)", async failure => {
   let finish!: (value: unknown) => void;
   mocks.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  await render();
+  await render({ userId: `pending-read-${failure}` });
   await act(async () => latest.editCode("captured during read"));
   const second = { ...problem, id: "problem-b" };
   await act(async () => change({ problem: second, code: second.starterCode }));
@@ -202,7 +202,10 @@ it.each([false, true])("flushes captured edits after a pending read only if it s
   expect(mocks.read).toHaveBeenCalledTimes(readsBeforeReturn);
   expect(mocks.save).not.toHaveBeenCalled();
   await act(async () => finish(failure ? { error: new Error("offline") } : { data: row("previous draft"), error: null }));
-  if (failure) expect(mocks.save).not.toHaveBeenCalled();
+  if (failure) {
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(latest.conflictingDraft).toBe("captured during read");
+  }
   else expect(mocks.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ p_problem_id: problem.id, p_draft_code: "captured during read" }));
   expect(input.code).toBe(problem.starterCode);
 });
@@ -225,7 +228,7 @@ it("flushes dirty code under the old exercise and cancels its timer when switchi
 it("discards old exercise reads after switching, and never overwrites a saved draft after a load failure", async () => {
   let finish!: (value: unknown) => void;
   mocks.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  await render();
+  await render({ userId: "failed-read" });
   mocks.read.mockRejectedValue(new Error("offline"));
   const second = { ...problem, id: "problem-b" };
   await act(async () => change({ problem: second, code: second.starterCode }));
@@ -235,6 +238,11 @@ it("discards old exercise reads after switching, and never overwrites a saved dr
   await act(async () => latest.editCode("new unsaved code"));
   await advance();
   expect(mocks.save).not.toHaveBeenCalled();
+  await act(async () => change({ problem, code: problem.starterCode }));
+  mocks.read.mockResolvedValue({ data: row("saved elsewhere"), error: null });
+  await act(async () => change({ problem: second, code: second.starterCode }));
+  expect(latest.conflictingDraft).toBe("new unsaved code");
+  expect(latest.progress?.draftCode).toBe("saved elsewhere");
 });
 
 it.each(["timer", "navigation"])("retains a recovered conflict for the next %s save", async trigger => {

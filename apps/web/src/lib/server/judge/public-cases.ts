@@ -68,13 +68,13 @@ export function casePassed(actual: string, expected: string): boolean {
   return !/[\r\n]/.test(actual) && actual.replace(/[^\S\uFEFF]+$/u, "") === expected;
 }
 
-export function publicCaseResults(config: JudgeConfig, outputs?: string[]): JudgePublicCase[] | undefined {
+export function publicCaseResults(config: JudgeConfig, outputs: string[]): JudgePublicCase[] | undefined {
   return config.publicCasePlan?.cases.map(({ fixtureIndex, ...example }) => {
-    const actual = outputs?.[fixtureIndex];
+    const actual = outputs[fixtureIndex];
     return {
       ...example,
-      output: actual !== undefined && actual.length <= 4096 ? actual : null,
-      passed: actual !== undefined ? casePassed(actual, config.expectedOutput[fixtureIndex]) : null,
+      output: actual.length <= 4096 ? actual : null,
+      passed: casePassed(actual, config.expectedOutput[fixtureIndex]),
     };
   });
 }

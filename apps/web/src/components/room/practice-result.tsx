@@ -1,5 +1,5 @@
 import type { JudgePublicCase, JudgeSubmission, JudgeSubmissionResponse, JudgeVerdict } from "@leetcollab/contracts";
-import { CheckCircle2, Circle, XCircle } from "lucide-react";
+import { CheckCircle2, XCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { compilerCountLabel, sourceDiagnostics } from "./execution-feedback";
 
@@ -38,13 +38,13 @@ function PublicCaseResults({ cases }: { cases: JudgePublicCase[] }) {
     <h3>Public testcases</h3>
     <Tabs defaultValue="case-0" className="public-case-tabs">
       <TabsList aria-label="Public testcases">
-        {cases.map((testcase, index) => <TabsTrigger key={`${testcase.id}:${index}`} value={`case-${index}`} className={`public-case-tab ${testcase.passed === true ? "is-passed" : testcase.passed === false ? "is-failed" : "is-unavailable"}`}>
-          {testcase.passed === true ? <CheckCircle2 aria-hidden="true" /> : testcase.passed === false ? <XCircle aria-hidden="true" /> : <Circle aria-hidden="true" />}
-          Case {index + 1}<span className="sr-only">: {testcase.passed === true ? "Passed" : testcase.passed === false ? "Failed" : "Result unavailable"}</span>
+        {cases.map((testcase, index) => <TabsTrigger key={`${testcase.id}:${index}`} value={`case-${index}`} className={`public-case-tab ${testcase.passed ? "is-passed" : "is-failed"}`}>
+          {testcase.passed ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}
+          Case {index + 1}<span className="sr-only">: {testcase.passed ? "Passed" : "Failed"}</span>
         </TabsTrigger>)}
       </TabsList>
       {cases.map((testcase, index) => <TabsContent key={`${testcase.id}:${index}`} value={`case-${index}`} className="public-case-detail">
-        <div className="public-case-heading"><strong>{testcase.title}</strong><span className={testcase.passed === true ? "success" : testcase.passed === false ? "error" : "muted"}>{testcase.passed === true ? "Passed" : testcase.passed === false ? "Failed" : "Result unavailable"}</span></div>
+        <div className="public-case-heading"><strong>{testcase.title}</strong><span className={testcase.passed ? "success" : "error"}>{testcase.passed ? "Passed" : "Failed"}</span></div>
         <dl>
           <div><dt>Input</dt><dd><pre>{testcase.input || "(empty input)"}</pre></dd></div>
           <div><dt>Output</dt><dd><pre>{testcase.output === null ? "Not available" : testcase.output || "(empty output)"}</pre></dd></div>

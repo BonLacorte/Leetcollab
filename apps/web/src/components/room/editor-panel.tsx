@@ -23,6 +23,7 @@ type EditorPanelProps = {
   codeVersion: number;
   execution: PracticeExecution | null;
   canEditCode: boolean;
+  pendingCodeWrite?: boolean;
   reconcilingCode?: boolean;
   progress: ProblemProgress | null;
   progressStatus: string;
@@ -57,6 +58,7 @@ export function EditorPanel({
   codeVersion,
   execution,
   canEditCode,
+  pendingCodeWrite,
   reconcilingCode,
   progress,
   progressStatus,
@@ -149,7 +151,7 @@ export function EditorPanel({
       </div>
       <span className="sr-only" role="status">{maximized ? "Code card maximized. Press Escape to restore the workspace." : folded ? "Code card folded." : ""}</span>
       <div className="editor-content" id={`${tooltipId}-content`} hidden={folded}>
-        {problemId && <PracticeControls problemId={problemId} roomId={roomId} code={code} codeVersion={codeVersion} codePending={reconcilingCode || isRetrievingSubmission} onExecutionChange={value => {
+        {problemId && <PracticeControls problemId={problemId} roomId={roomId} code={code} codeVersion={codeVersion} codePending={!connected || reconcilingCode || pendingCodeWrite || isRetrievingSubmission} onExecutionChange={value => {
           if (value.state === "running") setViewMode(current => current === "maximized" ? "normal" : current);
           onExecutionChange(value);
         }} />}

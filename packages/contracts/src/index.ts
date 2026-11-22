@@ -149,7 +149,7 @@ export const judgePublicCaseSchema = z.object({
   input: z.string().max(4096),
   output: z.string().max(4096).nullable(),
   expected: z.string().max(4096),
-  passed: z.boolean().nullable(),
+  passed: z.boolean(),
 });
 
 export type JudgeCompilerDiagnostic = z.infer<typeof judgeCompilerDiagnosticSchema>;
@@ -349,7 +349,7 @@ export interface ServerToClientEvents {
   "practice:refresh": (payload: { problemId: string }) => void;
   "room:state": (state: RoomState) => void;
   "room:presence": (members: RoomState["members"]) => void;
-  "code:updated": (code: string) => void;
+  "code:updated": (code: string, replacement?: true) => void;
   "chat:message": (message: RoomState["messages"][number]) => void;
   "whiteboard:stroke:added": (stroke: WhiteboardStroke) => void;
   "whiteboard:undone": (payload: { strokeId: string }) => void;

@@ -121,6 +121,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const [code, setCode] = useState("");
   const codeRef = useRef("");
   const sharedCode = useRef<SharedCodeState | null>(null);
+  const [pendingCodeWrite, setPendingCodeWrite] = useState(false);
   const [reconcilingCode, setReconcilingCode] = useState(false);
   const [codeVersion, setCodeVersion] = useState(0);
   const [message, setMessage] = useState("");
@@ -212,13 +213,14 @@ export function RoomClient({ roomId }: { roomId: string }) {
       const problemId = state.problem?.id ?? null;
       if (sharedCode.current?.roomId !== state.roomId || sharedCode.current.problemId !== problemId) {
         sharedCode.current = { roomId: state.roomId, problemId, pendingEdit: null };
+        setPendingCodeWrite(false);
         setReconcilingCode(false);
       }
       setRoom(state);
       receiveEditorCode(state.code);
       setStatus("");
     };
-    const handleCode = (nextCode: string) => receiveEditorCode(nextCode);
+    const handleCode = (nextCode: string, replacement?: true) => receiveEditorCode(nextCode, replacement);
     const handleMessage = (nextMessage: RoomState["messages"][number]) => setRoom((current) => current ? { ...current, messages: [...current.messages, nextMessage] } : current);
     const handleStrokeAdded = (stroke: WhiteboardStroke) => {
       setRoom((current) => {
@@ -262,6 +264,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
     };
     const handleDisconnect = () => {
       sharedCode.current = null;
+      setReconcilingCode(true);
       setStatus("Connection interrupted. Reconnecting...");
     };
 
@@ -322,15 +325,25 @@ export function RoomClient({ roomId }: { roomId: string }) {
     setCode(nextCode);
   }
 
-  function receiveEditorCode(nextCode: string) {
+  function receiveEditorCode(nextCode: string, replacement = false) {
     const shared = sharedCode.current;
-    if (shared && !shared.pendingEdit) replaceEditorCode(nextCode);
+    if (!shared) return;
+    if (!shared.pendingEdit) replaceEditorCode(nextCode, replacement);
+    else if (replacement) setCodeVersion(version => version + 1);
+  }
+
+  function beginEditorWrite(shared: SharedCodeState) {
+    const edit = Symbol();
+    shared.pendingEdit = edit;
+    setPendingCodeWrite(true);
+    return edit;
   }
 
   function settleEditorWrite(shared: SharedCodeState, edit: symbol, authoritativeCode: string, invalidate = false) {
     if (sharedCode.current !== shared || shared.pendingEdit !== edit) return;
     shared.pendingEdit = null;
     replaceEditorCode(authoritativeCode, invalidate);
+    setPendingCodeWrite(false);
   }
 
   function reconcileEditorWrite(shared: SharedCodeState, edit: symbol, replacementCode?: string, onConfirmed?: (replaced: boolean) => void) {
@@ -354,11 +367,10 @@ export function RoomClient({ roomId }: { roomId: string }) {
 
   function updateCode(nextCode: string) {
     if (!canEditCode || reconcilingCode) return;
-    replaceEditorCode(nextCode, true);
     const shared = sharedCode.current;
     if (!socket?.connected || !shared || shared.roomId !== roomId || shared.problemId !== (room?.problem?.id ?? null)) return;
-    const edit = Symbol();
-    shared.pendingEdit = edit;
+    const edit = beginEditorWrite(shared);
+    replaceEditorCode(nextCode, true);
     socket.timeout(3000).emit("code:update", { roomId, problemId: shared.problemId, code: nextCode }, (error, response) => {
       if (error || !response.ok) return reconcileEditorWrite(shared, edit);
       settleEditorWrite(shared, edit, nextCode);
@@ -370,8 +382,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
     if (!socket?.connected || !shared || reconcilingCode || shared.roomId !== roomId || shared.problemId !== problemId) {
       throw new Error("Reconnect before replacing shared code.");
     }
-    const edit = Symbol();
-    shared.pendingEdit = edit;
+    const edit = beginEditorWrite(shared);
     await new Promise<void>((resolve, reject) => {
       socket.timeout(3000).emit("code:replace", { roomId, problemId, expectedCode, code: nextCode }, (error, response) => {
         if (error) return reconcileEditorWrite(shared, edit, nextCode, replaced => {
@@ -713,6 +724,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
           codeVersion={codeVersion}
           execution={execution?.scope === executionScope ? execution.value : null}
           canEditCode={canEditCode}
+          pendingCodeWrite={pendingCodeWrite || room.roomId !== roomId}
           reconcilingCode={reconcilingCode}
           progress={draft.progress}
           progressStatus={draft.status}

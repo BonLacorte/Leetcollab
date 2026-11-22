@@ -68,6 +68,11 @@ export function usePracticeDraft(options: Options) {
     const updateCurrent = (value: Partial<typeof state>) => {
       if (active) setState(current => current.scope === scope ? { ...current, ...value } : current);
     };
+    function retainDraft() {
+      if (context.draftEdit === null || conflictingDrafts.has(persistenceScope)) return;
+      conflictingDrafts.set(persistenceScope, context.draftEdit);
+      context.draftEdit = null;
+    }
     async function save(): Promise<void> {
       if (context.draftEdit === null) return;
       const previousSave = pendingDraftWrites.get(persistenceScope);
@@ -75,7 +80,11 @@ export function usePracticeDraft(options: Options) {
         await previousSave;
         await read;
         const savedCode = context.draftEdit;
-        if (!context.ready || conflictingDrafts.has(persistenceScope) || savedCode === null || savedCode === context.lastSaved) return;
+        if (!context.ready) {
+          if (!active) retainDraft();
+          return;
+        }
+        if (conflictingDrafts.has(persistenceScope) || savedCode === null || savedCode === context.lastSaved) return;
         updateCurrent({ saving: true, status: "Saving draft…" });
         try {
           const { data, error } = await supabase.rpc("save_practice_draft", {
@@ -83,8 +92,7 @@ export function usePracticeDraft(options: Options) {
           });
           if (error) throw error;
           if (!data) {
-            conflictingDrafts.set(persistenceScope, context.draftEdit ?? savedCode);
-            context.draftEdit = null;
+            retainDraft();
             updateCurrent({ status: "Your saved draft changed in another tab. This edit was not saved." });
             return;
           }
@@ -93,10 +101,7 @@ export function usePracticeDraft(options: Options) {
           context.lastSavedAt = row.last_saved_at;
           updateCurrent({ progress: progressFromRow(row), status: "Draft autosaved." });
         } catch {
-          if (!active && context.draftEdit !== null) {
-            conflictingDrafts.set(persistenceScope, context.draftEdit);
-            context.draftEdit = null;
-          }
+          if (!active) retainDraft();
           updateCurrent({ status: "Could not autosave draft. Your editor content is still here; the next autosave will retry." });
         } finally { updateCurrent({ saving: false }); }
       })();

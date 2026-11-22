@@ -4,6 +4,7 @@ import type { JudgeQuota, JudgeSubmissionRequest, JudgeVerdict } from "@leetcoll
 import { JudgeService } from "./service";
 import { JdoodleProvider } from "./jdoodle";
 import { OnlineCompilerProvider } from "./onlinecompiler";
+import { ProviderFailure } from "./types";
 import { judgeSubmissionResponseSchema } from "@leetcollab/contracts";
 import type {
   ExecutionProvider,
@@ -278,8 +279,8 @@ describe("structured public results", () => {
     expect(judgeSubmissionResponseSchema.parse(result.body)).toMatchObject({ ok: true, submission: {
       verdict: "compile_error", compilerErrorCount: 3, compilerDiagnosticsComplete: false,
       compilerDiagnostics: [{ line: 4, message: "Expected a semicolon (;)." }, { line: 4, message: "Expected a semicolon (;)." }],
-      publicCases: [{ output: null, passed: null }],
     } });
+    expect(result.body.ok && result.body.submission.publicCases).toBeUndefined();
     expect(JSON.stringify(result.body)).not.toMatch(/PRIVATE|HIDDEN|Main\.java/);
   });
 });
@@ -309,6 +310,26 @@ describe("JudgeService", () => {
     await expect(service.submit("user-a", { ...request(), action: "submit" })).rejects.toThrow("Snapshot unavailable");
     expect(reserve).not.toHaveBeenCalled();
     expect(provider.calls).toBe(0);
+  });
+
+  it("reserves and records provider exhaustion in the new period when room capture crosses reset", async () => {
+    let instant = new Date("2026-11-10T23:54:59Z");
+    const repository = new MemoryRepository(config());
+    const reserve = vi.spyOn(repository, "reserve");
+    const exhaust = vi.spyOn(repository, "exhaust");
+    const provider: ExecutionProvider = { configured: true, execute: async () => {
+      throw new ProviderFailure("quota_exhausted", "Synthetic exhaustion");
+    } };
+    const service = new JudgeService(repository, provider, { now: () => instant, captureParticipants: async () => {
+      instant = new Date("2026-11-10T23:55:01Z");
+      return { roomId: "abcdefgh", userIds: ["user-a", "user-b"] };
+    } });
+    const result = await service.submit("user-a", { ...request(), action: "submit", roomId: "abcdefgh" });
+    expect(result.body).toMatchObject({ ok: false, error: { code: "QUOTA_EXHAUSTED" } });
+    expect(reserve).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      period: { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" },
+    }));
+    expect(exhaust).toHaveBeenCalledExactlyOnceWith("2026-11-10T23:55:00.000Z");
   });
 
   it("refuses a new solo Submit without an authoritative snapshot", async () => {

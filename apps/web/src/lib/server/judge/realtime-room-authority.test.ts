@@ -61,24 +61,26 @@ it("checks replacements against live room state, waits for rejoin, and refreshes
     const partner = await connect(peer);
     expect(await partner.emitWithAck("room:join", { roomId })).toMatchObject({ ok: true });
 
-    const received = new Promise<string>(resolve => partner.once("code:updated", resolve));
+    const received = new Promise<[string, true | undefined]>(resolve =>
+      partner.once("code:updated", (code, replacement) => resolve([code, replacement])));
     const senderUpdates: string[] = [];
     owner.on("code:updated", code => senderUpdates.push(code));
-    expect(await owner.emitWithAck("code:replace", { roomId, problemId: problem, expectedCode: "starter", code: "newer" }))
+    expect(await owner.emitWithAck("code:replace", { roomId, problemId: problem, expectedCode: "starter", code: "starter" }))
       .toEqual({ ok: true, data: null });
-    expect(await received).toBe("newer");
+    expect(await received).toEqual(["starter", true]);
     expect(senderUpdates).toEqual([]);
-    expect(await owner.emitWithAck("code:replace", { roomId, problemId: problem, expectedCode: "starter", code: "private draft" }))
+    expect(await owner.emitWithAck("code:replace", { roomId, problemId: problem, expectedCode: "outdated", code: "private draft" }))
       .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
-    expect(await owner.emitWithAck("code:replace", { roomId, problemId: submission, expectedCode: "newer", code: "old exercise" }))
+    expect(await owner.emitWithAck("code:replace", { roomId, problemId: submission, expectedCode: "starter", code: "old exercise" }))
       .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
 
     expect(await owner.emitWithAck("code:update", { roomId, problemId: submission, code: "old exercise" }))
       .toMatchObject({ ok: false, error: expect.stringContaining("changed") });
-    const typed = new Promise<string>(resolve => partner.once("code:updated", resolve));
+    const typed = new Promise<[string, true | undefined]>(resolve =>
+      partner.once("code:updated", (code, replacement) => resolve([code, replacement])));
     expect(await owner.emitWithAck("code:update", { roomId, problemId: problem, code: "collaborator edit" }))
       .toEqual({ ok: true, data: null });
-    expect(await typed).toBe("collaborator edit");
+    expect(await typed).toEqual(["collaborator edit", undefined]);
     expect(await owner.emitWithAck("code:current", { roomId, problemId: problem }))
       .toEqual({ ok: true, data: "collaborator edit" });
     expect(await owner.emitWithAck("code:current", { roomId, problemId: submission }))

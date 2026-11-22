@@ -214,8 +214,8 @@ export class JudgeService {
     }
 
     this.assertAdmission(userId, request.problemId);
-    const period = this.evaluation?.period ?? quotaPeriod(this.now());
     if (!this.provider.configured || (this.provider.provenance && !this.renderPolicyId)) {
+      const period = this.evaluation?.period ?? quotaPeriod(this.now());
       const { admission: _admission, ...quota } = await this.repository.getQuota(period, this.quotaLimit, this.renderPolicyId);
       return errorResponse(
         "JUDGE_UNAVAILABLE",
@@ -240,6 +240,7 @@ export class JudgeService {
       }
     }
     this.assertAdmission(userId, request.problemId);
+    const period = this.evaluation?.period ?? quotaPeriod(this.now());
     const reservation = await this.repository.reserve({
       userId,
       problemId: request.problemId,
@@ -346,7 +347,7 @@ export class JudgeService {
         try { await this.notifyCompletion?.(completed.submission.id); } catch { /* Refresh/reconnect reads durable credit. */ }
       }
       return { status: 200, body: { ok: true,
-        submission: publicSubmission(completed.submission, request.sourceCode, compiler, publicCaseResults(config, observed)),
+        submission: publicSubmission(completed.submission, request.sourceCode, compiler, observed && publicCaseResults(config, observed)),
         quota: completed.quota } };
     } catch (error) {
       const failure = error instanceof ProviderFailure
