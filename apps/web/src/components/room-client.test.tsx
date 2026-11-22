@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
   };
   return {
     room,
+    realEditor: false,
     auth: { loading: false, session: { access_token: "token", user: { id: "11111111-1111-4111-8111-111111111111" } } },
     router: { push: vi.fn(), replace: vi.fn() },
     socket: {
@@ -42,7 +43,14 @@ vi.mock("../lib/supabase", () => ({ supabase: { from: () => {
     then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve) };
   return query;
 } } }));
-vi.mock("@uiw/react-codemirror", async importOriginal => ({ ...await importOriginal<typeof import("@uiw/react-codemirror")>(), default: ({ value, onChange, readOnly }: { value: string; onChange: (value: string) => void; readOnly: boolean }) => <textarea aria-label="Shared code" readOnly={readOnly} value={value} onChange={event => onChange(event.target.value)} /> }));
+vi.mock("@uiw/react-codemirror", async importOriginal => {
+  const actual = await importOriginal<typeof import("@uiw/react-codemirror")>();
+  const CodeMirror = actual.default;
+  type Props = Omit<React.ComponentProps<typeof CodeMirror>, "onChange"> & { onChange?: (value: string) => void };
+  return { ...actual, default: (props: Props) => mocks.realEditor
+    ? <CodeMirror {...props} />
+    : <textarea aria-label="Shared code" readOnly={props.readOnly} value={props.value} onChange={event => props.onChange?.(event.target.value)} /> };
+});
 
 Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
@@ -51,6 +59,7 @@ afterEach(async () => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  mocks.realEditor = false;
   mocks.room.problem = null;
   mocks.room.code = "";
   mocks.auth.session.user.id = "11111111-1111-4111-8111-111111111111";
@@ -141,12 +150,6 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   expect(editor.value).toBe("my latest edit");
   await act(async () => receive("later peer edit"));
   expect(editor.value).toBe("later peer edit");
-  await type("rejected local edit");
-  await act(async () => receive("authoritative code"));
-  const rejected = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
-  await act(async () => rejected(null, { ok: false, error: "Edit permission changed." }));
-  expect(editor.value).toBe("authoritative code");
-
   const confirmCode = (code: string) => {
     const [event, payload, callback] = mocks.socket.emit.mock.lastCall!;
     expect(event).toBe("code:current");
@@ -155,6 +158,17 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
     confirm(null, { ok: true, data: code });
   };
   const run = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Run")!;
+  await type("accepted without acknowledgement");
+  const superseded = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
+  await type("rejected local edit");
+  const rejected = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
+  await act(async () => superseded(new Error("Ack timed out")));
+  await act(async () => rejected(null, { ok: false, error: "Edit permission changed." }));
+  expect(run.disabled).toBe(true);
+  await act(async () => confirmCode("accepted without acknowledgement"));
+  expect(editor.value).toBe("accepted without acknowledgement");
+  expect(run.disabled).toBe(false);
+
   await type("committed edit");
   const timedOutEdit = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
   await act(async () => timedOutEdit(new Error("Ack timed out")));
@@ -175,4 +189,45 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   await act(async () => confirmCode("original"));
   expect(editor.value).toBe("original");
   expect(run.disabled).toBe(false);
+});
+
+it.each(["acknowledged", "confirmed after timeout"])("clears compiler markers when an identical reset is %s", async confirmation => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+  Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
+  Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: () => new DOMRect() });
+  mocks.realEditor = true;
+  mocks.room.code = "class Solution {";
+  const problemId = "66666666-6666-4666-8666-666666666666";
+  mocks.room.problem = { id: problemId, slug: "test", title: "Test", category: "Arrays", difficulty: "Easy", sortOrder: 1,
+    statement: "", starterCode: mocks.room.code, examples: [], constraints: [] };
+  const quota = { available: true, used: 1, limit: 25, remaining: 24, active: 0,
+    resetAt: new Date(Date.now() + 3_600_000).toISOString(), fallback: null, unavailableReason: null };
+  vi.stubGlobal("fetch", vi.fn(async (_url, options) => new Response(JSON.stringify(options?.method ? {
+    ok: true, quota, submission: { id: "22222222-2222-4222-8222-222222222222", problemId, language: "java",
+      verification: "leetcollab", verdict: "compile_error", testsPassed: 0, testsTotal: 4, durationMs: 10,
+      diagnostics: "Missing closing brace.", createdAt: "2026-11-18T03:00:00.000Z",
+      compilerDiagnostics: [{ line: 1, message: "Missing closing brace." }], compilerErrorCount: 1, compilerDiagnosticsComplete: true },
+  } : quota))));
+  const container = document.createElement("div");
+  document.body.append(container);
+  await act(async () => { root = createRoot(container); root.render(<RoomClient roomId="abcdefgh" />); });
+  const run = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Run")!;
+  await act(async () => run.click());
+  expect(container.querySelector(".cm-lintRange-error")).not.toBeNull();
+
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Reset to default code definition"]')!.click());
+  const [event, , callback] = mocks.socket.emit.mock.lastCall!;
+  expect(event).toBe("code:replace");
+  const acknowledge = callback as unknown as (error: Error | null, response?: Acknowledgement<null>) => void;
+  if (confirmation === "acknowledged") {
+    await act(async () => acknowledge(null, { ok: true, data: null }));
+  } else {
+    await act(async () => acknowledge(new Error("Ack timed out")));
+    const [readEvent, , readCallback] = mocks.socket.emit.mock.lastCall!;
+    expect(readEvent).toBe("code:current");
+    const confirm = readCallback as unknown as (error: Error | null, response: Acknowledgement<string>) => void;
+    await act(async () => confirm(null, { ok: true, data: mocks.room.code }));
+  }
+  expect(container.querySelector(".cm-content")?.textContent).toBe(mocks.room.code);
+  expect(container.querySelector(".cm-lintRange-error")).toBeNull();
 });

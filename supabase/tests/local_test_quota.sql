@@ -31,6 +31,7 @@ declare
   test_end timestamptz := test_start + interval '1 day';
   response jsonb;
   key uuid;
+  partner_attempt uuid;
   count integer;
 begin
   select id into strict problem from public.problems where slug = 'parcel-pair';
@@ -77,9 +78,24 @@ begin
   if response->>'result' <> 'reserved' or (response->>'used')::integer <> 1 then
     raise exception 'The partner still has a separate allowance: %', response;
   end if;
+  partner_attempt := (response->>'submissionId')::uuid;
+  key := gen_random_uuid();
 
   response := public.reserve_judge_execution('user', 'onlinecompiler', 'run',null,null,
-    tester, problem, gen_random_uuid(), 'java', 'class Solution {}', test_end, test_end+interval '1 day', 50, 1, 45);
+    tester, problem, key, 'java', 'class Solution {}', test_end, test_end+interval '1 day', 50, 1, 45);
+  if response->>'result' is distinct from 'busy' or (response->>'used')::integer is distinct from 0 then
+    raise exception 'A live lease from the previous period must block personal admission without a charge: %', response;
+  end if;
+  response := public.reserve_judge_submission(tester, problem, gen_random_uuid(), 'java', 'class Solution {}',
+    test_end, test_end+interval '1 day', 20, 1, 45);
+  if response->>'result' is distinct from 'busy' or (response->>'used')::integer is distinct from 0 then
+    raise exception 'A live lease from the previous period must block legacy shared admission without a charge: %', response;
+  end if;
+  perform public.complete_judge_submission(partner, partner_attempt,
+    'failed', 'runtime_error', 0, 3, 0, 'Synthetic completion releases the previous period lease', null, null);
+
+  response := public.reserve_judge_execution('user', 'onlinecompiler', 'run',null,null,
+    tester, problem, key, 'java', 'class Solution {}', test_end, test_end+interval '1 day', 50, 1, 45);
   if response->>'result' <> 'reserved' or (response->>'limit')::integer <> 50
     or not exists(select 1 from public.judge_quota_periods where period_start=test_end and quota_limit=20 and used=1) then
     raise exception 'A fresh local period must seed separate personal and shared limits: %', response;

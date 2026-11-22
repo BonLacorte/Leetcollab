@@ -5,6 +5,7 @@ do $$
 declare
   a uuid := gen_random_uuid(); b uuid := gen_random_uuid(); late uuid := gen_random_uuid();
   capped uuid := gen_random_uuid(); fresh uuid := gen_random_uuid(); identity uuid;
+  deleted_peer uuid := gen_random_uuid();
   problem uuid; key uuid := gen_random_uuid(); accepted_submit uuid; repeated_submit uuid;
   result jsonb; quota jsonb; attempt uuid; credits integer; draft_saved_at timestamptz;
   starts timestamptz := '2196-01-01T23:55:00Z'; ends timestamptz := '2196-01-02T23:55:00Z';
@@ -29,7 +30,9 @@ begin
   exception when invalid_parameter_value then null; end;
 
   key := gen_random_uuid();
-  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b],
+  insert into auth.users(id,email) values(deleted_peer,'deleted-peer@example.test');
+  delete from auth.users where id=deleted_peer;
+  result := public.reserve_judge_execution('user','onlinecompiler','submit','abcdefgh',array[a,b,deleted_peer],
     a,problem,key,'java','class Solution {}',starts,ends,25,4,45);
   accepted_submit := (result->>'submissionId')::uuid;
   perform public.complete_judge_submission(a,accepted_submit,'completed','accepted',3,3,1,'synthetic',null,null);

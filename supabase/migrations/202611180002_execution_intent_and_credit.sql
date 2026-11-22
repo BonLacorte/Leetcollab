@@ -34,6 +34,8 @@ create table public.verified_problem_solves (
   submission_id uuid references public.submissions(id) on delete set null,
   primary key (user_id, problem_id)
 );
+create index on public.submissions(reservation_expires_at)
+  where judge_state='reserved' and quota_period_start is not null;
 create index on public.verified_problem_solves(submission_id) where submission_id is not null;
 alter table public.judge_user_quota_periods enable row level security;
 alter table public.judge_submission_participants enable row level security;
@@ -121,35 +123,17 @@ end $$;
 revoke all on function public.expire_prior_judge_reservation(uuid,uuid,text,uuid,text,text,timestamptz)
   from public,anon,authenticated,service_role;
 
-alter function public.reserve_judge_submission_for_runner(
-  text,uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer
-) rename to reserve_shared_judge_submission;
-
-create function public.reserve_judge_submission_for_runner(
-  p_runner text,p_user_id uuid,p_problem_id uuid,p_idempotency_key uuid,p_language text,p_source_code text,
-  p_period_start timestamptz,p_period_end timestamptz,p_quota_limit integer,p_active_limit integer,p_reservation_seconds integer
-) returns jsonb language plpgsql security definer set search_path=public as $$
-begin
-  perform public.expire_prior_judge_reservation(p_user_id,p_idempotency_key,p_runner,p_problem_id,p_language,p_source_code,p_period_start);
-  return public.reserve_shared_judge_submission(p_runner,p_user_id,p_problem_id,p_idempotency_key,
-    p_language,p_source_code,p_period_start,p_period_end,p_quota_limit,p_active_limit,p_reservation_seconds);
-end $$;
-revoke all on function public.reserve_judge_submission_for_runner(
-  text,uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer
-) from public,anon,authenticated,service_role;
-
-create function public.reserve_judge_execution(
+create function public.reserve_judge_execution_internal(
   p_scope text, p_runner text, p_action text, p_room_id text, p_participant_ids uuid[],
   p_user_id uuid, p_problem_id uuid, p_idempotency_key uuid, p_language text, p_source_code text,
   p_period_start timestamptz, p_period_end timestamptz, p_quota_limit integer,
   p_active_limit integer, p_reservation_seconds integer
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 declare account public.judge_quota_periods; personal public.judge_user_quota_periods;
-  attempt public.submissions; result jsonb; expired_count integer; active_count integer;
+  attempt public.submissions; result jsonb; outcome text; expired_count integer; active_count integer;
   no_snapshot boolean := p_room_id is null and p_participant_ids is null;
 begin
   if p_scope is null or p_scope not in ('user','shared') or p_runner is null or p_runner not in ('jdoodle','onlinecompiler')
-    or p_action is null or p_action not in ('run','submit')
     or (not no_snapshot and (
       p_action <> 'submit' or
       p_participant_ids is null or not (p_user_id=any(p_participant_ids))
@@ -161,10 +145,14 @@ begin
     )) then
     raise exception 'invalid execution context' using errcode='22023';
   end if;
+  perform pg_advisory_xact_lock(hashtextextended('leetcollab:judge:admission', 0));
   perform public.expire_prior_judge_reservation(p_user_id,p_idempotency_key,p_runner,p_problem_id,p_language,p_source_code,p_period_start);
-  select * into attempt from public.submissions
-    where user_id=p_user_id and idempotency_key=p_idempotency_key and execution_action='legacy';
-  if found and attempt.judge_state<>'reserved' then
+  if p_action <> 'legacy' then
+    select * into attempt from public.submissions
+      where user_id=p_user_id and idempotency_key=p_idempotency_key
+        and execution_action='legacy' and judge_state<>'reserved';
+  end if;
+  if attempt.id is not null then
     if p_scope='shared' then
       select * into account from public.judge_quota_periods where period_start=p_period_start;
       result := jsonb_build_object('used',coalesce(account.used,0),
@@ -179,25 +167,27 @@ begin
         'resetAt',coalesce(personal.period_end,p_period_end));
     end if;
     result := result || jsonb_build_object('result','existing','submissionId',attempt.id);
-  elsif p_scope='shared' then
-    -- Restricted evaluation retains the existing account budget and admission.
-    result := public.reserve_shared_judge_submission(p_runner,p_user_id,p_problem_id,p_idempotency_key,
-      p_language,p_source_code,p_period_start,p_period_end,p_quota_limit,p_active_limit,p_reservation_seconds);
   else
     if p_language <> 'java' or char_length(p_source_code) not between 1 and 32768
-      or p_quota_limit not between 1 and 50 or p_active_limit < 1
-      or p_reservation_seconds not between 5 and 120 or p_period_end <= p_period_start then
+      or p_quota_limit not between 1 and (case p_scope when 'shared' then 20 else 50 end)
+      or p_active_limit is null or p_active_limit < 1 or p_reservation_seconds not between 5 and 120
+      or p_period_end <= p_period_start then
       raise exception 'invalid execution configuration' using errcode='22023';
     end if;
     if not exists (select 1 from public.problem_judge_configs c join public.problems p on p.id=c.problem_id
       where c.problem_id=p_problem_id and c.language=p_language and p.is_enabled) then
       return jsonb_build_object('result','problem_not_found');
     end if;
-    -- Account row still serializes every reservation and bounds GLOBAL active
-    -- provider requests. Its used counter remains an aggregate audit ledger;
-    -- personal allowance, rather than that old shared ceiling, admits this call.
-    insert into public.judge_quota_periods(period_start,period_end,quota_limit)
-      values(p_period_start,p_period_end,20) on conflict do nothing;
+
+    if p_scope='shared' then
+      insert into public.judge_quota_periods(period_start,period_end,quota_limit)
+        values(p_period_start,p_period_end,p_quota_limit)
+        on conflict(period_start) do update set
+          quota_limit=least(judge_quota_periods.quota_limit,excluded.quota_limit),updated_at=now();
+    else
+      insert into public.judge_quota_periods(period_start,period_end,quota_limit)
+        values(p_period_start,p_period_end,20) on conflict do nothing;
+    end if;
     select * into strict account from public.judge_quota_periods where period_start=p_period_start for update;
     with expired as (
       update public.submissions set judge_state='failed',status='error',verdict='runtime_error',
@@ -208,40 +198,55 @@ begin
       update public.judge_quota_periods set active=greatest(0,active-expired_count),updated_at=now()
         where period_start=p_period_start returning * into account;
     end if;
-    perform public.get_user_judge_quota_status(p_user_id,p_period_start,p_period_end,p_quota_limit);
-    select * into strict personal from public.judge_user_quota_periods
-      where user_id=p_user_id and period_start=p_period_start for update;
-    result := public.get_user_judge_quota_status(p_user_id,p_period_start,p_period_end,p_quota_limit);
+    if p_scope='user' then
+      result := public.get_user_judge_quota_status(p_user_id,p_period_start,p_period_end,p_quota_limit);
+    end if;
     select * into attempt from public.submissions where user_id=p_user_id and idempotency_key=p_idempotency_key;
     if found then
-      result := result || jsonb_build_object('result',case when attempt.judge_state='reserved' then 'in_progress' else 'existing' end,'submissionId',attempt.id);
-    elsif personal.used >= personal.quota_limit or account.provider_exhausted then
-      return result || jsonb_build_object('result','exhausted');
-    elsif account.active >= p_active_limit then
-      return result || jsonb_build_object('result','busy');
+      outcome := case when attempt.judge_state='reserved' then 'in_progress' else 'existing' end;
+    elsif account.provider_exhausted
+      or (p_scope='shared' and account.used >= account.quota_limit)
+      or (p_scope='user' and (result->>'used')::integer >= (result->>'limit')::integer) then
+      outcome := 'exhausted';
+    elsif (select count(*) from public.submissions
+      where judge_state='reserved' and quota_period_start is not null and reservation_expires_at>now()) >= p_active_limit then
+      outcome := 'busy';
     else
+      if p_action='submit' and no_snapshot then
+        raise exception 'new submit requires captured participants' using errcode='22023';
+      end if;
       insert into public.submissions(user_id,problem_id,idempotency_key,language,source_code,status,verification,runner,
-        fixture_version,judge_state,quota_period_start,reservation_expires_at,quota_scope)
+        fixture_version,judge_state,quota_period_start,reservation_expires_at,quota_scope,execution_action)
       select p_user_id,p_problem_id,p_idempotency_key,p_language,p_source_code,'queued','leetcollab',p_runner,
-        c.fixture_version,'reserved',p_period_start,now()+make_interval(secs=>p_reservation_seconds),'user'
+        c.fixture_version,'reserved',p_period_start,now()+make_interval(secs=>p_reservation_seconds),p_scope,p_action
       from public.problem_judge_configs c where c.problem_id=p_problem_id returning * into attempt;
-      update public.judge_quota_periods set used=used+1,active=active+1,updated_at=now() where period_start=p_period_start;
-      result := public.get_user_judge_quota_status(p_user_id,p_period_start,p_period_end,p_quota_limit)
-        || jsonb_build_object('result','reserved','submissionId',attempt.id);
+      update public.judge_quota_periods set used=used+1,active=active+1,updated_at=now()
+        where period_start=p_period_start returning * into account;
+      if p_scope='user' then
+        result := public.get_user_judge_quota_status(p_user_id,p_period_start,p_period_end,p_quota_limit);
+      end if;
+      outcome := 'reserved';
+    end if;
+    if p_scope='shared' then
+      result := jsonb_build_object('used',account.used,'limit',account.quota_limit,'active',account.active,'resetAt',account.period_end);
+    end if;
+    result := result || jsonb_build_object('result',outcome);
+    if attempt.id is not null then
+      result := result || jsonb_build_object('submissionId',attempt.id);
     end if;
   end if;
-  if result->>'result'='reserved' then
-    if p_action='submit' and no_snapshot then
-      raise exception 'new submit requires captured participants' using errcode='22023';
-    end if;
-    update public.submissions set execution_action=p_action where id=(result->>'submissionId')::uuid;
-    if p_action='submit' then
-      insert into public.judge_submission_participants(submission_id,user_id,room_id)
-        select (result->>'submissionId')::uuid,unnest(p_participant_ids),p_room_id on conflict do nothing;
-    end if;
+
+  if result->>'result'='reserved' and p_action='submit' then
+    insert into public.judge_submission_participants(submission_id,user_id,room_id)
+      select attempt.id,profile.id,p_room_id from public.profiles profile
+      where profile.id=any(p_participant_ids)
+      order by profile.id for key share of profile;
   elsif result->>'result' in ('existing','in_progress') then
-    select * into strict attempt from public.submissions where id=(result->>'submissionId')::uuid;
-    if attempt.verification <> 'leetcollab'
+    if p_action='legacy' then
+      if attempt.runner is distinct from p_runner then
+        raise exception 'idempotency key belongs to another judge runner' using errcode='22023';
+      end if;
+    elsif attempt.verification <> 'leetcollab'
       or attempt.runner is distinct from p_runner or attempt.problem_id is distinct from p_problem_id
       or attempt.language is distinct from p_language or attempt.source_code is distinct from p_source_code
       or (attempt.execution_action='legacy' and p_action<>'run')
@@ -253,6 +258,37 @@ begin
   -- has since left or changed rooms. Current membership cannot change credit.
   return result;
 end $$;
+revoke all on function public.reserve_judge_execution_internal(
+  text,text,text,text,uuid[],uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer
+) from public,anon,authenticated,service_role;
+
+create function public.reserve_judge_execution(
+  p_scope text, p_runner text, p_action text, p_room_id text, p_participant_ids uuid[],
+  p_user_id uuid, p_problem_id uuid, p_idempotency_key uuid, p_language text, p_source_code text,
+  p_period_start timestamptz, p_period_end timestamptz, p_quota_limit integer,
+  p_active_limit integer, p_reservation_seconds integer
+) returns jsonb language plpgsql security definer set search_path=public as $$
+begin
+  if p_action is null or p_action not in ('run','submit') then
+    raise exception 'invalid execution context' using errcode='22023';
+  end if;
+  return public.reserve_judge_execution_internal(p_scope,p_runner,p_action,p_room_id,p_participant_ids,
+    p_user_id,p_problem_id,p_idempotency_key,p_language,p_source_code,
+    p_period_start,p_period_end,p_quota_limit,p_active_limit,p_reservation_seconds);
+end $$;
+
+create or replace function public.reserve_judge_submission_for_runner(
+  p_runner text,p_user_id uuid,p_problem_id uuid,p_idempotency_key uuid,p_language text,p_source_code text,
+  p_period_start timestamptz,p_period_end timestamptz,p_quota_limit integer,p_active_limit integer,p_reservation_seconds integer
+) returns jsonb language sql security definer set search_path=public as $$
+  select public.reserve_judge_execution_internal('shared',p_runner,'legacy',null,null,
+    p_user_id,p_problem_id,p_idempotency_key,p_language,p_source_code,
+    p_period_start,p_period_end,p_quota_limit,p_active_limit,p_reservation_seconds);
+$$;
+
+drop function public.reserve_judge_submission_internal(
+  uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer
+);
 
 create function public.complete_judge_submission(
   p_user_id uuid,p_submission_id uuid,p_judge_state text,p_verdict text,p_tests_passed integer,p_tests_total integer,
@@ -266,8 +302,11 @@ begin
   if result->>'result'='completed' and attempt.execution_action='submit' and attempt.judge_state='completed'
     and attempt.verdict='accepted' and attempt.tests_total>0 and attempt.tests_passed=attempt.tests_total then
     insert into public.verified_problem_solves(user_id,problem_id,submission_id)
-      select user_id,attempt.problem_id,attempt.id from public.judge_submission_participants where submission_id=attempt.id
-      order by user_id on conflict do nothing;
+      select profile.id,attempt.problem_id,attempt.id
+      from public.judge_submission_participants participant
+      join public.profiles profile on profile.id=participant.user_id
+      where participant.submission_id=attempt.id
+      order by profile.id for key share of profile on conflict do nothing;
   end if;
   if attempt.quota_scope='user' then
     select * into strict personal from public.judge_user_quota_periods

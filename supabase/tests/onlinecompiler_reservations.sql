@@ -81,7 +81,7 @@ $$;
 
 do $$
 declare
-  internal_signature text := 'public.reserve_judge_submission_internal(uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer)';
+  internal_signature text := 'public.reserve_judge_execution_internal(text,text,text,text,uuid[],uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer)';
   helper_signature text := 'public.reserve_judge_submission_for_runner(text,uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer)';
   onlinecompiler_signature text := 'public.reserve_onlinecompiler_submission(uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer)';
   checked_role text;

@@ -139,7 +139,7 @@ it("resets to the current starter and retrieves only this user's latest actual J
   await render({ code: "unsaved code" });
   await act(async () => latest.resetCode());
   expect(input.code).toBe(problem.starterCode);
-  mocks.submitted.mockResolvedValue({ data: { source_code: "actual submitted Java", created_at: "2026-11-18T03:00:00Z" }, error: null });
+  mocks.submitted.mockResolvedValue({ data: { source_code: "actual submitted Java" }, error: null });
   await act(async () => { await latest.retrieveSubmission(); });
   expect(input.code).toBe("actual submitted Java");
   expect(mocks.query).toHaveBeenCalledWith("submissions", "user_id", "user");

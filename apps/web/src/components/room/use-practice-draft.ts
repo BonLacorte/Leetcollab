@@ -235,7 +235,7 @@ export function usePracticeDraft(options: Options) {
   function retrieveSubmission() {
     if (!userId || !problemId || conflictingDrafts.has(persistenceScope)) return;
     return replaceCode(async () => {
-      const { data, error } = await supabase.from("submissions").select("source_code, created_at")
+      const { data, error } = await supabase.from("submissions").select("source_code")
         .eq("user_id", userId).eq("problem_id", problemId).eq("language", "java").eq("verification", "leetcollab")
         .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle();
       if (error) throw error;
