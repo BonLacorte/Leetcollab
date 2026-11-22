@@ -329,7 +329,8 @@ describe("JudgeService", () => {
     expect(reserve).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       period: { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" },
     }));
-    expect(exhaust).toHaveBeenCalledExactlyOnceWith("2026-11-10T23:55:00.000Z");
+    expect(exhaust).toHaveBeenCalledExactlyOnceWith(
+      { start: "2026-11-10T23:55:00.000Z", end: "2026-11-11T23:55:00.000Z" }, 25);
   });
 
   it("refuses a new solo Submit without an authoritative snapshot", async () => {

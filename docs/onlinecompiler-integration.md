@@ -354,7 +354,11 @@ configuration. Every enabled evaluation artifact therefore closes on its own fix
 expiry and remains closed after reset. For immediate closure before expiry, the
 authorized hosting operator must also stop/protect those enabled artifacts; a
 settings edit alone is not an emergency switch. Configuration-only rollback cannot
-revoke already-running invocations or recall outbound source. Keep drafts, submissions and consumed quota. Attempts admitted by a compatible
-rollback revision also count in the same personal period after redeploy.
+revoke already-running invocations or recall outbound source. Keep drafts,
+submissions and consumed quota. After the migration, **Save draft** in older
+tabs or a rolled-back web revision fails because draft writes require the
+version-checked save RPC. Existing drafts remain readable. Reload the updated
+web app to resume autosave. Attempts admitted by a compatible rollback revision
+also count in the same personal period after redeploy.
 Already-sent jobs cannot be cancelled by this switch and provider execution history
 cannot be recalled. There is no automatic fallback, database reset or schema rollback.

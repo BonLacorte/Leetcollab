@@ -209,14 +209,11 @@ export class SupabaseJudgeRepository implements JudgeRepository {
     return { submission: stored, quota: quota(result), applied: result.result === "completed" };
   }
 
-  async exhaust(periodStart: string): Promise<JudgeQuota> {
-    const { data, error } = await this.client.rpc("exhaust_judge_quota", { p_period_start: periodStart });
+  async exhaust(period: QuotaPeriod, limit: number): Promise<JudgeQuota> {
+    const { data, error } = await this.client.rpc("exhaust_judge_quota", { p_period_start: period.start });
     if (error) throw error;
     if (this.options.userId && !this.options.sharedQuota) {
-      const existing = await this.client.from("judge_user_quota_periods").select("period_end, quota_limit")
-        .eq("user_id", this.options.userId).eq("period_start", periodStart).single();
-      if (existing.error) throw existing.error;
-      const { admission: _admission, ...personal } = await this.getQuota({ start: periodStart, end: existing.data.period_end }, existing.data.quota_limit);
+      const { admission: _admission, ...personal } = await this.getQuota(period, limit);
       return personal;
     }
     return quota(data as RpcQuota);

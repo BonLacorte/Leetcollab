@@ -42,7 +42,6 @@ alter table public.judge_submission_participants enable row level security;
 alter table public.verified_problem_solves enable row level security;
 revoke all on public.judge_user_quota_periods, public.judge_submission_participants,
   public.verified_problem_solves from public, anon, authenticated, service_role;
-grant select on public.judge_user_quota_periods to service_role;
 create function public.has_verified_problem_solve(p_problem_id uuid)
 returns boolean language sql stable security definer set search_path=public as $$
   select exists(
@@ -348,9 +347,17 @@ revoke all on function public.get_user_judge_quota_status(uuid,timestamptz,times
 grant execute on function public.get_user_judge_quota_status(uuid,timestamptz,timestamptz,integer),
   public.reserve_judge_execution(text,text,text,text,uuid[],uuid,uuid,uuid,text,text,timestamptz,timestamptz,integer,integer,integer),
   public.complete_judge_submission(uuid,uuid,text,text,integer,integer,integer,text,text,text) to service_role;
+
+revoke insert, update on public.user_problem_progress from public, anon, authenticated;
+grant insert (user_id, problem_id, is_liked, is_starred, solved_at, updated_at, solved_with, solved_code,
+    review_grade, last_reviewed_at, suggested_review_at),
+  update (is_liked, is_starred, solved_at, updated_at, solved_with, solved_code,
+    review_grade, last_reviewed_at, suggested_review_at)
+  on public.user_problem_progress to authenticated;
+
 create function public.save_practice_draft(
   p_user_id uuid, p_problem_id uuid, p_draft_code text, p_expected_saved_at timestamptz
-) returns jsonb language plpgsql security invoker set search_path=public as $$
+) returns jsonb language plpgsql security definer set search_path='' as $$
 declare saved public.user_problem_progress;
 begin
   if auth.uid() is distinct from p_user_id or p_user_id is null then

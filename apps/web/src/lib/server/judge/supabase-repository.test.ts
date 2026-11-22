@@ -23,6 +23,24 @@ it("binds normal quota and execution intent to the authenticated actor while pee
   }));
 });
 
+it("returns the effective personal quota from the status RPC after provider exhaustion", async () => {
+  const rpc = vi.fn(async (name: string, _args: unknown) => ({ data: {
+    used: name === "exhaust_judge_quota" ? 20 : 7,
+    limit: name === "exhaust_judge_quota" ? 20 : 25,
+    active: 0, resetAt: period.end, admission: "exhausted",
+  }, error: null }));
+  const repo = new SupabaseJudgeRepository({ rpc } as unknown as SupabaseClient, { userId });
+  expect(await repo.exhaust(period, 50)).toEqual({
+    used: 7, limit: 25, active: 0, remaining: 18, resetAt: "2026-11-14T00:00:00.000Z",
+  });
+  expect(rpc.mock.calls).toEqual([
+    ["exhaust_judge_quota", { p_period_start: period.start }],
+    ["get_user_judge_quota_status", {
+      p_user_id: userId, p_period_start: period.start, p_period_end: period.end, p_quota_limit: 50,
+    }],
+  ]);
+});
+
 function repository(completionResult = "completed") {
   const rpc = vi.fn(async (name: string) => ({ data: {
     used: 1, limit: 20, active: 0, resetAt: "2026-11-14T00:00:00+00:00",
@@ -54,7 +72,7 @@ describe("PostgreSQL timestamps satisfy the public judge response contract", () 
       period, quotaLimit: 20, activeLimit: 2, reservationSeconds: 45,
     });
     for (const quota of [await repo.getQuota(period, 20), reservation.quota,
-      completion.quota, await repo.exhaust(period.start)]) {
+      completion.quota, await repo.exhaust(period, 20)]) {
       expect(judgeQuotaSchema.parse(quota).resetAt).toBe("2026-11-14T00:00:00.000Z");
     }
     expect(judgeSubmissionSchema.parse(completion.submission).createdAt)

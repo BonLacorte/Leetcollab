@@ -377,7 +377,7 @@ export class JudgeService {
 
       if (failure.kind === "quota_exhausted" && !this.provider.provenance) {
         try {
-          quota = await this.repository.exhaust(period.start);
+          quota = await this.repository.exhaust(period, this.quotaLimit);
         } catch {
           // Keep the last known quota. The operator still receives an unavailable response.
         }

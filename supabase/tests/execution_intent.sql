@@ -204,6 +204,14 @@ begin
     raise exception 'Client solved readback must omit private provenance and recipient rosters';
   end if;
   set local role service_role;
+  begin
+    perform period_end from public.judge_user_quota_periods where user_id=b and period_start=starts;
+    raise exception 'Personal quota must be read through the status RPC';
+  exception when insufficient_privilege then null; end;
+  quota := public.get_user_judge_quota_status(b,starts,ends,25);
+  if quota->>'admission' is distinct from 'exhausted' or (quota->>'used')::int is distinct from 0 then
+    raise exception 'The service role must still be able to read personal quota through the status RPC';
+  end if;
   select count(*) into credits from public.judge_refresh_recipients(accepted_submit,a) r where r.user_id in(a,b);
   if credits<>2 or exists(select 1 from public.judge_refresh_recipients(accepted_submit,a) r where r.user_id=late)
     or exists(select 1 from public.judge_refresh_recipients(accepted_submit,b))
@@ -242,6 +250,27 @@ begin
     perform public.save_practice_draft(a,problem,'wrong owner',null);
     raise exception 'A draft save cannot target a different user';
   exception when insufficient_privilege then null; end;
+  begin
+    insert into public.user_problem_progress(user_id,problem_id,draft_code,draft_language,last_saved_at)
+    values(b,problem,'legacy tab edit','java',now())
+    on conflict(user_id,problem_id) do update set
+      draft_code=excluded.draft_code,draft_language=excluded.draft_language,last_saved_at=excluded.last_saved_at;
+    raise exception 'Legacy Save draft must not bypass the version check';
+  exception when insufficient_privilege then null; end;
+  begin
+    update public.user_problem_progress set last_saved_at=null where user_id=b and problem_id=problem;
+    raise exception 'Direct writes must not clear the current draft version';
+  exception when insufficient_privilege then null; end;
+  begin
+    insert into public.user_problem_progress(user_id,problem_id,draft_code)
+      select b,id,'unversioned first draft' from public.problems where slug='bracket-beacon';
+    raise exception 'A first draft must also use the version-checked save';
+  exception when insufficient_privilege then null; end;
+  perform public.record_problem_grade(problem,'good');
+  if not exists(select 1 from public.user_problem_progress
+    where user_id=b and problem_id=problem and draft_code='newer tab edit' and review_grade='good') then
+    raise exception 'Review grading must preserve the current draft';
+  end if;
   perform set_config('request.jwt.claim.sub',late::text,true);
   if public.has_verified_problem_solve(problem) is distinct from false then
     raise exception 'A late joiner must remain unsolved despite others receiving credit';

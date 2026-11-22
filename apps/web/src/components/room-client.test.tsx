@@ -193,6 +193,26 @@ it("keeps an optimistic edit when a peer replacement arrives before its acknowle
   await act(async () => confirmCode("original"));
   expect(editor.value).toBe("original");
   expect(run.disabled).toBe(false);
+
+  await type("edit with two lost acknowledgements");
+  const lostWrite = mocks.socket.emit.mock.lastCall?.[2] as unknown as typeof acknowledgements[number];
+  await act(async () => lostWrite(new Error("Write acknowledgement timed out")));
+  const lostRead = mocks.socket.emit.mock.lastCall?.[2] as unknown as (error: Error) => void;
+  await act(async () => lostRead(new Error("Read acknowledgement timed out")));
+  const state = mocks.socket.on.mock.calls.find(([event]) => event === "room:state")![1] as (value: RoomState) => void;
+  await act(async () => state({ ...mocks.room, code: "peer's confirmed code" }));
+  expect(editor.readOnly).toBe(true);
+  expect(run.disabled).toBe(true);
+  expect(submit.disabled).toBe(true);
+  const retry = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Retry code sync");
+  expect(retry).toBeDefined();
+  await act(async () => retry!.click());
+  expect(run.disabled).toBe(true);
+  await act(async () => confirmCode("peer's confirmed code"));
+  expect(editor.value).toBe("peer's confirmed code");
+  expect(editor.readOnly).toBe(false);
+  expect(run.disabled).toBe(false);
+  expect(submit.disabled).toBe(false);
 });
 
 it.each(["acknowledged", "confirmed after timeout", "received from a peer", "received from a peer during a local reset"])("clears compiler markers when an identical reset is %s", async confirmation => {

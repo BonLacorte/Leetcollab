@@ -23,6 +23,7 @@ import { WorkspacePanel } from "./room/workspace-panel";
 import type { PracticeExecution } from "./room/practice-result";
 import { usePracticeDraft } from "./room/use-practice-draft";
 import { Alert, AlertDescription } from "./ui/alert";
+import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Skeleton } from "./ui/skeleton";
 
@@ -122,7 +123,8 @@ export function RoomClient({ roomId }: { roomId: string }) {
   const codeRef = useRef("");
   const sharedCode = useRef<SharedCodeState | null>(null);
   const [pendingCodeWrite, setPendingCodeWrite] = useState(false);
-  const [reconcilingCode, setReconcilingCode] = useState(false);
+  const [codeSync, setCodeSync] = useState<"checking" | "failed" | null>(null);
+  const reconcilingCode = codeSync !== null;
   const [codeVersion, setCodeVersion] = useState(0);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("Connecting to room…");
@@ -214,7 +216,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
       if (sharedCode.current?.roomId !== state.roomId || sharedCode.current.problemId !== problemId) {
         sharedCode.current = { roomId: state.roomId, problemId, pendingEdit: null };
         setPendingCodeWrite(false);
-        setReconcilingCode(false);
+        setCodeSync(null);
       }
       setRoom(state);
       receiveEditorCode(state.code);
@@ -264,7 +266,7 @@ export function RoomClient({ roomId }: { roomId: string }) {
     };
     const handleDisconnect = () => {
       sharedCode.current = null;
-      setReconcilingCode(true);
+      setCodeSync("checking");
       setStatus("Connection interrupted. Reconnecting...");
     };
 
@@ -351,18 +353,23 @@ export function RoomClient({ roomId }: { roomId: string }) {
       onConfirmed?.(false);
       return;
     }
-    setReconcilingCode(true);
+    setCodeSync("checking");
     socket.timeout(3000).emit("code:current", { roomId: shared.roomId, problemId: shared.problemId }, (error, response) => {
       if (sharedCode.current !== shared || shared.pendingEdit !== edit) return onConfirmed?.(false);
       if (error || !response.ok) {
-        setStatus("Shared code could not be confirmed. Reconnect before editing or running code.");
+        setCodeSync("failed");
         return onConfirmed?.(false);
       }
       const replaced = response.data === replacementCode;
       settleEditorWrite(shared, edit, response.data, replaced);
-      setReconcilingCode(false);
+      setCodeSync(null);
       onConfirmed?.(replaced);
     });
+  }
+
+  function retryCodeSync() {
+    const shared = sharedCode.current;
+    if (codeSync === "failed" && shared?.pendingEdit) reconcileEditorWrite(shared, shared.pendingEdit);
   }
 
   function updateCode(nextCode: string) {
@@ -690,9 +697,14 @@ export function RoomClient({ roomId }: { roomId: string }) {
       onResetTimer={() => updateTimer("reset")}
       onLeave={leaveRoom}
     />
-    {status && (
+    {(status || codeSync === "failed") && (
       <Alert className="room-alert" variant="destructive">
-        <AlertDescription>{status}</AlertDescription>
+        <AlertDescription>
+          {codeSync === "failed" ? <>
+            <p>Shared code could not be confirmed. Sync it before editing or running code.</p>
+            <Button type="button" size="sm" variant="outline" onClick={retryCodeSync}>Retry code sync</Button>
+          </> : status}
+        </AlertDescription>
       </Alert>
     )}
     {!room ? (
